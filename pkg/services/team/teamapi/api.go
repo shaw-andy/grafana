@@ -1,9 +1,14 @@
 package teamapi
 
 import (
+	"context"
+
+	"github.com/open-feature/go-sdk/openfeature"
+
 	"github.com/grafana/grafana/pkg/api/routing"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/middleware/requestmeta"
+	iamapi "github.com/grafana/grafana/pkg/registry/apis/iam"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/apiserver"
 	"github.com/grafana/grafana/pkg/services/dashboards"
@@ -32,6 +37,8 @@ type TeamAPI struct {
 	ds                   dashboards.DashboardService
 	logger               log.Logger
 	features             featuremgmt.FeatureToggles
+	iamFeatures          *iamapi.Features
+	openFeatureClient    *openfeature.Client
 	teamClientFactory    teamClientFactory
 	folderSearcher       resourcepb.ResourceIndexClient
 }
@@ -51,7 +58,12 @@ func ProvideTeamAPI(
 	features featuremgmt.FeatureToggles,
 	resourceClient resource.ResourceClient,
 	clientConfigProvider apiserver.DirectRestConfigProvider,
-) *TeamAPI {
+) (*TeamAPI, error) {
+	startupFeatures, err := iamapi.ProvideStartupFeatures(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	tapi := &TeamAPI{
 		teamService:            teamService,
 		ac:                     ac,
@@ -64,12 +76,21 @@ func ProvideTeamAPI(
 		ds:                     ds,
 		logger:                 log.New("team-api"),
 		features:               features,
+		iamFeatures:            startupFeatures.Snapshot(),
+		openFeatureClient:      openfeature.NewDefaultClient(),
 		teamClientFactory:      &directRestConfigClientFactory{clientConfigProvider: clientConfigProvider},
 		folderSearcher:         resourceClient,
 	}
 
 	tapi.registerRoutes(routeRegister, acEvaluator)
-	return tapi
+	return tapi, nil
+}
+
+func (tapi *TeamAPI) usersAPIEnabled(ctx context.Context) bool {
+	if tapi.iamFeatures != nil {
+		return tapi.iamFeatures.UsersAPI
+	}
+	return tapi.openFeatureClient.Boolean(ctx, featuremgmt.FlagKubernetesUsersApi, false, openfeature.TransactionContext(ctx))
 }
 
 func (tapi *TeamAPI) registerRoutes(router routing.RouteRegister, ac accesscontrol.AccessControl) {

@@ -10,6 +10,7 @@ import (
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/infra/tracing"
+	iamapi "github.com/grafana/grafana/pkg/registry/apis/iam"
 	"github.com/grafana/grafana/pkg/services/apiserver"
 	"github.com/grafana/grafana/pkg/services/contexthandler"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
@@ -24,6 +25,7 @@ type Service struct {
 	legacyService     *LegacyService
 	k8sService        team.Service
 	openFeatureClient *openfeature.Client
+	iamFeatures       *iamapi.Features
 	logger            log.Logger
 	tracer            tracing.Tracer
 }
@@ -36,6 +38,11 @@ func (s *Service) LegacySearchService() team.Service {
 }
 
 func ProvideService(sql legacysql.LegacyDatabaseProvider, cfg *setting.Cfg, tracer tracing.Tracer, configProvider apiserver.DirectRestConfigProvider) (*Service, error) {
+	startupFeatures, err := iamapi.ProvideStartupFeatures(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	legacyService, err := NewLegacyService(sql, tracer)
 	if err != nil {
 		return nil, err
@@ -47,6 +54,7 @@ func ProvideService(sql legacysql.LegacyDatabaseProvider, cfg *setting.Cfg, trac
 		legacyService:     legacyService,
 		k8sService:        k8sService,
 		openFeatureClient: openfeature.NewDefaultClient(),
+		iamFeatures:       startupFeatures.Snapshot(),
 		logger:            log.New("team"),
 		tracer:            tracer,
 	}, nil
@@ -205,6 +213,9 @@ func (s *Service) isK8sRedirectEnabled(ctx context.Context) bool {
 	txCtx := openfeature.TransactionContext(ctx)
 	if !s.openFeatureClient.Boolean(ctx, featuremgmt.FlagKubernetesTeamsRedirect, false, txCtx) {
 		return false
+	}
+	if s.iamFeatures != nil {
+		return s.iamFeatures.UsersAPI
 	}
 	return s.openFeatureClient.Boolean(ctx, featuremgmt.FlagKubernetesUsersApi, false, txCtx)
 }

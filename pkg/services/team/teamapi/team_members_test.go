@@ -37,7 +37,7 @@ func SetupAPITestServer(t *testing.T, teamService team.Service, opts ...func(a *
 		teamService = teamtest.NewFakeService()
 	}
 
-	a := ProvideTeamAPI(router,
+	a, err := ProvideTeamAPI(router,
 		teamService,
 		actest.FakeService{},
 		acimpl.ProvideAccessControl(featuremgmt.WithFeatures()),
@@ -52,6 +52,7 @@ func SetupAPITestServer(t *testing.T, teamService team.Service, opts ...func(a *
 		nil, // resource client not needed by default; deletion tests inject a folder searcher
 		nil, // teamBindingClient not needed for these tests
 	)
+	require.NoError(t, err)
 	for _, o := range opts {
 		o(a)
 	}
@@ -417,7 +418,7 @@ func Test_getTeamMembershipUpdates(t *testing.T) {
 			}
 			teamSvc := teamtest.NewFakeService()
 			teamSvc.ExpectedMembers = tc.currentMembers
-			tapi := ProvideTeamAPI(routing.NewRouteRegister(),
+			tapi, err := ProvideTeamAPI(routing.NewRouteRegister(),
 				teamSvc,
 				actest.FakeService{},
 				acimpl.ProvideAccessControl(featuremgmt.WithFeatures()),
@@ -432,6 +433,7 @@ func Test_getTeamMembershipUpdates(t *testing.T) {
 				nil, // resource client not needed for this test
 				nil, // teamBindingClient not needed for these tests
 			)
+			require.NoError(t, err)
 
 			user := &user.SignedInUser{UserID: 1, OrgID: 1, OrgRole: org.RoleAdmin, Permissions: map[int64]map[string][]string{1: {accesscontrol.ActionOrgUsersRead: {"users:id:*"}}}}
 			updates, err := tapi.getTeamMembershipUpdates(context.Background(), 1, 1, tc.input, user)
