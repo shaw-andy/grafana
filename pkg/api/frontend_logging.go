@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -17,15 +18,27 @@ type frontendLogMessageHandler func(hs *HTTPServer, c *web.Context)
 
 const grafanaJavascriptAgentEndpointPath = "/log-grafana-javascript-agent"
 
+// The endpoint is unauthenticated, so it accepts far less than web.MaxBindBodyBytes.
+const frontendLogMaxBodyBytes = 1 << 20
+
 func GrafanaJavascriptAgentLogMessageHandler(store *frontendlogging.SourceMapStore) frontendLogMessageHandler {
 	return func(hs *HTTPServer, c *web.Context) {
 		event := frontendlogging.FrontendGrafanaJavascriptAgentEvent{}
+		if c.Req.Body != nil {
+			c.Req.Body = http.MaxBytesReader(c.Resp, c.Req.Body, frontendLogMaxBodyBytes)
+		}
 		if err := web.Bind(c.Req, &event); err != nil {
-			c.Resp.WriteHeader(http.StatusBadRequest)
+			status := http.StatusBadRequest
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				status = http.StatusRequestEntityTooLarge
+			}
+			c.Resp.WriteHeader(status)
 			_, err = c.Resp.Write([]byte("bad request data"))
 			if err != nil {
 				hs.log.Error("could not write to response", "err", err)
 			}
+			return
 		}
 
 		// Meta object is standard across event types, adding it globally.
@@ -76,11 +89,12 @@ func GrafanaJavascriptAgentLogMessageHandler(store *frontendlogging.SourceMapSto
 			}
 		}
 		if len(event.Exceptions) > 0 {
+			resolver := store.NewResolver()
 			for _, exception := range event.Exceptions {
 				var ctx = frontendlogging.CtxVector{}
 				ctx = event.AddMetaToContext(ctx)
 				exception := exception
-				transformedException := frontendlogging.TransformException(c.Req.Context(), &exception, store)
+				transformedException := resolver.TransformException(c.Req.Context(), &exception)
 				ctx = append(ctx, "kind", "exception", "type", transformedException.Type, "value", transformedException.Value, "stacktrace", transformedException.String())
 				ctx = append(ctx, "original_timestamp", exception.Timestamp)
 				frontendLogger.Error(exception.Message(), ctx...)
