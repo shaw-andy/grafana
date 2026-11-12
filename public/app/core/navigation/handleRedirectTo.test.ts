@@ -49,6 +49,39 @@ describe('handleRedirectTo', () => {
     jest.restoreAllMocks();
   });
 
+  it('removes the URL login value from the address', () => {
+    const token = 'placeholder-token';
+    const mockLocationService = locationService as jest.Mocked<typeof locationService>;
+    const queryParams = new URLSearchParams(`auth_token=${token}&orgId=1`);
+    mockLocationService.getSearch.mockReturnValue(queryParams);
+    const replace = jest.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...window.location,
+        origin: 'http://grafana.local',
+        pathname: '/d/abc',
+        search: `?auth_token=${token}&orgId=1`,
+        href: `http://grafana.local/d/abc?auth_token=${token}&orgId=1`,
+        replace,
+      },
+    });
+    const replaceState = jest.spyOn(window.history, 'replaceState');
+
+    handleRedirectTo();
+
+    const written = [
+      ...replaceState.mock.calls.map((call) => String(call[2] ?? '')),
+      ...replace.mock.calls.map((call) => String(call[0] ?? '')),
+      ...(mockLocationService.replace as jest.Mock).mock.calls.map((call: unknown[]) => String(call[0] ?? '')),
+    ];
+    expect(written.length).toBeGreaterThan(0);
+    for (const url of written) {
+      expect(url).not.toContain(token);
+      expect(url).not.toContain('auth_token');
+    }
+  });
+
   it('clears the stored redirect when handling URL login', () => {
     const mockLocationService = locationService as jest.Mocked<typeof locationService>;
     mockLocationService.getSearch.mockReturnValue(new URLSearchParams('auth_token=test-token'));
