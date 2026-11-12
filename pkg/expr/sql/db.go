@@ -123,10 +123,14 @@ func (db *DB) QueryFrames(ctx context.Context, tracer tracing.Tracer, name strin
 
 	contextErr := func(err error) error {
 		if le, ok := asLimitError(err); ok {
-			if le.kind == valueBytesLimit {
+			switch le.kind {
+			case valueBytesLimit:
 				return MakeValueBytesLimitExceededError(name, le.limit)
+			case patternLengthLimit:
+				return MakePatternTooLongError(name, le.limit)
+			default:
+				return MakeProcessedCellLimitExceededError(name, le.limit)
 			}
-			return MakeProcessedCellLimitExceededError(name, le.limit)
 		}
 		switch {
 		case errors.Is(err, context.DeadlineExceeded):
@@ -160,6 +164,9 @@ func (db *DB) QueryFrames(ctx context.Context, tracer tracing.Tracer, name strin
 			return nil, contextErr(ctx.Err())
 		}
 		return nil, err
+	}
+	if err := limits.err(); err != nil {
+		return nil, contextErr(err)
 	}
 
 	f.Name = name

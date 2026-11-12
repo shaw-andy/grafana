@@ -3,6 +3,7 @@ package sql
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/dolthub/vitess/go/vt/sqlparser"
@@ -117,8 +118,11 @@ func allowedNode(node sqlparser.SQLNode) (b bool) {
 	case *sqlparser.ComparisonExpr:
 		return
 
-	case *sqlparser.ConvertExpr, *sqlparser.ConvertType:
+	case *sqlparser.ConvertExpr:
 		return
+
+	case *sqlparser.ConvertType:
+		return allowedConvertType(v)
 
 	case *sqlparser.CollateExpr:
 		return
@@ -216,6 +220,19 @@ func allowedNode(node sqlparser.SQLNode) (b bool) {
 	default:
 		return false
 	}
+}
+
+// maxBinaryConvertLength is the largest n allowed in CAST(x AS BINARY(n)). A
+// binary cast pads its result with zero bytes up to n inside the engine, so n
+// has to be bounded before the query runs. It matches the largest VARBINARY.
+const maxBinaryConvertLength = 65535
+
+func allowedConvertType(t *sqlparser.ConvertType) bool {
+	if t == nil || t.Length == nil || !strings.EqualFold(t.Type, "binary") {
+		return true
+	}
+	n, err := strconv.ParseInt(string(t.Length.Val), 10, 64)
+	return err == nil && n <= maxBinaryConvertLength
 }
 
 // nolint:gocyclo,nakedret

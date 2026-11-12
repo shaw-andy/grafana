@@ -180,6 +180,26 @@ func MakeProcessedCellLimitExceededError(refID string, limit int64) CategorizedE
 	return &ErrorWithCategory{category: ErrCategoryProcessedCellLimitExceeded, err: ProcessedCellLimitExceededError.Build(data)}
 }
 
+const ErrCategoryPatternTooLong = "pattern_too_long"
+
+var patternTooLongStr = "sql expression [{{ .Public.refId }}] was stopped because a LIKE or regular expression pattern is longer than {{ .Public.limit }} bytes"
+
+var PatternTooLongError = errutil.NewBase(
+	errutil.StatusBadRequest, sseErrBase+ErrCategoryPatternTooLong).MustTemplate(
+	patternTooLongStr,
+	errutil.WithPublic(patternTooLongStr))
+
+func MakePatternTooLongError(refID string, limit int64) CategorizedError {
+	data := errutil.TemplateData{
+		Public: map[string]interface{}{
+			"refId": refID,
+			"limit": limit,
+		},
+	}
+
+	return &ErrorWithCategory{category: ErrCategoryPatternTooLong, err: PatternTooLongError.Build(data)}
+}
+
 const ErrCategoryDuplicateStringColumns = "duplicate_string_columns"
 
 var duplicateStringColumnErrorStr = "sql expression [{{ .Public.refId }}] failed because it returned duplicate values across the string columns, which is not allowed for alerting. Examples: ({{ .Public.examples }}). Hint: use GROUP BY or aggregation (e.g. MAX(), AVG()) to return one row per unique combination."

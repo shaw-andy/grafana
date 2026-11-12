@@ -28,11 +28,18 @@ const (
 	inputCellsFactor      = 10
 )
 
+// maxPatternBytes bounds LIKE and regular expression patterns. Compiling a
+// pattern takes a few hundred bytes per pattern byte, and a pattern that
+// depends on a column is compiled again for every row. A pattern written in
+// the query cannot be longer than the default query length limit anyway.
+const maxPatternBytes = 10000
+
 type limitKind int
 
 const (
 	valueBytesLimit limitKind = iota
 	processedCellsLimit
+	patternLengthLimit
 )
 
 type limitExceededError struct {
@@ -41,10 +48,14 @@ type limitExceededError struct {
 }
 
 func (e *limitExceededError) Error() string {
-	if e.kind == valueBytesLimit {
+	switch e.kind {
+	case valueBytesLimit:
 		return fmt.Sprintf("sql expression would build more than %d bytes of string and JSON values", e.limit)
+	case patternLengthLimit:
+		return fmt.Sprintf("sql expression uses a pattern longer than %d bytes", e.limit)
+	default:
+		return fmt.Sprintf("sql expression would process more than %d cells", e.limit)
 	}
-	return fmt.Sprintf("sql expression would process more than %d cells", e.limit)
 }
 
 // queryLimits is the budget of a single query. It is charged while the engine
@@ -56,6 +67,11 @@ type queryLimits struct {
 	valueBytes    int64
 	maxCells      int64
 	cells         int64
+
+	// exceeded stays set once a limit is hit. Some engine code discards the
+	// errors of the expressions it evaluates, so every later check fails too
+	// and the query is reported as failed rather than returning partial rows.
+	exceeded *limitExceededError
 }
 
 // newQueryLimits returns the limits for a query over frames. A limit of 0 or
@@ -81,8 +97,26 @@ func (l *queryLimits) remainingBytes() int64 {
 
 // reserve refuses a value of n bytes before it is built.
 func (l *queryLimits) reserve(n int64) error {
+	if l.exceeded != nil {
+		return l.exceeded
+	}
 	if n > l.remainingBytes() {
-		return &limitExceededError{kind: valueBytesLimit, limit: l.maxValueBytes}
+		return l.fail(valueBytesLimit, l.maxValueBytes)
+	}
+	return nil
+}
+
+func (l *queryLimits) fail(kind limitKind, limit int64) error {
+	if l.exceeded == nil {
+		l.exceeded = &limitExceededError{kind: kind, limit: limit}
+	}
+	return l.exceeded
+}
+
+// err returns the limit the query exceeded, if any.
+func (l *queryLimits) err() error {
+	if l.exceeded != nil {
+		return l.exceeded
 	}
 	return nil
 }
@@ -97,6 +131,9 @@ func (l *queryLimits) chargeBytes(n int64) error {
 
 // chargeValue charges the size of a value that was just built or retained.
 func (l *queryLimits) chargeValue(ctx context.Context, v interface{}) error {
+	if l.exceeded != nil {
+		return l.exceeded
+	}
 	if l.maxValueBytes <= 0 {
 		return nil
 	}
@@ -104,6 +141,9 @@ func (l *queryLimits) chargeValue(ctx context.Context, v interface{}) error {
 }
 
 func (l *queryLimits) chargeCells(n int) error {
+	if l.exceeded != nil {
+		return l.exceeded
+	}
 	if l.maxCells <= 0 {
 		return nil
 	}
@@ -112,7 +152,7 @@ func (l *queryLimits) chargeCells(n int) error {
 	}
 	l.cells += int64(n)
 	if l.cells > l.maxCells {
-		return &limitExceededError{kind: processedCellsLimit, limit: l.maxCells}
+		return l.fail(processedCellsLimit, l.maxCells)
 	}
 	return nil
 }
@@ -216,6 +256,8 @@ func limitExpression(e mysql.Expression, limits *queryLimits) (mysql.Expression,
 			return e, transform.SameTree, nil
 		}
 		return newBoundedExpr(e, "convert", limits)
+	case *expression.Like:
+		return newBoundedExpr(e, "like", limits)
 	case mysql.FunctionExpression:
 		name := strings.ToLower(e.FunctionName())
 		switch name {
@@ -224,7 +266,7 @@ func limitExpression(e mysql.Expression, limits *queryLimits) (mysql.Expression,
 			// every argument, so they are left as they are.
 			return e, transform.SameTree, nil
 		}
-		if !buildsValues(e.Type()) {
+		if patternArg(name) < 0 && !buildsValues(e.Type()) {
 			return e, transform.SameTree, nil
 		}
 		return newBoundedExpr(e, name, limits)
@@ -282,6 +324,11 @@ func (b *boundedExpr) Eval(ctx *mysql.Context, row mysql.Row) (interface{}, erro
 		args[i] = v
 		m.val, m.set = v, true
 	}
+	if i := patternArg(b.name); i >= 0 {
+		if pattern, ok := stringArg(args, i); ok && len(pattern) > maxPatternBytes {
+			return nil, b.limits.fail(patternLengthLimit, maxPatternBytes)
+		}
+	}
 	if b.limits.maxValueBytes > 0 {
 		if err := b.limits.reserve(estimateResultSize(ctx, b.name, args, b.limits.remainingBytes())); err != nil {
 			return nil, err
@@ -311,17 +358,21 @@ func (b *boundedExpr) WithChildren(children ...mysql.Expression) (mysql.Expressi
 	return ne, err
 }
 
-func (b *boundedExpr) Resolved() bool      { return b.fn.Resolved() }
-func (b *boundedExpr) String() string      { return b.fn.String() }
-func (b *boundedExpr) Type() mysql.Type    { return b.fn.Type() }
-func (b *boundedExpr) IsNullable() bool    { return b.fn.IsNullable() }
-func (b *boundedExpr) DebugString() string { return mysql.DebugString(b.fn) }
+func (b *boundedExpr) Resolved() bool           { return b.fn.Resolved() }
+func (b *boundedExpr) String() string           { return b.fn.String() }
+func (b *boundedExpr) Type() mysql.Type         { return b.fn.Type() }
+func (b *boundedExpr) IsNullable() bool         { return b.fn.IsNullable() }
+func (b *boundedExpr) DebugString() string      { return mysql.DebugString(b.fn) }
+func (b *boundedExpr) IsNonDeterministic() bool { return isNonDeterministic(b.fn) }
+func (b *boundedExpr) Dispose()                 { mysql.Dispose(b.inner) }
 func (b *boundedExpr) CollationCoercibility(ctx *mysql.Context) (mysql.CollationID, byte) {
 	return mysql.GetCoercibility(ctx, b.fn)
 }
 
 // memoExpr hands boundedExpr's inner function the argument value boundedExpr
-// already evaluated, so arguments are evaluated once.
+// already evaluated, so arguments are evaluated once. It reports its argument
+// as its only child, since functions such as REGEXP_SUBSTR inspect their
+// arguments for column references to decide whether a result can be cached.
 type memoExpr struct {
 	mysql.Expression
 	val interface{}
@@ -338,20 +389,31 @@ func (m *memoExpr) Eval(ctx *mysql.Context, row mysql.Row) (interface{}, error) 
 	return m.Expression.Eval(ctx, row)
 }
 
+func (m *memoExpr) Children() []mysql.Expression { return []mysql.Expression{m.Expression} }
+
 func (m *memoExpr) WithChildren(children ...mysql.Expression) (mysql.Expression, error) {
-	e, err := m.Expression.WithChildren(children...)
-	if err != nil {
-		return nil, err
+	if len(children) != 1 {
+		return nil, mysql.ErrInvalidChildrenNumber.New(m, len(children), 1)
 	}
-	return &memoExpr{Expression: e}, nil
+	return &memoExpr{Expression: children[0]}, nil
 }
+
+func (m *memoExpr) IsNonDeterministic() bool { return isNonDeterministic(m.Expression) }
+func (m *memoExpr) Dispose()                 { mysql.Dispose(m.Expression) }
 
 func (m *memoExpr) CollationCoercibility(ctx *mysql.Context) (mysql.CollationID, byte) {
 	return mysql.GetCoercibility(ctx, m.Expression)
 }
 
+func isNonDeterministic(e mysql.Expression) bool {
+	nd, ok := e.(mysql.NonDeterministicExpression)
+	return ok && nd.IsNonDeterministic()
+}
+
 // chargedExpr charges every value it returns, for aggregations that keep their
-// inputs.
+// inputs. As a window function such an aggregation evaluates its argument for
+// every row of every frame and copies the results, so each evaluation is also
+// charged as a cell.
 type chargedExpr struct {
 	mysql.Expression
 	limits *queryLimits
@@ -360,6 +422,9 @@ type chargedExpr struct {
 var _ mysql.CollationCoercible = (*chargedExpr)(nil)
 
 func (c *chargedExpr) Eval(ctx *mysql.Context, row mysql.Row) (interface{}, error) {
+	if err := c.limits.chargeCells(1); err != nil {
+		return nil, err
+	}
 	v, err := c.Expression.Eval(ctx, row)
 	if err != nil {
 		return nil, err
@@ -378,6 +443,9 @@ func (c *chargedExpr) WithChildren(children ...mysql.Expression) (mysql.Expressi
 	}
 	return &chargedExpr{Expression: children[0], limits: c.limits}, nil
 }
+
+func (c *chargedExpr) IsNonDeterministic() bool { return isNonDeterministic(c.Expression) }
+func (c *chargedExpr) Dispose()                 { mysql.Dispose(c.Expression) }
 
 func (c *chargedExpr) CollationCoercibility(ctx *mysql.Context) (mysql.CollationID, byte) {
 	return mysql.GetCoercibility(ctx, c.Expression)
@@ -479,7 +547,7 @@ func estimateResultSize(ctx context.Context, name string, args []interface{}, li
 
 	switch name {
 	case "repeat":
-		count, ok := intArg(ctx, args, 1)
+		count, ok := repeatCount(ctx, args)
 		if !ok || count <= 0 {
 			return slack
 		}
@@ -507,6 +575,8 @@ func estimateResultSize(ctx context.Context, name string, args []interface{}, li
 			per = satMul(per, s+1)
 		}
 		return satAdd(slack, satAdd(s, satMul(s+1, per)))
+	case "like", "regexp_like", "regexp_instr":
+		return slack
 	case "json_pretty":
 		return satAdd(slack, measureJSONArg(ctx, args, 0, measurePretty, limit))
 	case "json_search":
@@ -526,6 +596,17 @@ func estimateResultSize(ctx context.Context, name string, args []interface{}, li
 	}
 }
 
+// patternArg returns the index of the pattern argument of the named function,
+// or -1 if it does not take one.
+func patternArg(name string) int {
+	switch name {
+	case "like", "regexp_like", "regexp_instr", "regexp_substr", "regexp_replace":
+		return 1
+	default:
+		return -1
+	}
+}
+
 func stringArg(args []interface{}, i int) (string, bool) {
 	if i >= len(args) {
 		return "", false
@@ -540,16 +621,18 @@ func stringArg(args []interface{}, i int) (string, bool) {
 	}
 }
 
-func intArg(ctx context.Context, args []interface{}, i int) (int64, bool) {
-	if i >= len(args) || args[i] == nil {
+// repeatCount converts REPEAT's count the way REPEAT does. When the conversion
+// fails REPEAT fails too, without building anything.
+func repeatCount(ctx context.Context, args []interface{}) (int64, bool) {
+	if len(args) < 2 || args[1] == nil {
 		return 0, false
 	}
-	v, _, err := types.Int64.Convert(ctx, args[i])
+	v, _, err := types.Int32.Convert(ctx, args[1])
 	if err != nil {
 		return 0, false
 	}
-	n, ok := v.(int64)
-	return n, ok
+	n, ok := v.(int32)
+	return int64(n), ok
 }
 
 // valueSize returns the number of bytes v takes once serialized. It stops
