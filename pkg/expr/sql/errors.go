@@ -140,6 +140,66 @@ func MakeInputLimitExceededError(refID string, inputLimit int64) CategorizedErro
 	return &ErrorWithCategory{category: ErrCategoryInputLimitExceeded, err: InputLimitExceededError.Build(data)}
 }
 
+const ErrCategoryValueBytesLimitExceeded = "value_bytes_limit_exceeded"
+
+var valueBytesLimitExceededStr = "sql expression [{{ .Public.refId }}] was stopped because the string and JSON values it builds exceeded the limit of {{ .Public.limit }} bytes"
+
+var ValueBytesLimitExceededError = errutil.NewBase(
+	errutil.StatusBadRequest, sseErrBase+ErrCategoryValueBytesLimitExceeded).MustTemplate(
+	valueBytesLimitExceededStr,
+	errutil.WithPublic(valueBytesLimitExceededStr))
+
+func MakeValueBytesLimitExceededError(refID string, limit int64) CategorizedError {
+	data := errutil.TemplateData{
+		Public: map[string]interface{}{
+			"refId": refID,
+			"limit": limit,
+		},
+	}
+
+	return &ErrorWithCategory{category: ErrCategoryValueBytesLimitExceeded, err: ValueBytesLimitExceededError.Build(data)}
+}
+
+const ErrCategoryProcessedCellLimitExceeded = "processed_cell_limit_exceeded"
+
+var processedCellLimitExceededStr = "sql expression [{{ .Public.refId }}] was stopped because the cells (columns*rows) produced while running it exceeded the limit of {{ .Public.limit }}"
+
+var ProcessedCellLimitExceededError = errutil.NewBase(
+	errutil.StatusBadRequest, sseErrBase+ErrCategoryProcessedCellLimitExceeded).MustTemplate(
+	processedCellLimitExceededStr,
+	errutil.WithPublic(processedCellLimitExceededStr))
+
+func MakeProcessedCellLimitExceededError(refID string, limit int64) CategorizedError {
+	data := errutil.TemplateData{
+		Public: map[string]interface{}{
+			"refId": refID,
+			"limit": limit,
+		},
+	}
+
+	return &ErrorWithCategory{category: ErrCategoryProcessedCellLimitExceeded, err: ProcessedCellLimitExceededError.Build(data)}
+}
+
+const ErrCategoryPatternTooLong = "pattern_too_long"
+
+var patternTooLongStr = "sql expression [{{ .Public.refId }}] was stopped because a LIKE or regular expression pattern is longer than {{ .Public.limit }} bytes"
+
+var PatternTooLongError = errutil.NewBase(
+	errutil.StatusBadRequest, sseErrBase+ErrCategoryPatternTooLong).MustTemplate(
+	patternTooLongStr,
+	errutil.WithPublic(patternTooLongStr))
+
+func MakePatternTooLongError(refID string, limit int64) CategorizedError {
+	data := errutil.TemplateData{
+		Public: map[string]interface{}{
+			"refId": refID,
+			"limit": limit,
+		},
+	}
+
+	return &ErrorWithCategory{category: ErrCategoryPatternTooLong, err: PatternTooLongError.Build(data)}
+}
+
 const ErrCategoryDuplicateStringColumns = "duplicate_string_columns"
 
 var duplicateStringColumnErrorStr = "sql expression [{{ .Public.refId }}] failed because it returned duplicate values across the string columns, which is not allowed for alerting. Examples: ({{ .Public.examples }}). Hint: use GROUP BY or aggregation (e.g. MAX(), AVG()) to return one row per unique combination."

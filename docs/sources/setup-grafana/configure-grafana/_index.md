@@ -3218,6 +3218,14 @@ Set the maximum length of a SQL query that can be used in a SQL expression. Defa
 
 The duration a SQL expression will run before being cancelled. The default is `10s`. A setting of `0s` means no limit.
 
+#### `sql_expression_value_bytes_limit`
+
+Set the maximum number of bytes of string and JSON values that a SQL expression can build while it runs, in addition to four times the size of its input. Grafana checks each value before the SQL engine builds it, and the query fails when the limit is reached. Default is `262144` (256 KiB). A setting of `0` or less uses the default, so this limit can't be disabled.
+
+#### `sql_expression_processed_cell_limit`
+
+Set the maximum number of cells, that is rows multiplied by columns, that the operators of a SQL expression's query plan can produce in total, in addition to ten times the number of input cells. This bounds intermediate results such as joins, sorts, and recursive common table expressions, and the query fails when the limit is reached. Default is `1000000`. A setting of `0` or less uses the default, so this limit can't be disabled.
+
 #### `math_expression_memory_limit`
 
 Set the maximum estimated memory in bytes that a single math expression binary operation can allocate. Default is `1073741824` (1 GiB). A setting of `0` means no limit.

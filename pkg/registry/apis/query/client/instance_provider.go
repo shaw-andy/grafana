@@ -30,12 +30,14 @@ func (t *singleTenantInstance) GetDataSourceClient(_ context.Context, _ data.Dat
 
 func NewSingleTenantInstanceProvider(cfg *setting.Cfg, features featuremgmt.FeatureToggles, p plugins.Client, ctxProv *plugincontext.Provider, accessControl accesscontrol.AccessControl) clientapi.InstanceProvider {
 	conf := clientapi.InstanceConfigurationSettings{
-		FeatureToggles:                features,
-		SQLExpressionCellLimit:        cfg.SQLExpressionCellLimit,
-		SQLExpressionOutputCellLimit:  cfg.SQLExpressionOutputCellLimit,
-		SQLExpressionQueryLengthLimit: cfg.SQLExpressionQueryLengthLimit,
-		SQLExpressionTimeout:          cfg.SQLExpressionTimeout,
-		ExpressionsEnabled:            cfg.ExpressionsEnabled,
+		FeatureToggles:                  features,
+		SQLExpressionCellLimit:          cfg.SQLExpressionCellLimit,
+		SQLExpressionOutputCellLimit:    cfg.SQLExpressionOutputCellLimit,
+		SQLExpressionQueryLengthLimit:   cfg.SQLExpressionQueryLengthLimit,
+		SQLExpressionTimeout:            cfg.SQLExpressionTimeout,
+		SQLExpressionValueBytesLimit:    cfg.SQLExpressionValueBytesLimit,
+		SQLExpressionProcessedCellLimit: cfg.SQLExpressionProcessedCellLimit,
+		ExpressionsEnabled:              cfg.ExpressionsEnabled,
 	}
 
 	return &singleTenantInstanceProvider{

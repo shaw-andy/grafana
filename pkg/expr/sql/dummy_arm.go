@@ -31,6 +31,18 @@ func WithMaxOutputCells(_ int64) QueryOption {
 	}
 }
 
+func WithMaxValueBytes(_ int64) QueryOption {
+	return func(_ *QueryOptions) {
+		// no-op
+	}
+}
+
+func WithMaxProcessedCells(_ int64) QueryOption {
+	return func(_ *QueryOptions) {
+		// no-op
+	}
+}
+
 type QueryOptions struct{}
 
 type QueryOption func(*QueryOptions)
