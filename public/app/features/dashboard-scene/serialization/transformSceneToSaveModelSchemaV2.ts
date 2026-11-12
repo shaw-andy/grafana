@@ -19,7 +19,7 @@ import {
 } from '@grafana/scenes';
 import { type DataSourceRef } from '@grafana/schema';
 import { sortedDeepCloneWithoutNulls } from 'app/core/utils/object';
-import { getPanelDataFrames } from 'app/features/dashboard/components/HelpWizard/utils';
+import { getSnapshotDataFrames } from 'app/features/dashboard/components/HelpWizard/utils';
 import { GrafanaQueryType } from 'app/plugins/datasource/grafana/types';
 import { MIXED_DATASOURCE_NAME } from 'app/plugins/datasource/mixed/MixedDataSource';
 
@@ -461,9 +461,9 @@ export function getVizPanelQueries(
       return queries;
     }
 
-    let snapshotData = getPanelDataFrames(dataProvider.state.data);
+    let snapshotData = getSnapshotDataFrames(dataProvider.state.data);
     if (dataProvider instanceof SceneDataTransformer) {
-      snapshotData = getPanelDataFrames(dataProvider.state.$data!.state.data);
+      snapshotData = getSnapshotDataFrames(dataProvider.state.$data!.state.data);
     }
 
     const snapshotQuery: DataQueryKind = {

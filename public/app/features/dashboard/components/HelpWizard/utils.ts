@@ -38,6 +38,43 @@ export function getPanelDataFrames(data?: PanelData): DataFrameJSON[] {
   return frames;
 }
 
+/**
+ * Snapshots are readable by anyone with the link, so query text that datasources attach to their
+ * responses is dropped: the executed query string, and field links that can embed it
+ * (console deep links, internal links carrying a query).
+ */
+export function getSnapshotDataFrames(data?: PanelData): DataFrameJSON[] {
+  return getPanelDataFrames(data).map(stripQueryTextFromFrame);
+}
+
+function stripQueryTextFromFrame(frame: DataFrameJSON): DataFrameJSON {
+  if (!frame.schema) {
+    return frame;
+  }
+
+  const { meta, fields, ...schema } = frame.schema;
+  let strippedMeta = meta;
+  if (meta && 'executedQueryString' in meta) {
+    const { executedQueryString, ...rest } = meta;
+    strippedMeta = rest;
+  }
+
+  return {
+    ...frame,
+    schema: {
+      ...schema,
+      ...(strippedMeta && { meta: strippedMeta }),
+      fields: fields.map((field) => {
+        if (!field.config || !('links' in field.config)) {
+          return field;
+        }
+        const { links, ...config } = field.config;
+        return { ...field, config };
+      }),
+    },
+  };
+}
+
 export function getGithubMarkdown(panel: PanelModel, snapshot: string): string {
   const saveModel = panel.getSaveModel();
   const info = {
