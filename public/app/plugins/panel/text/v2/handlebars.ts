@@ -10,6 +10,8 @@ import {
   isDateTime,
 } from '@grafana/data';
 
+import { createLinearMatcher } from './linearRegex';
+
 /** One row of query data, keyed by field display name. */
 export type TemplateRow = Record<string, unknown>;
 
@@ -91,9 +93,11 @@ const helperArgs = (args: unknown[]): unknown[] => args.slice(0, -1);
 // `#if` counts `0` and an empty array as falsy, so the boolean helpers have to agree.
 const isTruthy = (value: unknown): boolean => Boolean(value) && !Handlebars.Utils.isEmpty(value);
 
-// Fresh per call: the variable helpers close over this panel's replaceVariables.
+// Fresh per call: the variable helpers close over this panel's replaceVariables, and
+// `match` spends one work budget per render.
 function createEnvironment(replaceVariables: InterpolateFunction) {
   const env = Handlebars.create();
+  const matchPattern = createLinearMatcher();
 
   env.registerHelper({
     and: (...args: unknown[]) => helperArgs(args).every(isTruthy),
@@ -109,7 +113,7 @@ function createEnvironment(replaceVariables: InterpolateFunction) {
       Array.isArray(haystack) ? haystack.includes(value) : toText(haystack).includes(toText(value)),
     startsWith: (left: unknown, right: unknown) => toText(left).startsWith(toText(right)),
     endsWith: (left: unknown, right: unknown) => toText(left).endsWith(toText(right)),
-    match: (left: unknown, right: unknown) => new RegExp(toText(right)).test(toText(left)),
+    match: (left: unknown, right: unknown) => matchPattern(toText(right), toText(left)),
     split: (value: unknown, separator: unknown) => toText(value).split(toSeparator(separator)),
     join: (value: unknown, separator: unknown) =>
       Array.isArray(value) ? value.join(toSeparator(separator)) : toText(value),
