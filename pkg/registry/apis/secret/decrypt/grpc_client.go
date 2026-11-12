@@ -42,10 +42,13 @@ type TLSConfig struct {
 	CAFile             string
 	ServerName         string
 	InsecureSkipVerify bool
+	// AllowInsecure must be set to dial without TLS. Decrypt responses carry plaintext
+	// secure values and every call carries an access token, so plaintext is opt-in only.
+	AllowInsecure bool
 }
 
 func NewGRPCDecryptClient(tokenExchanger authnlib.TokenExchanger, tracer trace.Tracer, address string, clientLoadBalancingEnabled bool) (*GRPCDecryptClient, error) {
-	return NewGRPCDecryptClientWithTLS(tokenExchanger, tracer, address, TLSConfig{}, clientLoadBalancingEnabled)
+	return NewGRPCDecryptClientWithTLS(tokenExchanger, tracer, address, TLSConfig{UseTLS: true}, clientLoadBalancingEnabled)
 }
 
 func NewGRPCDecryptClientWithTLS(
@@ -64,6 +67,9 @@ func NewGRPCDecryptClientWithTLS(
 
 		opts = append(opts, grpc.WithTransportCredentials(creds))
 	} else {
+		if !tlsConfig.AllowInsecure {
+			return nil, fmt.Errorf("refusing to connect to grpc decrypt server at %s without TLS: enable TLS or explicitly allow insecure connections", address)
+		}
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 

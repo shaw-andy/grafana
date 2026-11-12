@@ -84,6 +84,7 @@ type ControllerConfig struct {
 // grpc_server_address =
 // grpc_server_tls_server_name =
 // grpc_server_use_tls =
+// grpc_server_allow_insecure =
 // grpc_server_tls_ca_file =
 // grpc_server_tls_skip_verify =
 // [unified_storage]
@@ -711,6 +712,7 @@ func setupDecryptService(cfg *setting.Cfg, tracer tracing.Tracer, tokenExchangeC
 		CAFile:             secretsSec.Key("grpc_server_tls_ca_file").String(),
 		ServerName:         secretsSec.Key("grpc_server_tls_server_name").String(),
 		InsecureSkipVerify: secretsSec.Key("grpc_server_tls_skip_verify").MustBool(false),
+		AllowInsecure:      secretsSec.Key("grpc_server_allow_insecure").MustBool(false),
 	}
 
 	decryptSvc, err := secretdecrypt.NewGRPCDecryptClientWithTLS(

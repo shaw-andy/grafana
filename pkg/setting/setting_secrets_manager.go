@@ -36,6 +36,7 @@ type SecretsManagerSettings struct {
 	GrpcClientEnable        bool   // Whether to enable the gRPC client. If disabled, it will use the in-process services implementations.
 	GrpcClientLoadBalancing bool   // Whether to enable gRPC client-side load balancing
 	GrpcServerUseTLS        bool   // Whether to use TLS when communicating with the gRPC server
+	GrpcServerAllowInsecure bool   // Whether to allow a plaintext connection to the gRPC server when GrpcServerUseTLS is false
 	GrpcServerTLSSkipVerify bool   // Whether to skip TLS verification when communicating with the gRPC server
 	GrpcServerTLSServerName string // Server name to use for TLS verification
 	GrpcServerAddress       string // Address for gRPC secrets server
@@ -72,7 +73,8 @@ func (cfg *Cfg) readSecretsManagerSettings() {
 
 	cfg.SecretsManagement.GrpcClientEnable = secretsMgmt.Key("grpc_client_enable").MustBool(false)
 	cfg.SecretsManagement.GrpcClientLoadBalancing = secretsMgmt.Key("grpc_client_load_balancing").MustBool(false)
-	cfg.SecretsManagement.GrpcServerUseTLS = secretsMgmt.Key("grpc_server_use_tls").MustBool(false)
+	cfg.SecretsManagement.GrpcServerUseTLS = secretsMgmt.Key("grpc_server_use_tls").MustBool(true)
+	cfg.SecretsManagement.GrpcServerAllowInsecure = secretsMgmt.Key("grpc_server_allow_insecure").MustBool(false)
 	cfg.SecretsManagement.GrpcServerTLSSkipVerify = secretsMgmt.Key("grpc_server_tls_skip_verify").MustBool(false)
 	cfg.SecretsManagement.GrpcServerTLSServerName = valueAsString(secretsMgmt, "grpc_server_tls_server_name", "")
 	cfg.SecretsManagement.GrpcServerAddress = valueAsString(secretsMgmt, "grpc_server_address", "")
