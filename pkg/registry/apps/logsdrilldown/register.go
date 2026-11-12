@@ -33,11 +33,15 @@ func RegisterAppInstaller(
 	installer := &LogsDrilldownAppInstaller{
 		cfg: cfg,
 	}
-	provider := simple.NewAppProvider(apis.LocalManifest(), nil, logsdrilldownapp.New)
+	specificConfig := &logsdrilldownapp.Config{
+		LogsDrilldownValidator: &simple.Validator{ValidateFunc: validateLogsDrilldownOwner},
+	}
+	provider := simple.NewAppProvider(apis.LocalManifest(), specificConfig, logsdrilldownapp.New)
 
 	appConfig := app.Config{
-		KubeConfig:   restclient.Config{}, // this will be overridden by the installer's InitializeApp method
-		ManifestData: *apis.LocalManifest().ManifestData,
+		KubeConfig:     restclient.Config{}, // this will be overridden by the installer's InitializeApp method
+		ManifestData:   *apis.LocalManifest().ManifestData,
+		SpecificConfig: specificConfig,
 	}
 	i, err := appsdkapiserver.NewDefaultAppInstaller(provider, appConfig, apis.NewGoTypeAssociator())
 	if err != nil {
