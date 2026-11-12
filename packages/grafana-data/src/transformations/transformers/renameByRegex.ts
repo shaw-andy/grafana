@@ -1,7 +1,7 @@
 import { map } from 'rxjs/operators';
 
 import { getFieldDisplayName } from '../../field/fieldState';
-import { stringToJsRegex } from '../../text/string';
+import { stringToSafeRegex } from '../../text/safeRegex';
 import { type DataFrame } from '../../types/dataFrame';
 import { type DataTransformerInfo } from '../../types/transformations';
 
@@ -48,13 +48,13 @@ export const renameByRegexTransformer: DataTransformerInfo<RenameByRegexTransfor
 };
 
 const renameFieldsByRegex = (options: RenameByRegexTransformerOptions) => (frame: DataFrame) => {
-  const regex = stringToJsRegex(options.regex);
+  const regex = stringToSafeRegex(options.regex);
   const fields = frame.fields.map((field) => {
     const displayName = getFieldDisplayName(field, frame);
     if (!regex.test(displayName)) {
       return field;
     }
-    const newDisplayName = displayName.replace(regex, options.renamePattern);
+    const newDisplayName = regex.replace(displayName, options.renamePattern);
     return {
       ...field,
       config: { ...field.config, displayName: newDisplayName },

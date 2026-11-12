@@ -1,3 +1,4 @@
+import { compileSafeRegex } from '../../../text/safeRegex';
 import { type Field } from '../../../types/dataFrame';
 import { type ValueMatcherInfo } from '../../../types/transformations';
 import { ValueMatcherID } from '../ids';
@@ -9,7 +10,7 @@ const regexValueMatcher: ValueMatcherInfo<BasicValueMatcherOptions<string>> = {
   name: 'Regex',
   description: 'Match when field value is matching regex.',
   get: (options) => {
-    const regex = new RegExp(options.value);
+    const regex = compileSafeRegex(String(options.value ?? ''));
 
     return (valueIndex: number, field: Field) => {
       const value = field.values[valueIndex];

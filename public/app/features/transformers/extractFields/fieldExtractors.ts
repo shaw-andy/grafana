@@ -1,4 +1,5 @@
-import { escapeStringForRegex, Registry, type RegistryItem, stringStartsAsRegEx, stringToJsRegex } from '@grafana/data';
+import { escapeStringForRegex, Registry, type RegistryItem, stringStartsAsRegEx } from '@grafana/data';
+import { type SafeRegex, stringToSafeRegex } from '@grafana/data/internal';
 
 import { type ExtractFieldsOptions, FieldExtractorID } from './types';
 
@@ -22,11 +23,11 @@ const extRegExp: FieldExtractor = {
   name: 'RegExp',
   description: 'Parse with RegExp',
   getParser: (options) => {
-    let regex: RegExp | null = /(?<NewField>.*)/;
+    let regex: SafeRegex | RegExp = /(?<NewField>.*)/;
 
     if (stringStartsAsRegEx(options.regExp!)) {
       try {
-        regex = stringToJsRegex(options.regExp!);
+        regex = stringToSafeRegex(options.regExp!);
       } catch (error) {
         if (error instanceof Error) {
           console.warn(error.message);
@@ -34,7 +35,7 @@ const extRegExp: FieldExtractor = {
       }
     }
 
-    return (v: string) => v.match(regex)?.groups;
+    return (v: string) => regex.exec(v)?.groups;
   },
 };
 

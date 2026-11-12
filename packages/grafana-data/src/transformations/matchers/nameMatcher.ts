@@ -1,5 +1,5 @@
 import { getFieldDisplayName } from '../../field/fieldState';
-import { stringToJsRegex } from '../../text/string';
+import { type SafeRegex, stringToSafeRegex } from '../../text/safeRegex';
 import { type DataFrame, type Field, FieldType, TIME_SERIES_VALUE_FIELD_NAME } from '../../types/dataFrame';
 import { type FieldMatcher, type FieldMatcherInfo, type FrameMatcherInfo } from '../../types/transformations';
 
@@ -193,13 +193,13 @@ const regexpOrMultipleNamesMatcher: FieldMatcherInfo<RegexpOrNamesMatcherOptions
   },
 };
 
-const patternToRegex = (pattern?: string): RegExp | undefined => {
+const patternToRegex = (pattern?: string): SafeRegex | undefined => {
   if (!pattern) {
     return undefined;
   }
 
   try {
-    return stringToJsRegex(pattern);
+    return stringToSafeRegex(pattern);
   } catch (error) {
     console.error(error);
     return undefined;
@@ -214,7 +214,7 @@ const frameNameMatcher: FrameMatcherInfo<string> = {
   defaultOptions: '/.*/',
 
   get: (pattern: string) => {
-    const regex = stringToJsRegex(pattern);
+    const regex = stringToSafeRegex(pattern);
     return (frame: DataFrame) => {
       return regex.test(frame.name || '');
     };

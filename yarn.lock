@@ -2348,6 +2348,7 @@ __metadata:
     i18next-cli: "npm:^1.48.0"
     lodash: "npm:^4.17.21"
     micro-memoize: "npm:^4.1.2"
+    re2js: "npm:^2.9.1"
     react: "npm:19.2.8"
     react-dom: "npm:19.2.8"
     react-redux: "npm:^9.2.0"
@@ -2457,6 +2458,7 @@ __metadata:
     moment-timezone: "npm:^0.5.47"
     ol: "npm:^10.7.0"
     papaparse: "npm:^5.5.3"
+    re2js: "npm:^2.9.1"
     react: "npm:19.2.8"
     react-dom: "npm:19.2.8"
     react-use: "npm:^17.6.1"
@@ -29171,6 +29173,13 @@ __metadata:
     react: ^16.13.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
     react-dom: ^16.13.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
   checksum: 10/3b814c61b77af294862bd36382b6f2e7f9a90a86f3696fd93780d39d2534c1fcbab68f63b088fc1e1935b1b9dba6c1ab8f61f4f4e6e5d16e86e5805bae40cfb6
+  languageName: node
+  linkType: hard
+
+"re2js@npm:^2.9.1":
+  version: 2.9.1
+  resolution: "re2js@npm:2.9.1"
+  checksum: 10/52ddfc92187544bf4e13899cca4704d7ebdcdf803a66b45cba93df0d02bd50e109a87fa3deb6f1e7d8fb30a8ac8b665f647eed7e7d4cd40b434c66ffc7ffb5a1
   languageName: node
   linkType: hard
 
