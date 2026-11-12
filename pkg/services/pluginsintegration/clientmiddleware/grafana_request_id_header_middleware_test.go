@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"net"
 	"net/http"
 	"net/url"
 	"testing"
@@ -21,6 +22,11 @@ import (
 )
 
 func Test_HostedGrafanaACHeaderMiddleware(t *testing.T) {
+	_, proxyNet, err := net.ParseCIDR("10.0.0.0/8")
+	require.NoError(t, err)
+	web.SetTrustedProxies([]*net.IPNet{proxyNet}, "X-Real-IP")
+	t.Cleanup(func() { web.SetTrustedProxies(nil, "") })
+
 	t.Run("Should set Grafana request ID headers if the data source URL is in the allow list", func(t *testing.T) {
 		cfg := setting.NewCfg()
 		allowedURL := &url.URL{Scheme: "https", Host: "logs.grafana.net"}
@@ -30,7 +36,8 @@ func Test_HostedGrafanaACHeaderMiddleware(t *testing.T) {
 
 		ctx := context.WithValue(context.Background(), ctxkey.Key{}, &contextmodel.ReqContext{
 			Context: &web.Context{Req: &http.Request{
-				Header: map[string][]string{"X-Real-Ip": {"1.2.3.4"}},
+				RemoteAddr: "10.0.0.2:4242",
+				Header:     map[string][]string{"X-Real-Ip": {"1.2.3.4"}},
 			}},
 			SignedInUser: &user.SignedInUser{},
 		})
@@ -72,7 +79,8 @@ func Test_HostedGrafanaACHeaderMiddleware(t *testing.T) {
 
 		ctx := context.WithValue(context.Background(), ctxkey.Key{}, &contextmodel.ReqContext{
 			Context: &web.Context{Req: &http.Request{
-				Header: map[string][]string{"X-Real-Ip": {"1.2.3.4"}},
+				RemoteAddr: "10.0.0.2:4242",
+				Header:     map[string][]string{"X-Real-Ip": {"1.2.3.4"}},
 			}},
 			SignedInUser: &user.SignedInUser{},
 		})
@@ -169,5 +177,31 @@ func Test_HostedGrafanaACHeaderMiddleware(t *testing.T) {
 		}, nopCallResourceSender)
 		require.NoError(t, err)
 		require.Equal(t, cdt.CallResourceReq.Headers[GrafanaInternalRequest][0], "true")
+	})
+
+	t.Run("Should send the TCP peer instead of X-Real-IP set by an untrusted client", func(t *testing.T) {
+		cfg := setting.NewCfg()
+		allowedURL := &url.URL{Scheme: "https", Host: "logs.grafana.net"}
+		cfg.IPRangeACAllowedURLs = []*url.URL{allowedURL}
+		cfg.IPRangeACSecretKey = "secret"
+		cdt := handlertest.NewHandlerMiddlewareTest(t, handlertest.WithMiddlewares(NewHostedGrafanaACHeaderMiddleware(cfg)))
+
+		ctx := context.WithValue(context.Background(), ctxkey.Key{}, &contextmodel.ReqContext{
+			Context: &web.Context{Req: &http.Request{
+				RemoteAddr: "203.0.113.10:4242",
+				Header:     map[string][]string{"X-Real-Ip": {"1.2.3.4"}},
+			}},
+			SignedInUser: &user.SignedInUser{},
+		})
+
+		err := cdt.MiddlewareHandler.CallResource(ctx, &backend.CallResourceRequest{
+			PluginContext: backend.PluginContext{
+				DataSourceInstanceSettings: &backend.DataSourceInstanceSettings{
+					URL: "https://logs.grafana.net",
+				},
+			},
+		}, nopCallResourceSender)
+		require.NoError(t, err)
+		require.Equal(t, []string{"203.0.113.10"}, cdt.CallResourceReq.Headers[XRealIPHeader])
 	})
 }

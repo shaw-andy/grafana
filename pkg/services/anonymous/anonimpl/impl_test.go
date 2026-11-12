@@ -60,9 +60,9 @@ func TestIntegrationDeviceService_tag(t *testing.T) {
 		{
 			name: "should tag device ID once",
 			req: []tagReq{{httpReq: &http.Request{
+				RemoteAddr: "10.30.30.1:1234",
 				Header: http.Header{
 					"User-Agent":                            []string{"test"},
-					"X-Forwarded-For":                       []string{"10.30.30.1"},
 					http.CanonicalHeaderKey(deviceIDHeader): []string{"32mdo31deeqwes"},
 				},
 			},
@@ -79,18 +79,18 @@ func TestIntegrationDeviceService_tag(t *testing.T) {
 		{
 			name: "repeat request should not tag",
 			req: []tagReq{{httpReq: &http.Request{
+				RemoteAddr: "10.30.30.1:1234",
 				Header: http.Header{
 					"User-Agent":                            []string{"test"},
 					http.CanonicalHeaderKey(deviceIDHeader): []string{"32mdo31deeqwes"},
-					"X-Forwarded-For":                       []string{"10.30.30.1"},
 				},
 			},
 				kind: anonymous.AnonDeviceUI,
 			}, {httpReq: &http.Request{
+				RemoteAddr: "10.30.30.1:1234",
 				Header: http.Header{
 					"User-Agent":                            []string{"test"},
 					http.CanonicalHeaderKey(deviceIDHeader): []string{"32mdo31deeqwes"},
-					"X-Forwarded-For":                       []string{"10.30.30.1"},
 				},
 			},
 				kind: anonymous.AnonDeviceUI,
@@ -100,17 +100,17 @@ func TestIntegrationDeviceService_tag(t *testing.T) {
 		}, {
 			name: "tag 2 different requests",
 			req: []tagReq{{httpReq: &http.Request{
+				RemoteAddr: "10.30.30.1:1234",
 				Header: http.Header{
-					http.CanonicalHeaderKey("User-Agent"):      []string{"test"},
-					http.CanonicalHeaderKey("X-Forwarded-For"): []string{"10.30.30.1"},
-					http.CanonicalHeaderKey(deviceIDHeader):    []string{"a"},
+					http.CanonicalHeaderKey("User-Agent"):   []string{"test"},
+					http.CanonicalHeaderKey(deviceIDHeader): []string{"a"},
 				},
 			},
 				kind: anonymous.AnonDeviceUI,
 			}, {httpReq: &http.Request{
+				RemoteAddr: "10.30.30.2:1234",
 				Header: http.Header{
 					"User-Agent":                            []string{"test"},
-					"X-Forwarded-For":                       []string{"10.30.30.2"},
 					http.CanonicalHeaderKey(deviceIDHeader): []string{"b"},
 				},
 			},
@@ -124,9 +124,9 @@ func TestIntegrationDeviceService_tag(t *testing.T) {
 			req: []tagReq{
 				{
 					httpReq: &http.Request{
+						RemoteAddr: "10.33.33.3:1234",
 						Header: http.Header{
 							"User-Agent":                            []string{"testdisabled"},
-							"X-Forwarded-For":                       []string{"10.33.33.3"},
 							http.CanonicalHeaderKey(deviceIDHeader): []string{"t35td154b13d1d"},
 						},
 					},
@@ -214,9 +214,9 @@ func TestIntegrationAnonDeviceService_localCacheSafety(t *testing.T) {
 		&authntest.FakeService{}, store, setting.NewCfg(), orgtest.NewOrgServiceFake(), nil, actest.FakeAccessControl{}, &routing.RouteRegisterImpl{}, validator.FakeAnonUserLimitValidator{})
 
 	req := &http.Request{
+		RemoteAddr: "10.30.30.2:1234",
 		Header: http.Header{
 			"User-Agent":                            []string{"test"},
-			"X-Forwarded-For":                       []string{"10.30.30.2"},
 			http.CanonicalHeaderKey(deviceIDHeader): []string{"32mdo31deeqwes"},
 		},
 	}
@@ -379,9 +379,9 @@ func TestIntegrationAnonDeviceService_DeviceLimitWithCache(t *testing.T) {
 		{
 			name: "first request should succeed",
 			httpReq: &http.Request{
+				RemoteAddr: "10.30.30.1:1234",
 				Header: http.Header{
 					"User-Agent":                            []string{"test"},
-					"X-Forwarded-For":                       []string{"10.30.30.1"},
 					http.CanonicalHeaderKey(deviceIDHeader): []string{"device1"},
 				},
 			},
@@ -390,9 +390,9 @@ func TestIntegrationAnonDeviceService_DeviceLimitWithCache(t *testing.T) {
 		{
 			name: "second request should fail due to device limit",
 			httpReq: &http.Request{
+				RemoteAddr: "10.30.30.2:1234",
 				Header: http.Header{
 					"User-Agent":                            []string{"test"},
-					"X-Forwarded-For":                       []string{"10.30.30.2"},
 					http.CanonicalHeaderKey(deviceIDHeader): []string{"device2"},
 				},
 			},
@@ -401,9 +401,9 @@ func TestIntegrationAnonDeviceService_DeviceLimitWithCache(t *testing.T) {
 		{
 			name: "repeat request should hit cache and succeed",
 			httpReq: &http.Request{
+				RemoteAddr: "10.30.30.1:1234",
 				Header: http.Header{
 					"User-Agent":                            []string{"test"},
-					"X-Forwarded-For":                       []string{"10.30.30.1"},
 					http.CanonicalHeaderKey(deviceIDHeader): []string{"device1"},
 				},
 			},
@@ -412,9 +412,9 @@ func TestIntegrationAnonDeviceService_DeviceLimitWithCache(t *testing.T) {
 		{
 			name: "third request should hit cache and fail due to device limit",
 			httpReq: &http.Request{
+				RemoteAddr: "10.30.30.2:1234",
 				Header: http.Header{
 					"User-Agent":                            []string{"test"},
-					"X-Forwarded-For":                       []string{"10.30.30.2"},
 					http.CanonicalHeaderKey(deviceIDHeader): []string{"device2"},
 				},
 			},

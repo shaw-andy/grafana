@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/grafana/grafana/pkg/apimachinery/errutil"
@@ -64,32 +65,75 @@ func (ctx *Context) run() {
 	}
 }
 
-// RemoteAddr returns more real IP address.
+const headerXForwardedFor = "X-Forwarded-For"
+
+type proxyTrust struct {
+	networks []*net.IPNet
+	header   string
+}
+
+var trustedProxies atomic.Pointer[proxyTrust]
+
+// SetTrustedProxies configures the reverse proxies whose requests may carry the
+// client address in header. Requests from any other peer are attributed to the
+// peer itself. An empty header defaults to X-Forwarded-For.
+func SetTrustedProxies(networks []*net.IPNet, header string) {
+	if header == "" {
+		header = headerXForwardedFor
+	}
+	trustedProxies.Store(&proxyTrust{networks: slices.Clone(networks), header: http.CanonicalHeaderKey(header)})
+}
+
+func (t *proxyTrust) trusts(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	for _, network := range t.networks {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// RemoteAddr returns the client IP address of the request.
 func (ctx *Context) RemoteAddr() string {
 	return RemoteAddr(ctx.Req)
 }
 
+// RemoteAddr returns the client IP address of the request. Forwarding headers
+// are client-controlled unless the TCP peer is a trusted proxy, so they are
+// only read when it is.
 func RemoteAddr(req *http.Request) string {
-	addr := req.Header.Get("X-Real-IP")
-
-	if len(addr) == 0 {
-		// X-Forwarded-For may contain multiple IP addresses, separated by
-		// commas.
-		addr = strings.TrimSpace(strings.Split(req.Header.Get("X-Forwarded-For"), ",")[0])
+	peer := req.RemoteAddr
+	if i := strings.LastIndex(peer, ":"); i > -1 {
+		peer = peer[:i]
 	}
 
-	// parse user inputs from headers to prevent log forgery
-	if len(addr) > 0 {
-		if parsedIP := net.ParseIP(addr); parsedIP == nil {
-			// if parsedIP is nil we clean addr and populate with RemoteAddr below
-			addr = ""
+	trust := trustedProxies.Load()
+	if trust == nil || !trust.trusts(net.ParseIP(strings.Trim(peer, "[]"))) {
+		return peer
+	}
+
+	if trust.header != headerXForwardedFor {
+		if ip := net.ParseIP(strings.TrimSpace(req.Header.Get(trust.header))); ip != nil {
+			return ip.String()
 		}
+		return peer
 	}
 
-	if len(addr) == 0 {
-		addr = req.RemoteAddr
-		if i := strings.LastIndex(addr, ":"); i > -1 {
-			addr = addr[:i]
+	// Each proxy appends the address it received the request from, so only
+	// entries up to the first untrusted hop from the right are reliable.
+	addr := peer
+	forwarded := strings.Split(strings.Join(req.Header.Values(headerXForwardedFor), ","), ",")
+	for _, entry := range slices.Backward(forwarded) {
+		ip := net.ParseIP(strings.TrimSpace(entry))
+		if ip == nil {
+			break
+		}
+		addr = ip.String()
+		if !trust.trusts(ip) {
+			break
 		}
 	}
 

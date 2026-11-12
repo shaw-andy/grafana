@@ -289,6 +289,7 @@ func ProvideHTTPServer(opts ServerOptions, cfg *setting.Cfg, routeRegister routi
 	userVerifier user.Verifier, pluginPreinstall pluginchecker.Preinstall, publicDashboardsService publicdashboards.Service,
 ) (*HTTPServer, error) {
 	web.Env = cfg.Env
+	web.SetTrustedProxies(cfg.TrustedProxies, cfg.TrustedProxyClientIPHeader)
 	m := web.New()
 
 	var diagnosticsMetrics *diagnostics.Metrics
