@@ -777,6 +777,23 @@ Set to `true` to disable [brute force login protection by username](https://chea
 
 Set to `true` to disable [brute force login protection by IP address](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html#account-lockout). Default is `true`. Anyone from the IP address will be unable to login for 5 minutes if all login attempts are spent within a 5 minute window.
 
+#### `trusted_proxies`
+
+A comma or space separated list of IP addresses or CIDR ranges of reverse proxies that are allowed to set the client address, for example `10.0.0.0/8, 192.168.1.10`.
+Grafana reads the client address from [`trusted_proxy_client_ip_header`](#trusted_proxy_client_ip_header) only for requests whose TCP peer is in this list.
+For all other requests, Grafana uses the TCP peer address and ignores forwarding headers.
+Grafana uses the client address for brute force login protection by IP address, sessions, anonymous devices, and logs.
+Default is empty, so no forwarding header is trusted.
+
+If you run Grafana behind a reverse proxy, add the address of the proxy here. Otherwise, Grafana attributes all requests to the proxy.
+
+#### `trusted_proxy_client_ip_header`
+
+The header that trusted proxies use to send the client address. Default is `X-Forwarded-For`.
+
+For `X-Forwarded-For`, Grafana uses the rightmost address that isn't in `trusted_proxies`, because a client can add any address to the left of the list.
+For any other header, such as `X-Real-IP`, the proxy must overwrite the header on every request.
+
 #### `cookie_secure`
 
 Set to `true` if you host Grafana behind HTTPS. Default is `false`.
