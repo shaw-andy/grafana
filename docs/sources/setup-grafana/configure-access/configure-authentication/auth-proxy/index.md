@@ -40,10 +40,11 @@ auto_sign_up = true
 # If combined with Grafana LDAP integration it is also the sync interval
 # Set to 0 to always fetch and sync the latest user data
 sync_ttl = 15
-# Limit where auth proxy requests come from by configuring a list of IP addresses.
-# This can be used to prevent users spoofing the X-WEBAUTH-USER header.
+# Required. List of IP addresses or CIDR ranges of the trusted proxies that can send auth proxy requests.
+# Requests from any other address are rejected, which prevents users spoofing the X-WEBAUTH-USER header.
+# Auth proxy isn't enabled if this list is empty.
 # Example `whitelist = 192.168.1.1, 192.168.1.0/24, 2001::23, 2001::0/120`
-whitelist =
+whitelist = 127.0.0.1
 # Optionally define more headers to sync other user attributes
 # Example `headers = Name:X-WEBAUTH-NAME Role:X-WEBAUTH-ROLE Email:X-WEBAUTH-EMAIL Groups:X-WEBAUTH-GROUPS`
 headers =
