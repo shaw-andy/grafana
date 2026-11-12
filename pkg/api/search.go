@@ -100,7 +100,7 @@ func (hs *HTTPServer) Search(c *contextmodel.ReqContext) response.Response {
 
 	hits, err := hs.SearchService.SearchHandler(c.Req.Context(), &searchQuery)
 	if err != nil {
-		return response.Error(http.StatusInternalServerError, "Search failed", err)
+		return response.ErrOrFallback(http.StatusInternalServerError, "Search failed", err)
 	}
 
 	defer c.TimeRequest(metrics.MApiDashboardSearch)

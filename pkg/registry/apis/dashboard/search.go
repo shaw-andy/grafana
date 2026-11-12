@@ -38,6 +38,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	foldermodel "github.com/grafana/grafana/pkg/services/folder"
 	searchsort "github.com/grafana/grafana/pkg/services/search/sort"
+	"github.com/grafana/grafana/pkg/services/search/textquery"
 	"github.com/grafana/grafana/pkg/storage/unified/resource"
 	"github.com/grafana/grafana/pkg/storage/unified/resourcepb"
 	"github.com/grafana/grafana/pkg/storage/unified/search/builders"
@@ -749,9 +750,15 @@ func (s *SearchHandler) DoHybridSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	query := queryParams.Get("query")
+	if err := textquery.Check(query); err != nil {
+		errhttp.Write(ctx, err, w)
+		return
+	}
+
 	req := &resourcepb.HybridSearchRequest{
 		Key:           key,
-		Query:         queryParams.Get("query"),
+		Query:         query,
 		SemanticQuery: queryParams.Get("semanticQuery"),
 		Limit:         int64(limit),
 		// Both validated server-side; an unknown min_relevance or the
@@ -851,9 +858,16 @@ func convertHttpSearchRequestToResourceSearchRequest(queryParams url.Values, use
 		offset = (page - 1) * limit
 	}
 
+	query := queryParams.Get("query")
+	if query != "*" {
+		if err := textquery.Check(query); err != nil {
+			return nil, err
+		}
+	}
+
 	searchRequest := &resourcepb.ResourceSearchRequest{
 		Options: &resourcepb.ListOptions{},
-		Query:   queryParams.Get("query"),
+		Query:   query,
 		Limit:   int64(limit),
 		Offset:  int64(offset),
 		Page:    int64(page), // for modes 0-2 (legacy)
