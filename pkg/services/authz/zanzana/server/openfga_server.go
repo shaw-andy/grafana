@@ -253,6 +253,7 @@ func NewOpenFGAHttpServer(cfg setting.ZanzanaServerSettings, grpcSrv grpcserver.
 				http.MethodHead, http.MethodPatch, http.MethodDelete, http.MethodPut},
 		}).Handler(mux),
 		ReadHeaderTimeout: 30 * time.Second,
+		IdleTimeout:       setting.DefaultIdleTimeout,
 	}, nil
 }
 
