@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 
 	provisioning "github.com/grafana/grafana/apps/provisioning/pkg/apis/provisioning/v0alpha1"
 
@@ -64,7 +65,10 @@ func (b *WatchRunner) OnSubscribe(_ context.Context, u identity.Requester, e mod
 	b.watchingMu.Lock()
 	defer b.watchingMu.Unlock()
 
-	current, ok := b.watching[e.Channel]
+	// Live strips the org from e.Channel, so a watcher started in one org must not
+	// satisfy a subscription from another org where the user may hold a different role.
+	key := u.GetNamespace() + "/" + e.Channel
+	current, ok := b.watching[key]
 	if ok && !current.done {
 		return model.SubscribeReply{
 			JoinLeave: false,
@@ -86,14 +90,14 @@ func (b *WatchRunner) OnSubscribe(_ context.Context, u identity.Requester, e mod
 	}
 
 	// doesn't matter what GetRestConfig sees for context, matters for watch below
-	cfg, err := b.configProvider.GetRestConfig(context.Background())
+	loopback, err := b.configProvider.GetRestConfig(context.Background())
 	if err != nil {
 		return model.SubscribeReply{}, backend.SubscribeStreamStatusNotFound, err
 	}
 
 	// add user to both requester and authInfo context keys, older implementations are still using requester
 	ctx := identity.WithRequester(types.WithAuthInfo(context.Background(), u), u)
-	uclient, err := dynamic.NewForConfig(cfg)
+	uclient, err := dynamic.NewForConfig(callerRestConfig(loopback))
 	if err != nil {
 		return model.SubscribeReply{}, backend.SubscribeStreamStatusNotFound, err
 	}
@@ -126,7 +130,7 @@ func (b *WatchRunner) OnSubscribe(_ context.Context, u identity.Requester, e mod
 		watch:     watch,
 	}
 
-	b.watching[e.Channel] = current
+	b.watching[key] = current
 	go current.run(ctx)
 
 	return model.SubscribeReply{
@@ -134,6 +138,17 @@ func (b *WatchRunner) OnSubscribe(_ context.Context, u identity.Requester, e mod
 		Presence:  false,
 		Recover:   false,
 	}, backend.SubscribeStreamStatusOK, nil
+}
+
+// callerRestConfig drops every credential from the loopback config and keeps only its
+// in-process transport. The loopback bearer token authenticates as a member of
+// system:masters, which the apiserver authorizes before any API-specific check, so a
+// watch started on behalf of a user must be authenticated from the requester in the
+// request context instead.
+func callerRestConfig(loopback *rest.Config) *rest.Config {
+	cfg := rest.AnonymousClientConfig(loopback)
+	cfg.Transport = loopback.Transport
+	return cfg
 }
 
 func parseWatchRequest(channel string, user string) (gvr schema.GroupVersionResource, name string, err error) {
