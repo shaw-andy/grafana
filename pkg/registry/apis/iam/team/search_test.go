@@ -23,6 +23,7 @@ import (
 	"github.com/grafana/grafana/pkg/apiserver/rest"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/infra/tracing"
+	"github.com/grafana/grafana/pkg/registry/apis/iam/common"
 	teamsearch "github.com/grafana/grafana/pkg/services/team/search"
 	"github.com/grafana/grafana/pkg/services/user"
 	"github.com/grafana/grafana/pkg/setting"
@@ -31,6 +32,29 @@ import (
 	"github.com/grafana/grafana/pkg/storage/unified/resourcepb"
 	"github.com/grafana/grafana/pkg/storage/unified/search/builders"
 )
+
+func TestTeamSearchZeroLimitDoesNotPanic(t *testing.T) {
+	for _, rawQuery := range []string{"limit=0&offset=1", "limit=nope&offset=1"} {
+		t.Run(rawQuery, func(t *testing.T) {
+			mockClient := &MockClient{}
+			handler := NewSearchHandler(tracing.NewNoopTracerService(), mockClient, nil)
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/teams/search?"+rawQuery, nil)
+			req = req.WithContext(identity.WithRequester(req.Context(), &user.SignedInUser{Namespace: "default"}))
+
+			require.NotPanics(t, func() {
+				handler.DoTeamSearch(rr, req)
+			})
+			require.Less(t, rr.Code, http.StatusInternalServerError, rr.Body.String())
+			if mockClient.CallCount > 0 {
+				require.GreaterOrEqual(t, mockClient.LastSearchRequest.Limit, int64(1))
+				require.LessOrEqual(t, mockClient.LastSearchRequest.Limit, int64(common.MaxListLimit))
+			} else {
+				require.Contains(t, []int{http.StatusBadRequest, http.StatusUnprocessableEntity}, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
 
 func TestTeamSearchFallback(t *testing.T) {
 	t.Skip("Skipping team search fallback test: https://github.com/grafana/identity-access-team/issues/2048")
