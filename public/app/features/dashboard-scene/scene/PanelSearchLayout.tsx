@@ -7,6 +7,7 @@ import { type VizPanel, sceneGraph } from '@grafana/scenes';
 import { useStyles2 } from '@grafana/ui';
 
 import { SoloPanelContextProvider } from '../solo/SoloPanelContext';
+import { LinearRegExp } from '../utils/linearRegExp';
 
 import { type DashboardScene } from './DashboardScene';
 
@@ -55,6 +56,7 @@ function getStyles(theme: GrafanaTheme2) {
 
 export class SoloPanelContextValueWithSearchStringFilter {
   public matchFound = false;
+  private compiledSearches = new Map<string, LinearRegExp | undefined>();
 
   public constructor(private searchQuery: string) {}
 
@@ -62,13 +64,7 @@ export class SoloPanelContextValueWithSearchStringFilter {
     const interpolatedSearchString = sceneGraph.interpolate(panel, this.searchQuery);
     const interpolatedTitle = panel.interpolate(panel.state.title, undefined, 'text');
 
-    let match: boolean;
-    try {
-      const regex = new RegExp(interpolatedSearchString, 'i');
-      match = regex.test(interpolatedTitle);
-    } catch {
-      match = false;
-    }
+    let match = this.compileSearch(interpolatedSearchString)?.test(interpolatedTitle) ?? false;
 
     if (!match) {
       match = interpolatedTitle.toLowerCase().includes(interpolatedSearchString.toLowerCase());
@@ -79,5 +75,19 @@ export class SoloPanelContextValueWithSearchStringFilter {
     }
 
     return match;
+  }
+
+  // The search string comes from a dashboard variable, so it must never reach the backtracking RegExp engine.
+  private compileSearch(searchString: string): LinearRegExp | undefined {
+    if (!this.compiledSearches.has(searchString)) {
+      let compiled: LinearRegExp | undefined;
+      try {
+        compiled = new LinearRegExp(searchString, 'i');
+      } catch {
+        compiled = undefined;
+      }
+      this.compiledSearches.set(searchString, compiled);
+    }
+    return this.compiledSearches.get(searchString);
   }
 }

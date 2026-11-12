@@ -19,6 +19,7 @@ import { Box, Combobox, type ComboboxOption, Field, Input, Stack } from '@grafan
 import { ALL_VARIABLE_TEXT } from 'app/features/variables/constants';
 
 import { edit } from '../../actions/utils/edit';
+import { LinearRegExp } from '../../utils/linearRegExp';
 import { useUserDefinedVariables } from '../../utils/variables';
 import { getLowerTranslatedObjectType } from '../object';
 
@@ -29,13 +30,15 @@ import { checkGroup, getObject, getObjectType } from './utils';
 type VariableConditionValueOperator = '=' | '!=' | '=~' | '!~';
 
 /**
- * Builds a RegExp from a user-entered value, honouring RE2-style inline flags
+ * Builds a matcher from a user-entered value, honouring RE2-style inline flags
  * such as `(?i)` that JavaScript's RegExp does not support natively (the same
- * syntax accepted elsewhere in Grafana). Throws on genuinely invalid patterns.
+ * syntax accepted elsewhere in Grafana). The value is saved with the dashboard
+ * and evaluated for every viewer, so it is matched in linear time. Throws on
+ * invalid patterns and on backreferences or lookaround, which RE2 also rejects.
  */
-function buildValueRegExp(value: string): RegExp {
+function buildValueRegExp(value: string): LinearRegExp {
   const { cleaned, flags } = parseFlags(value);
-  return new RegExp(cleaned, flags);
+  return new LinearRegExp(cleaned, flags);
 }
 
 interface ConditionalRenderingVariableState extends SceneObjectState {
