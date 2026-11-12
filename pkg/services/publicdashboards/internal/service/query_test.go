@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"testing"
@@ -1392,7 +1393,7 @@ func buildJsonDataWithTimeRange(from, to, timezone string) *simplejson.Json {
 }
 
 func TestSanitizeDataV2(t *testing.T) {
-	t.Run("removes expr, query, rawSql from query specs", func(t *testing.T) {
+	t.Run("keeps only allowlisted fields in query specs", func(t *testing.T) {
 		data := simplejson.NewFromAny(map[string]interface{}{
 			"elements": map[string]interface{}{
 				"panel-1": map[string]interface{}{
@@ -1466,7 +1467,7 @@ func TestSanitizeDataV2(t *testing.T) {
 		q2spec := simplejson.NewFromAny(panel1Queries[1]).Get("spec").Get("query").Get("spec")
 		assert.Empty(t, q2spec.Get("rawSql").MustString())
 		assert.Equal(t, "B", q2spec.Get("refId").MustString())
-		assert.Equal(t, "time_series", q2spec.Get("format").MustString())
+		assert.Equal(t, map[string]any{"refId": "B"}, q2spec.MustMap(), "only allowlisted fields should be kept")
 
 		panel2Queries := simplejson.NewFromAny(elements["panel-2"]).
 			Get("spec").Get("data").Get("spec").Get("queries").MustArray()
@@ -1511,6 +1512,240 @@ func TestSanitizeDataV2(t *testing.T) {
 		})
 		require.NotPanics(t, func() { sanitizeDataV2(data) })
 	})
+
+	t.Run("removes query text from annotations, query variables and nested query fields", func(t *testing.T) {
+		data, err := simplejson.NewJson([]byte(`{
+			"elements": {
+				"panel-1": {
+					"kind": "Panel",
+					"spec": {
+						"id": 1,
+						"title": "CPU",
+						"data": {
+							"kind": "QueryGroup",
+							"spec": {
+								"queries": [
+									{
+										"kind": "PanelQuery",
+										"spec": {
+											"refId": "A",
+											"hidden": false,
+											"extra": "secret-panel-query",
+											"query": {
+												"kind": "DataQuery",
+												"group": "cloudwatch",
+												"version": "v0",
+												"datasource": {"name": "cw", "extra": "secret-ref"},
+												"spec": {"refId": "A", "sqlExpression": "secret-sql", "sql": {"from": "secret-builder"}}
+											}
+										}
+									},
+									{
+										"kind": "PanelQuery",
+										"spec": {
+											"refId": "B",
+											"hidden": false,
+											"query": {
+												"kind": "DataQuery",
+												"group": "datasource",
+												"version": "v0",
+												"datasource": {"name": "-- Dashboard --"},
+												"spec": {"panelId": 2, "withTransforms": true, "expression": "secret-expression"}
+											}
+										}
+									}
+								]
+							}
+						}
+					}
+				}
+			},
+			"annotations": [
+				{
+					"kind": "AnnotationQuery",
+					"spec": {
+						"name": "Deploys",
+						"enable": true,
+						"hide": false,
+						"iconColor": "red",
+						"filter": {"exclude": false, "ids": [1, "secret-filter"]},
+						"legacyOptions": {"expr": "secret-annotation-legacy"},
+						"query": {
+							"kind": "DataQuery",
+							"group": "prometheus",
+							"version": "v0",
+							"datasource": {"name": "prom"},
+							"spec": {"expr": "secret-annotation-expr"}
+						}
+					}
+				}
+			],
+			"variables": [
+				{
+					"kind": "QueryVariable",
+					"spec": {
+						"name": "instance",
+						"definition": "secret-variable-definition",
+						"current": {"text": "host-1", "value": "host-1"},
+						"query": {
+							"kind": "DataQuery",
+							"group": "prometheus",
+							"version": "v0",
+							"datasource": {"name": "prom"},
+							"spec": {"query": "secret-variable-query"}
+						}
+					}
+				},
+				{
+					"kind": "CustomVariable",
+					"spec": {"name": "env", "query": "dev,prod"}
+				}
+			]
+		}`))
+		require.NoError(t, err)
+
+		sanitizeDataV2(data)
+
+		out, err := data.MarshalJSON()
+		require.NoError(t, err)
+		assert.NotContains(t, string(out), "secret-")
+
+		queries := data.GetPath("elements", "panel-1", "spec", "data", "spec", "queries").MustArray()
+		require.Len(t, queries, 2)
+		first, err := json.Marshal(queries[0])
+		require.NoError(t, err)
+		assert.JSONEq(t, `{
+			"kind": "PanelQuery",
+			"spec": {
+				"refId": "A",
+				"hidden": false,
+				"query": {"kind": "DataQuery", "group": "cloudwatch", "version": "v0", "datasource": {"name": "cw"}, "spec": {"refId": "A"}}
+			}
+		}`, string(first))
+
+		dashboardDsSpec := simplejson.NewFromAny(queries[1]).GetPath("spec", "query", "spec")
+		assert.Equal(t, int64(2), dashboardDsSpec.Get("panelId").MustInt64())
+		assert.True(t, dashboardDsSpec.Get("withTransforms").MustBool())
+
+		anno := simplejson.NewFromAny(data.Get("annotations").MustArray()[0]).Get("spec")
+		assert.Equal(t, "Deploys", anno.Get("name").MustString())
+		assert.True(t, anno.Get("enable").MustBool())
+		assert.Len(t, anno.GetPath("filter", "ids").MustArray(), 1)
+		assert.Equal(t, "prom", anno.GetPath("query", "datasource", "name").MustString())
+		assert.Empty(t, anno.GetPath("query", "spec").MustMap())
+
+		variables := data.Get("variables").MustArray()
+		queryVar := simplejson.NewFromAny(variables[0]).Get("spec")
+		assert.Equal(t, "host-1", queryVar.GetPath("current", "value").MustString())
+		assert.Equal(t, "prometheus", queryVar.GetPath("query", "group").MustString())
+		assert.Empty(t, queryVar.GetPath("query", "spec").MustMap())
+		assert.Equal(t, "dev,prod", simplejson.NewFromAny(variables[1]).GetPath("spec", "query").MustString())
+	})
+}
+
+func TestSanitizeData(t *testing.T) {
+	data, err := simplejson.NewJson([]byte(`{
+		"panels": [
+			{
+				"id": 1,
+				"type": "timeseries",
+				"title": "CPU",
+				"targets": [
+					{
+						"refId": "A",
+						"hide": true,
+						"datasource": {"type": "graphite", "uid": "graphite", "extra": {"query": "secret-ref"}},
+						"target": "secret-target",
+						"targetFull": "secret-target-full",
+						"nested": {"anything": "secret-nested"}
+					},
+					{
+						"refId": "B",
+						"datasource": {"type": "datasource", "uid": "-- Dashboard --"},
+						"panelId": 3,
+						"withTransforms": true,
+						"topic": "annotations"
+					}
+				]
+			},
+			{
+				"id": 2,
+				"type": "timeseries",
+				"datasource": "-- Dashboard --",
+				"targets": [{"refId": "A", "panelId": 1}]
+			},
+			{
+				"id": 4,
+				"type": "row",
+				"collapsed": false,
+				"panels": [{"id": 5, "targets": [{"refId": "A", "expression": "secret-uncollapsed-row"}]}]
+			},
+			{
+				"id": 6,
+				"type": "timeseries",
+				"libraryPanel": {"uid": "lib", "name": "lib", "model": {"targets": [{"refId": "A", "expr": "secret-library"}]}}
+			}
+		],
+		"rows": [{"panels": [{"id": 7, "targets": [{"refId": "A", "query": "secret-legacy-row"}]}]}],
+		"annotations": {
+			"list": [
+				{
+					"builtIn": 1,
+					"datasource": {"type": "grafana", "uid": "-- Grafana --"},
+					"enable": true,
+					"hide": true,
+					"iconColor": "blue",
+					"name": "Annotations & Alerts",
+					"type": "dashboard",
+					"target": {"limit": 100, "tags": ["secret-tag"]}
+				},
+				{
+					"datasource": {"type": "prometheus", "uid": "prom"},
+					"enable": true,
+					"name": "Deploys",
+					"expr": "secret-annotation-expr",
+					"target": {"expr": "secret-annotation-target"},
+					"filter": {"exclude": true, "ids": [1]}
+				}
+			]
+		},
+		"templating": {
+			"list": [
+				{"type": "query", "name": "instance", "query": {"query": "secret-variable-query"}, "definition": "secret-variable-definition", "current": {"value": "host-1"}},
+				{"type": "custom", "name": "env", "query": "dev,prod"}
+			]
+		}
+	}`))
+	require.NoError(t, err)
+
+	sanitizeData(data)
+
+	out, err := data.MarshalJSON()
+	require.NoError(t, err)
+	assert.NotContains(t, string(out), "secret-")
+
+	panels := data.Get("panels").MustArray()
+	targets, err := json.Marshal(simplejson.NewFromAny(panels[0]).Get("targets").Interface())
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{"refId": "A", "hide": true, "datasource": {"type": "graphite", "uid": "graphite"}},
+		{"refId": "B", "datasource": {"type": "datasource", "uid": "-- Dashboard --"}, "panelId": 3, "withTransforms": true, "topic": "annotations"}
+	]`, string(targets))
+
+	panelLevelDashboardDs := simplejson.NewFromAny(panels[1]).Get("targets").GetIndex(0)
+	assert.Equal(t, int64(1), panelLevelDashboardDs.Get("panelId").MustInt64())
+
+	annos := data.GetPath("annotations", "list").MustArray()
+	require.Len(t, annos, 2)
+	builtIn := simplejson.NewFromAny(annos[0])
+	assert.Equal(t, "-- Grafana --", builtIn.GetPath("datasource", "uid").MustString())
+	assert.Equal(t, "dashboard", builtIn.Get("type").MustString())
+	assert.True(t, builtIn.Get("hide").MustBool())
+	assert.True(t, simplejson.NewFromAny(annos[1]).GetPath("filter", "exclude").MustBool())
+
+	variables := data.GetPath("templating", "list").MustArray()
+	assert.Equal(t, "host-1", simplejson.NewFromAny(variables[0]).GetPath("current", "value").MustString())
+	assert.Equal(t, "dev,prod", simplejson.NewFromAny(variables[1]).Get("query").MustString())
 }
 
 func TestIsDashboardV2(t *testing.T) {
