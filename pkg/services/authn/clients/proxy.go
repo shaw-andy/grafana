@@ -38,6 +38,7 @@ var (
 	errNotAcceptedIP      = errutil.Unauthorized("auth-proxy.invalid-ip")
 	errEmptyProxyHeader   = errutil.Unauthorized("auth-proxy.empty-header")
 	errInvalidProxyHeader = errutil.Internal("auth-proxy.invalid-proxy-header")
+	errEmptyAcceptList    = errors.New("auth proxy requires at least one trusted proxy address in [auth.proxy] whitelist")
 )
 
 var (
@@ -210,8 +211,8 @@ func (c *Proxy) Hook(ctx context.Context, id *authn.Identity, r *authn.Request) 
 }
 
 func (c *Proxy) isAllowedIP(r *authn.Request) bool {
-	if len(c.acceptedIPs) == 0 {
-		return true
+	if len(c.acceptedIPs) == 0 || r.HTTPRequest == nil {
+		return false
 	}
 
 	host, _, err := net.SplitHostPort(r.HTTPRequest.RemoteAddr)
@@ -231,7 +232,7 @@ func (c *Proxy) isAllowedIP(r *authn.Request) bool {
 
 func parseAcceptList(s string) ([]*net.IPNet, error) {
 	if len(strings.TrimSpace(s)) == 0 {
-		return nil, nil
+		return nil, errEmptyAcceptList
 	}
 	addresses := strings.Split(s, ",")
 	list := make([]*net.IPNet, 0, len(addresses))

@@ -67,15 +67,19 @@ func TestProxy_Authenticate(t *testing.T) {
 		},
 		{
 			desc: "should fail when proxy header is empty",
+			ips:  "127.0.0.1",
 			req: &authn.Request{
-				HTTPRequest: &http.Request{Header: map[string][]string{
-					"X-Username": {""},
-					"X-Name":     {"name"},
-					"X-Email":    {"email"},
-					"X-Login":    {"login"},
-					"X-Role":     {"Viewer"},
-					"X-Group":    {"grp1,grp2"},
-				}},
+				HTTPRequest: &http.Request{
+					Header: map[string][]string{
+						"X-Username": {""},
+						"X-Name":     {"name"},
+						"X-Email":    {"email"},
+						"X-Login":    {"login"},
+						"X-Role":     {"Viewer"},
+						"X-Group":    {"grp1,grp2"},
+					},
+					RemoteAddr: "127.0.0.1:333",
+				},
 			},
 			proxyHeader: "X-Username",
 			proxyHeaders: map[string]string{
@@ -179,6 +183,7 @@ func TestProxy_Authenticate_CacheHitExternalGroups(t *testing.T) {
 			cfg.AuthProxy.HeaderName = "X-Username"
 			cfg.AuthProxy.Headers = tt.proxyHeaders
 			cfg.AuthProxy.SyncTTL = 15
+			cfg.AuthProxy.Whitelist = "127.0.0.1"
 			cfg.IDUseExternalGroupsForGroupsClaim = tt.useExternalGroups
 
 			req := &authn.Request{
@@ -273,8 +278,10 @@ func TestProxy_Test(t *testing.T) {
 		t.Run(tt.desc, func(t *testing.T) {
 			cfg := setting.NewCfg()
 			cfg.AuthProxy.HeaderName = "Proxy-Header"
+			cfg.AuthProxy.Whitelist = "127.0.0.1"
 
-			c, _ := ProvideProxy(cfg, nil, tracing.InitializeTracerForTest(), nil)
+			c, err := ProvideProxy(cfg, nil, tracing.InitializeTracerForTest(), nil)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expectedOK, c.Test(context.Background(), tt.req))
 		})
 	}
@@ -307,6 +314,7 @@ func TestProxy_Hook(t *testing.T) {
 	cfg.AuthProxy.Headers = map[string]string{
 		proxyFieldRole: "X-Role",
 	}
+	cfg.AuthProxy.Whitelist = "127.0.0.1"
 	cache := &fakeCache{data: make(map[string][]byte)}
 
 	// withRole creates a test case for a user with a specific role.
