@@ -2,6 +2,7 @@ package webhooks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,24 +11,34 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
 	"k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/registry/rest"
 	"k8s.io/kube-openapi/pkg/spec3"
 
 	provisioning "github.com/grafana/grafana/apps/provisioning/pkg/apis/provisioning/v0alpha1"
+	"github.com/grafana/grafana/apps/provisioning/pkg/repository"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/cmd/grafana-cli/logger"
 	provisioningapis "github.com/grafana/grafana/pkg/registry/apis/provisioning"
+	"github.com/grafana/grafana/pkg/registry/apis/provisioning/webhooks/pullrequest"
 	"github.com/grafana/grafana/pkg/storage/unified/resource"
 	"github.com/grafana/grafana/pkg/storage/unified/resourcepb"
 )
 
-type renderConnector struct {
-	unified resource.ResourceClient
-	core    *provisioningapis.APIBuilder
+// renderCore is the subset of the provisioning APIBuilder the render connector depends on.
+type renderCore interface {
+	GetGroupVersion() schema.GroupVersion
+	GetRepository(ctx context.Context, name string) (repository.Repository, error)
 }
 
-func NewRenderConnector(unified resource.ResourceClient, core *provisioningapis.APIBuilder) *renderConnector {
+type renderConnector struct {
+	unified resource.ResourceClient
+	core    renderCore
+}
+
+func NewRenderConnector(unified resource.ResourceClient, core renderCore) *renderConnector {
 	return &renderConnector{
 		unified: unified,
 		core:    core,
@@ -58,6 +69,9 @@ func (*renderConnector) NewConnectOptions() (runtime.Object, bool, string) {
 
 func (c *renderConnector) Authorize(_ context.Context, a authorizer.Attributes) (decision authorizer.Decision, reason string, err error) {
 	if a.GetResource() == provisioning.RepositoryResourceInfo.GetName() && a.GetSubresource() == "render" {
+		// The git provider fetches preview images without a Grafana identity, so the
+		// request is authorized by the signed URL, which Connect verifies before
+		// reading anything.
 		return authorizer.DecisionAllow, "", nil
 	}
 
@@ -133,6 +147,12 @@ func (c *renderConnector) Connect(
 			return
 		}
 
+		if err := c.verifySignature(ctx, r, namespace, name, blobID); err != nil {
+			logger.Debug("rejected preview image request", "namespace", namespace, "repository", name, "err", err)
+			responder.Error(apierrors.NewForbidden(provisioning.RepositoryResourceInfo.GroupResource(), name, errors.New("invalid or expired preview signature")))
+			return
+		}
+
 		rsp, err := c.unified.GetBlob(ctx, &resourcepb.GetBlobRequest{
 			Resource: &resourcepb.ResourceKey{
 				Namespace: namespace,
@@ -170,6 +190,37 @@ func (c *renderConnector) Connect(
 			})
 		}
 	}), nil
+}
+
+// verifySignature checks that the request carries an unexpired signature that
+// the repository's key issued for exactly this namespace, repository, and blob.
+func (c *renderConnector) verifySignature(ctx context.Context, r *http.Request, namespace, name, blobID string) error {
+	// Parse and time-check first so unsigned or stale requests never load the repository.
+	sig, err := pullrequest.ParsePreviewSignature(r.URL.Query(), time.Now())
+	if err != nil {
+		return err
+	}
+
+	repoCtx, _, err := identity.WithProvisioningIdentity(ctx, namespace)
+	if err != nil {
+		return err
+	}
+	repo, err := c.core.GetRepository(repoCtx, name)
+	if err != nil {
+		return err
+	}
+	signer, ok := repo.(repository.PreviewSigningRepository)
+	if !ok {
+		return errors.New("repository cannot sign preview URLs")
+	}
+	key, err := signer.PreviewSigningKey()
+	if err != nil {
+		return err
+	}
+	if !sig.Verify(key, namespace, name, blobID) {
+		return pullrequest.ErrPreviewSignatureInvalid
+	}
+	return nil
 }
 
 var (

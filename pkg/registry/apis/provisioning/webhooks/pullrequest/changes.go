@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -143,6 +144,18 @@ func (e *evaluator) Evaluate(ctx context.Context, repo repository.Reader, opts p
 	screenshotBaseURL := e.urls.Public(ctx, cfg.Namespace)
 
 	logger := logging.FromContext(ctx)
+
+	// Preview images are only served with a valid signature, so do not render
+	// images that could never be shown.
+	var previewKey []byte
+	if shouldRender {
+		previewKey, err = previewSigningKey(repo)
+		if err != nil {
+			logger.Warn("skipping dashboard preview images", "reason", err)
+			shouldRender = false
+		}
+	}
+
 	progress.SetTotal(ctx, len(changes))
 
 	for _, change := range changes {
@@ -154,12 +167,27 @@ func (e *evaluator) Evaluate(ctx context.Context, repo repository.Reader, opts p
 
 		progress.SetMessage(ctx, fmt.Sprintf("process %s", change.Path))
 		logger.With("action", change.Action).With("path", change.Path)
-		fileInfo := e.evaluateFile(ctx, repo, info.GrafanaBaseURL, screenshotBaseURL, orgID, change, opts, parser, shouldRender)
+		fileInfo := e.evaluateFile(ctx, repo, info.GrafanaBaseURL, screenshotBaseURL, orgID, change, opts, parser, shouldRender, previewKey)
 		info.Changes = append(info.Changes, fileInfo)
 		progress.RecordDryRun(ctx, previewResult(fileInfo))
 	}
 
 	return info, nil
+}
+
+func previewSigningKey(repo repository.Reader) ([]byte, error) {
+	signer, ok := repo.(repository.PreviewSigningRepository)
+	if !ok {
+		return nil, fmt.Errorf("repository cannot sign preview URLs")
+	}
+	key, err := signer.PreviewSigningKey()
+	if err != nil {
+		return nil, err
+	}
+	if len(key) == 0 {
+		return nil, fmt.Errorf("empty preview signing key")
+	}
+	return key, nil
 }
 
 func previewResult(info fileChangeInfo) jobs.JobResourceResult {
@@ -258,7 +286,7 @@ func orgIDForLinks(namespace string) int64 {
 	return ns.OrgID
 }
 
-func (e *evaluator) evaluateFile(ctx context.Context, repo repository.Reader, baseURL string, screenshotBaseURL string, orgID int64, change repository.VersionedFileChange, opts provisioning.PullRequestJobOptions, parser resources.Parser, shouldRender bool) fileChangeInfo {
+func (e *evaluator) evaluateFile(ctx context.Context, repo repository.Reader, baseURL string, screenshotBaseURL string, orgID int64, change repository.VersionedFileChange, opts provisioning.PullRequestJobOptions, parser resources.Parser, shouldRender bool, previewKey []byte) fileChangeInfo {
 	if change.Action == repository.FileActionDeleted {
 		return e.evaluateDeletedFile(ctx, repo, baseURL, orgID, change, parser)
 	}
@@ -345,14 +373,14 @@ func (e *evaluator) evaluateFile(ctx context.Context, repo repository.Reader, ba
 		info.PreviewURL += "?" + query.Encode()
 		if shouldRender {
 			if info.GrafanaURL != "" {
-				info.GrafanaScreenshotURL, err = renderScreenshotFromGrafanaURL(ctx, screenshotBaseURL, e.render, info.Parsed.Repo, info.GrafanaURL, e.metrics)
+				info.GrafanaScreenshotURL, err = renderScreenshotFromGrafanaURL(ctx, screenshotBaseURL, e.render, info.Parsed.Repo, previewKey, info.GrafanaURL, e.metrics)
 				if err != nil {
 					info.Error = err.Error()
 				}
 			}
 
 			if info.PreviewURL != "" {
-				info.PreviewScreenshotURL, err = renderScreenshotFromGrafanaURL(ctx, screenshotBaseURL, e.render, info.Parsed.Repo, info.PreviewURL, e.metrics)
+				info.PreviewScreenshotURL, err = renderScreenshotFromGrafanaURL(ctx, screenshotBaseURL, e.render, info.Parsed.Repo, previewKey, info.PreviewURL, e.metrics)
 				if err != nil {
 					info.Error = err.Error()
 				}
@@ -417,6 +445,7 @@ func renderScreenshotFromGrafanaURL(ctx context.Context,
 	baseURL string,
 	renderer ScreenshotRenderer,
 	repo provisioning.ResourceRepositoryInfo,
+	previewKey []byte,
 	grafanaURL string,
 	metrics screenshotMetrics,
 ) (string, error) {
@@ -449,8 +478,14 @@ func renderScreenshotFromGrafanaURL(ctx context.Context,
 		logger.Warn("invalid base", "url", baseURL, "err", err)
 		return "", err
 	}
+	if len(previewKey) == 0 {
+		return "", fmt.Errorf("missing preview signing key")
+	}
+	signed := base.JoinPath(snap)
+	blobID := path.Base(snap)
+	signed.RawQuery = SignPreviewQuery(previewKey, repo.Namespace, repo.Name, blobID, time.Now().Add(PreviewURLTTL)).Encode()
 	outcome = utils.SuccessOutcome
-	return base.JoinPath(snap).String(), nil
+	return signed.String(), nil
 }
 
 // hasRemovedMetadata returns true if the original object (from the file)
