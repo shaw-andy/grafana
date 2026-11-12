@@ -152,7 +152,7 @@ func ParseTracingConfig(cfg *setting.Cfg) (*TracingConfig, error) {
 		tc.enabled = otlpExporter
 	}
 	tc.Propagation = section.Key("propagation").MustString("")
-	tc.Insecure = section.Key("insecure").MustBool(true)
+	tc.Insecure = section.Key("insecure").MustBool(false)
 	if tc.enabled == otlpExporter {
 		return tc, nil
 	}

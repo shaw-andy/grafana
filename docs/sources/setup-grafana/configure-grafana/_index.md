@@ -2527,8 +2527,12 @@ The default value is `w3c`.
 
 #### `insecure`
 
-Toggles the insecure communication setting, defaults to `true`.
-When set to `false`, the OTLP client will use TLS credentials with the default system cert pool for communication.
+Toggles the insecure communication setting, defaults to `false`.
+When `false`, the OTLP client uses TLS credentials with the default system cert pool for communication.
+
+Set to `true` only for a collector reached over a trusted link, such as a local agent. Grafana then sends spans, including request URLs and query strings, in plaintext.
+
+Backend plugins export spans only in plaintext, so Grafana forwards the collector address to them only when `insecure` is `true`.
 
 <hr>
 
