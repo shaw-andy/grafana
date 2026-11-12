@@ -1,6 +1,5 @@
 import { type ReactElement, useEffect, useMemo, useState } from 'react';
 
-import { parseFlags } from '@grafana/data';
 import { selectors } from '@grafana/e2e-selectors';
 import { t } from '@grafana/i18n';
 import {
@@ -23,20 +22,11 @@ import { useUserDefinedVariables } from '../../utils/variables';
 import { getLowerTranslatedObjectType } from '../object';
 
 import { ConditionalRenderingConditionWrapper } from './ConditionalRenderingConditionWrapper';
+import { LinearRegExp } from './linearRegExp';
 import { type ConditionalRenderingConditionsSerializerRegistryItem } from './serializers';
 import { checkGroup, getObject, getObjectType } from './utils';
 
 type VariableConditionValueOperator = '=' | '!=' | '=~' | '!~';
-
-/**
- * Builds a RegExp from a user-entered value, honouring RE2-style inline flags
- * such as `(?i)` that JavaScript's RegExp does not support natively (the same
- * syntax accepted elsewhere in Grafana). Throws on genuinely invalid patterns.
- */
-function buildValueRegExp(value: string): RegExp {
-  const { cleaned, flags } = parseFlags(value);
-  return new RegExp(cleaned, flags);
-}
 
 interface ConditionalRenderingVariableState extends SceneObjectState {
   variable: string;
@@ -132,10 +122,12 @@ export class ConditionalRenderingVariable extends SceneObjectBase<ConditionalRen
         : variableValue === comparisonValue || isAllSelected;
     } else {
       try {
-        const regex = buildValueRegExp(this.state.value);
-        hit = Array.isArray(variableValue)
-          ? variableValue.some((currentVariableValue) => regex.test(currentVariableValue.toString()))
-          : regex.test(variableValue.toString());
+        const regex = LinearRegExp.compile(this.state.value);
+        hit = regex.testAny(
+          Array.isArray(variableValue)
+            ? variableValue.map((currentVariableValue) => currentVariableValue.toString())
+            : [variableValue.toString()]
+        );
       } catch (err) {
         return true;
       }
@@ -268,7 +260,7 @@ function ConditionalRenderingVariableRenderer({ model }: SceneComponentProps<Con
   const valueError = useMemo(() => {
     if (operator === '=~' || operator === '!~') {
       try {
-        buildValueRegExp(newValue);
+        LinearRegExp.compile(newValue);
         return '';
       } catch (err) {
         return t('dashboard.conditional-rendering.conditions.variable.error.invalid-regex', 'Invalid regex');
