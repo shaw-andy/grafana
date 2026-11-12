@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"maps"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/components/simplejson"
 	"github.com/grafana/grafana/pkg/expr"
+	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/annotations"
 	"github.com/grafana/grafana/pkg/services/dashboards"
 	"github.com/grafana/grafana/pkg/services/publicdashboards/internal/models"
@@ -39,7 +41,9 @@ func (pd *PublicDashboardServiceImpl) FindAnnotations(ctx context.Context, reqDT
 	from, to := getAnnotationsTimeRange(dash, reqDTO, pub.TimeSelectionEnabled)
 
 	// We don't have a signed in user for public dashboards. We are using Grafana's Identity to query the annotations.
-	svcCtx, svcIdent := identity.WithServiceIdentity(ctx, dash.OrgID)
+	// The service identity can read every dashboard in the org, so every query must stay pinned to the published
+	// dashboard: tag queries only filter that dashboard's annotations and organization annotations are never read.
+	svcCtx, svcIdent := identity.WithServiceIdentity(ctx, dash.OrgID, withDashboardAnnotationsReadOnly())
 	uniqueEvents := make(map[int64]models.AnnotationEvent, 0)
 	for _, anno := range annoDto.Annotations.List {
 		// skip annotations that are not enabled or are not a grafana datasource
@@ -59,8 +63,6 @@ func (pd *PublicDashboardServiceImpl) FindAnnotations(ctx context.Context, reqDT
 			annoQuery.Limit = anno.Target.Limit
 			annoQuery.MatchAny = anno.Target.MatchAny
 			if anno.Target.Type == "tags" {
-				annoQuery.DashboardID = 0 // nolint: staticcheck
-				annoQuery.DashboardUID = ""
 				annoQuery.Tags = anno.Target.Tags
 			}
 		}
@@ -107,6 +109,20 @@ func (pd *PublicDashboardServiceImpl) FindAnnotations(ctx context.Context, reqDT
 	}
 
 	return results, nil
+}
+
+// withDashboardAnnotationsReadOnly limits the service identity's annotations:read permission to dashboard
+// annotations, so the annotations authorizer never grants organization annotations to a public dashboard.
+func withDashboardAnnotationsReadOnly() identity.IdentityOpts {
+	return func(r *identity.StaticRequester) {
+		// The permissions map is shared by every service identity, so it must be copied before it is changed.
+		permissions := maps.Clone(r.Permissions[r.OrgID])
+		if permissions == nil {
+			permissions = map[string][]string{}
+		}
+		permissions[accesscontrol.ActionAnnotationsRead] = []string{accesscontrol.ScopeAnnotationsTypeDashboard}
+		r.Permissions = map[int64]map[string][]string{r.OrgID: permissions}
+	}
 }
 
 // GetMetricRequest returns a metric request for the given panel and query
