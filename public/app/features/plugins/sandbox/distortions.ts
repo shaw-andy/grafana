@@ -77,7 +77,8 @@ export function getGeneralSandboxDistortionMap() {
     distortAlert(generalDistortionMap);
     distortAppend(generalDistortionMap);
     distortInsert(generalDistortionMap);
-    distortInnerHTML(generalDistortionMap);
+    distortHTMLSinks(generalDistortionMap);
+    distortSetAttribute(generalDistortionMap);
     distortCreateElement(generalDistortionMap);
     distortWorkers(generalDistortionMap);
     distortDocument(generalDistortionMap);
@@ -182,58 +183,199 @@ function distortAlert(distortions: DistortionMap) {
   }
 }
 
-function distortInnerHTML(distortions: DistortionMap) {
-  function getInnerHTMLDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
-    const pluginId = meta.id;
-    return function innerHTMLDistortion(this: HTMLElement, ...args: string[]) {
-      for (let i = 0; i < args.length; i++) {
-        const arg = args[i];
-        // NOTE: DOMPurify anti-tamper mechanism requires us to clone the string
-        // calling any method whatsoever on a string will cause the string to be tampered
-        // and DOMPurify will return empty strings
-        const lowerCase = String(arg || '').toLowerCase();
-        for (const forbiddenElement of forbiddenElements) {
-          if (lowerCase.includes('<' + forbiddenElement)) {
-            logWarning(`Plugin ${pluginId} tried to set ${forbiddenElement} in innerHTML`, {
+// Any markup a sandboxed plugin writes into the real document must be sanitized,
+// otherwise the browser executes inline scripts and event-handler attributes in
+// the host page, outside the membrane. DOMPurify strips <script>, <iframe>,
+// `on*` handlers and `javascript:` URLs while keeping benign markup intact.
+// NOTE: DOMPurify's anti-tamper mechanism requires the value to be passed in
+// untouched. Calling any method on a membrane proxy string tampers with it and
+// makes DOMPurify return an empty string, so the raw argument is handed over
+// directly instead of being normalized first.
+function sanitizeHTMLArgument(value: unknown): unknown {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  return DOMPurify.sanitize(value);
+}
+
+function isHTMLMimeType(type: unknown): boolean {
+  if (type === undefined || type === null) {
+    return true;
+  }
+  return String(type).toLowerCase().includes('html');
+}
+
+// Distorts every sink that parses a string as HTML and attaches it to the real
+// document. Each sink receives the markup on a different argument, so the index
+// is passed in explicitly.
+function distortHTMLSinks(distortions: DistortionMap) {
+  function getHTMLSinkDistortion(htmlArgIndex: number, guardByMimeType = false) {
+    return function htmlSinkDistortionFactory(originalMethod: unknown, meta: SandboxPluginMeta) {
+      const pluginId = meta.id;
+      return function htmlSinkDistortion(this: unknown, ...args: unknown[]) {
+        if (args.length > htmlArgIndex && (!guardByMimeType || isHTMLMimeType(args[htmlArgIndex + 1]))) {
+          const sanitized = sanitizeHTMLArgument(args[htmlArgIndex]);
+          if (sanitized !== args[htmlArgIndex]) {
+            logWarning(`Plugin ${pluginId} wrote markup into the host page that was sanitized`, {
               pluginId,
-              attrOrMethod: 'innerHTML',
-              param: forbiddenElement,
+              attrOrMethod: 'htmlSink',
               entity: 'HTMLElement',
             });
-
-            throw new Error('<' + forbiddenElement + '> is not allowed in sandboxed plugins');
           }
+          args[htmlArgIndex] = sanitized;
         }
-        // prevent some dom operations that use direct callbacks
-        if (lowerCase.match(/onerror|onload|onsuccess|onbeforeunload/)) {
-          logWarning(`Plugin ${pluginId} tried to set forbidden attribute in innerHTML`, {
-            pluginId,
-            attrOrMethod: 'innerHTML',
-            param: arg,
-            entity: 'HTMLElement',
-          });
-          args[i] = DOMPurify.sanitize(args[i]);
+        if (isFunction(originalMethod)) {
+          return originalMethod.apply(this, args);
         }
-      }
+      };
+    };
+  }
 
+  const setterSinks: Array<[PropertyDescriptor | undefined, number]> = [
+    [Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML'), 0],
+    [Object.getOwnPropertyDescriptor(Element.prototype, 'outerHTML'), 0],
+  ];
+  if (typeof ShadowRoot !== 'undefined') {
+    setterSinks.push([Object.getOwnPropertyDescriptor(ShadowRoot.prototype, 'innerHTML'), 0]);
+  }
+  for (const [descriptor, htmlArgIndex] of setterSinks) {
+    if (descriptor?.set) {
+      distortions.set(descriptor.set, getHTMLSinkDistortion(htmlArgIndex));
+    }
+  }
+
+  const methodSinks: Array<[PropertyDescriptor | undefined, number, boolean]> = [
+    [Object.getOwnPropertyDescriptor(Element.prototype, 'insertAdjacentHTML'), 1, false],
+    [Object.getOwnPropertyDescriptor(Element.prototype, 'setHTMLUnsafe'), 0, false],
+    [Object.getOwnPropertyDescriptor(Range.prototype, 'createContextualFragment'), 0, false],
+    [Object.getOwnPropertyDescriptor(DOMParser.prototype, 'parseFromString'), 0, true],
+  ];
+  if (typeof ShadowRoot !== 'undefined') {
+    methodSinks.push([Object.getOwnPropertyDescriptor(ShadowRoot.prototype, 'setHTMLUnsafe'), 0, false]);
+  }
+  // Document.parseHTMLUnsafe is a static method, so its descriptor lives on the
+  // Document constructor rather than the prototype.
+  methodSinks.push([Object.getOwnPropertyDescriptor(Document, 'parseHTMLUnsafe'), 0, false]);
+
+  for (const [descriptor, htmlArgIndex, guardByMimeType] of methodSinks) {
+    if (descriptor?.value) {
+      distortions.set(descriptor.value, getHTMLSinkDistortion(htmlArgIndex, guardByMimeType));
+    }
+  }
+
+  // document.execCommand('insertHTML', showUI, markup) parses its third argument
+  // as HTML in the host document, so it needs the same sanitization.
+  function getExecCommandDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
+    const pluginId = meta.id;
+    return function execCommandDistortion(this: Document, ...args: unknown[]) {
+      const command = String(args[0] ?? '').toLowerCase();
+      if (command === 'inserthtml' && args.length > 2) {
+        const sanitized = sanitizeHTMLArgument(args[2]);
+        if (sanitized !== args[2]) {
+          logWarning(`Plugin ${pluginId} wrote markup into the host page that was sanitized`, {
+            pluginId,
+            attrOrMethod: 'execCommand',
+            entity: 'document',
+          });
+        }
+        args[2] = sanitized;
+      }
       if (isFunction(originalMethod)) {
         return originalMethod.apply(this, args);
       }
     };
   }
-  const descriptors = [
-    Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML'),
-    Object.getOwnPropertyDescriptor(Element.prototype, 'outerHTML'),
-    Object.getOwnPropertyDescriptor(Element.prototype, 'insertAdjacentHTML'),
-    Object.getOwnPropertyDescriptor(DOMParser.prototype, 'parseFromString'),
-  ];
+  const execCommandDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'execCommand');
+  if (execCommandDescriptor?.value) {
+    distortions.set(execCommandDescriptor.value, getExecCommandDistortion);
+  }
+}
 
-  for (const descriptor of descriptors) {
-    if (descriptor?.set) {
-      distortions.set(descriptor.set, getInnerHTMLDistortion);
-    }
+function isForbiddenAttribute(name: unknown, value: unknown): boolean {
+  const attributeName = String(name ?? '').toLowerCase();
+  // Event-handler attributes (onerror, onload, onpointerenter, ...) run script
+  // in the host page as soon as the element is attached.
+  if (attributeName.startsWith('on')) {
+    return true;
+  }
+  // Strip whitespace and control characters so obfuscated URLs such as
+  // "java\tscript:" are still recognized.
+  const attributeValue = String(value ?? '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u0020]+/g, '')
+    .toLowerCase();
+  return attributeValue.startsWith('javascript:') || attributeValue.startsWith('vbscript:');
+}
+
+// setAttribute and its variants are not covered by property distortions, so a
+// plugin could otherwise install an `onerror` handler or a `javascript:` URL on
+// a real host element and have the browser execute it outside the membrane.
+function distortSetAttribute(distortions: DistortionMap) {
+  function reject(meta: SandboxPluginMeta, attrOrMethod: string, name: unknown) {
+    logWarning(`Plugin ${meta.id} tried to set a forbidden attribute`, {
+      pluginId: meta.id,
+      attrOrMethod,
+      param: String(name ?? ''),
+      entity: 'HTMLElement',
+    });
+  }
+
+  function getSetAttributeDistortion(nameIndex: number, valueIndex: number) {
+    return function setAttributeDistortionFactory(originalMethod: unknown, meta: SandboxPluginMeta) {
+      return function setAttributeDistortion(this: Element, ...args: unknown[]) {
+        if (isForbiddenAttribute(args[nameIndex], args[valueIndex])) {
+          reject(meta, 'setAttribute', args[nameIndex]);
+          return undefined;
+        }
+        if (isFunction(originalMethod)) {
+          return originalMethod.apply(this, args);
+        }
+        return undefined;
+      };
+    };
+  }
+
+  function getSetAttributeNodeDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
+    return function setAttributeNodeDistortion(this: unknown, attr?: Attr) {
+      if (attr && isForbiddenAttribute(attr.name, attr.value)) {
+        reject(meta, 'setAttributeNode', attr.name);
+        return undefined;
+      }
+      if (isFunction(originalMethod)) {
+        return originalMethod.call(this, attr);
+      }
+      return undefined;
+    };
+  }
+
+  const byNameValue: Array<[string, number, number]> = [
+    // setAttribute(name, value)
+    ['setAttribute', 0, 1],
+    // setAttributeNS(namespace, name, value)
+    ['setAttributeNS', 1, 2],
+  ];
+  for (const [method, nameIndex, valueIndex] of byNameValue) {
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, method);
     if (descriptor?.value) {
-      distortions.set(descriptor.value, getInnerHTMLDistortion);
+      distortions.set(descriptor.value, getSetAttributeDistortion(nameIndex, valueIndex));
+    }
+  }
+
+  for (const method of ['setAttributeNode', 'setAttributeNodeNS']) {
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, method);
+    if (descriptor?.value) {
+      distortions.set(descriptor.value, getSetAttributeNodeDistortion);
+    }
+  }
+
+  // element.attributes.setNamedItem(attr) is another way to install an attribute
+  // node, bypassing setAttributeNode.
+  if (typeof NamedNodeMap !== 'undefined') {
+    for (const method of ['setNamedItem', 'setNamedItemNS']) {
+      const descriptor = Object.getOwnPropertyDescriptor(NamedNodeMap.prototype, method);
+      if (descriptor?.value) {
+        distortions.set(descriptor.value, getSetAttributeNodeDistortion);
+      }
     }
   }
 }
@@ -242,7 +384,7 @@ function distortCreateElement(distortions: DistortionMap) {
   function getCreateElementDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
     const pluginId = meta.id;
     return function createElementDistortion(this: HTMLElement, arg?: string, options?: unknown) {
-      if (arg && forbiddenElements.includes(arg)) {
+      if (arg && forbiddenElements.includes(String(arg).toLowerCase())) {
         logWarning(`Plugin ${pluginId} tried to create ${arg}`, {
           pluginId,
           attrOrMethod: 'createElement',
@@ -256,25 +398,79 @@ function distortCreateElement(distortions: DistortionMap) {
       }
     };
   }
+  // createElementNS lets a plugin create the same forbidden elements (e.g. an
+  // iframe in the XHTML namespace) while bypassing the createElement check.
+  function getCreateElementNSDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
+    const pluginId = meta.id;
+    return function createElementNSDistortion(this: HTMLElement, ...args: unknown[]) {
+      const qualifiedName = args[1];
+      if (qualifiedName && forbiddenElements.includes(String(qualifiedName).toLowerCase())) {
+        logWarning(`Plugin ${pluginId} tried to create ${String(qualifiedName)}`, {
+          pluginId,
+          attrOrMethod: 'createElementNS',
+          param: String(qualifiedName),
+          entity: 'document',
+        });
+        return document.createDocumentFragment();
+      }
+      if (isFunction(originalMethod)) {
+        return originalMethod.apply(this, args);
+      }
+    };
+  }
   const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'createElement');
   if (descriptor?.value) {
     distortions.set(descriptor.value, getCreateElementDistortion);
   }
+  const descriptorNS = Object.getOwnPropertyDescriptor(Document.prototype, 'createElementNS');
+  if (descriptorNS?.value) {
+    distortions.set(descriptorNS.value, getCreateElementNSDistortion);
+  }
+}
+
+// A plugin loads webpack chunks by attaching <script> elements to the document.
+// We never let those run in the host page: a same-domain/CDN src is re-fetched
+// and evaluated inside the sandbox instead, and anything else (e.g. an inline
+// script) is dropped. This mirrors the <script> handling in appendChild so that
+// every insertion API neutralizes scripts the same way.
+function routeScriptNodeThroughSandbox(node: Node, sandboxEnv?: SandboxEnvironment): void {
+  if (sandboxEnv && node instanceof HTMLScriptElement) {
+    loadScriptIntoSandbox(node.src, sandboxEnv)
+      .then(() => {
+        node.onload?.call(node, new Event('load'));
+      })
+      .catch((err) => {
+        node.onerror?.call(node, new ErrorEvent('error', { error: err }));
+      });
+  }
+}
+
+// Returns true when the node must not be inserted into the host document as-is
+// (forbidden elements are dropped, scripts are routed through the sandbox).
+function shouldBlockHostInsertion(node: Node, meta: SandboxPluginMeta, sandboxEnv?: SandboxEnvironment): boolean {
+  const nodeType = node?.nodeName?.toLowerCase?.() || '';
+  if (nodeType === 'script') {
+    routeScriptNodeThroughSandbox(node, sandboxEnv);
+    return true;
+  }
+  if (forbiddenElements.includes(nodeType)) {
+    logWarning(`Plugin ${meta.id} tried to insert ${nodeType}`, {
+      pluginId: meta.id,
+      attrOrMethod: 'insert',
+      param: nodeType,
+      entity: 'HTMLElement',
+    });
+    return true;
+  }
+  return false;
 }
 
 function distortInsert(distortions: DistortionMap) {
-  function getInsertDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
-    const pluginId = meta.id;
-    return function insertChildDistortion(this: HTMLElement, node?: Node, ref?: Node) {
-      const nodeType = node?.nodeName?.toLowerCase() || '';
-
-      if (node && forbiddenElements.includes(nodeType)) {
-        logWarning(`Plugin ${pluginId} tried to insert ${nodeType}`, {
-          pluginId,
-          attrOrMethod: 'insertChild',
-          param: nodeType,
-          entity: 'HTMLElement',
-        });
+  // Node.insertBefore(node, ref) and Node.replaceChild(node, old): the new node
+  // is the first argument.
+  function getInsertDistortion(originalMethod: unknown, meta: SandboxPluginMeta, sandboxEnv?: SandboxEnvironment) {
+    return function insertChildDistortion(this: unknown, node?: Node, ref?: Node) {
+      if (node && shouldBlockHostInsertion(node, meta, sandboxEnv)) {
         return document.createDocumentFragment();
       }
       if (isFunction(originalMethod)) {
@@ -283,18 +479,13 @@ function distortInsert(distortions: DistortionMap) {
     };
   }
 
-  function getinsertAdjacentElementDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
-    const pluginId = meta.id;
-    return function insertAdjacentElementDistortion(this: HTMLElement, position?: string, node?: Node) {
-      const nodeType = node?.nodeName?.toLowerCase() || '';
-      if (node && forbiddenElements.includes(nodeType)) {
-        logWarning(`Plugin ${pluginId} tried to insert ${nodeType}`, {
-          pluginId,
-          attrOrMethod: 'insertAdjacentElement',
-          param: nodeType,
-          entity: 'HTMLElement',
-        });
-
+  function getinsertAdjacentElementDistortion(
+    originalMethod: unknown,
+    meta: SandboxPluginMeta,
+    sandboxEnv?: SandboxEnvironment
+  ) {
+    return function insertAdjacentElementDistortion(this: Element, position?: string, node?: Node) {
+      if (node && shouldBlockHostInsertion(node, meta, sandboxEnv)) {
         return document.createDocumentFragment();
       }
       if (isFunction(originalMethod)) {
@@ -306,38 +497,34 @@ function distortInsert(distortions: DistortionMap) {
   const descriptors = [
     Object.getOwnPropertyDescriptor(Node.prototype, 'insertBefore'),
     Object.getOwnPropertyDescriptor(Node.prototype, 'replaceChild'),
+    // Range.insertNode(node) attaches a node to the document and would otherwise
+    // run a <script> in the host page.
+    Object.getOwnPropertyDescriptor(Range.prototype, 'insertNode'),
   ];
 
   for (const descriptor of descriptors) {
     if (descriptor?.value) {
-      distortions.set(descriptor.set, getInsertDistortion);
+      distortions.set(descriptor.value, getInsertDistortion);
     }
   }
 
   const descriptorAdjacent = Object.getOwnPropertyDescriptor(Element.prototype, 'insertAdjacentElement');
   if (descriptorAdjacent?.value) {
-    distortions.set(descriptorAdjacent.set, getinsertAdjacentElementDistortion);
+    distortions.set(descriptorAdjacent.value, getinsertAdjacentElementDistortion);
   }
 }
 
 // set distortions to append elements to the document
 function distortAppend(distortions: DistortionMap) {
   // append accepts an array of nodes to append https://developer.mozilla.org/en-US/docs/Web/API/Node/append
-  function getAppendDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
-    const pluginId = meta.id;
-    return function appendDistortion(this: HTMLElement, ...args: Node[]) {
-      let acceptedNodes = args;
-      const filteredAcceptedNodes = args?.filter((node) => !forbiddenElements.includes(node.nodeName.toLowerCase()));
-      acceptedNodes = filteredAcceptedNodes;
-
-      if (acceptedNodes.length !== filteredAcceptedNodes.length) {
-        logWarning(`Plugin ${pluginId} tried to append fobiddenElements`, {
-          pluginId,
-          attrOrMethod: 'append',
-          param: args?.filter((node) => forbiddenElements.includes(node.nodeName.toLowerCase()))?.join(',') || '',
-          entity: 'HTMLElement',
-        });
-      }
+  function getAppendDistortion(originalMethod: unknown, meta: SandboxPluginMeta, sandboxEnv?: SandboxEnvironment) {
+    return function appendDistortion(this: HTMLElement, ...args: Array<Node | string>) {
+      // Strings are inserted as text nodes, never parsed as HTML, so they are
+      // safe to forward. Element nodes go through the shared insertion guard that
+      // drops forbidden elements and routes scripts into the sandbox.
+      const acceptedNodes = args.filter(
+        (node): boolean => typeof node === 'string' || !shouldBlockHostInsertion(node, meta, sandboxEnv)
+      );
 
       if (isFunction(originalMethod)) {
         originalMethod.apply(this, acceptedNodes);
@@ -349,31 +536,11 @@ function distortAppend(distortions: DistortionMap) {
 
   // appendChild accepts a single node to add https://developer.mozilla.org/en-US/docs/Web/API/Node/appendChild
   function getAppendChildDistortion(originalMethod: unknown, meta: SandboxPluginMeta, sandboxEnv?: SandboxEnvironment) {
-    const pluginId = meta.id;
     return function appendChildDistortion(this: HTMLElement, arg?: Node) {
-      const nodeType = arg?.nodeName?.toLowerCase() || '';
-      if (arg && forbiddenElements.includes(nodeType)) {
-        logWarning(`Plugin ${pluginId} tried to append ${nodeType}`, {
-          pluginId,
-          attrOrMethod: 'appendChild',
-          param: nodeType,
-          entity: 'HTMLElement',
-        });
-
+      // Forbidden elements are dropped and scripts are re-loaded inside the
+      // sandbox (so webpack chunks keep working) rather than running in the host.
+      if (arg && shouldBlockHostInsertion(arg, meta, sandboxEnv)) {
         return document.createDocumentFragment();
-      }
-      // if the node is a script, load it into the sandbox
-      // this allows webpack chunks to be loaded into the sandbox
-      // loadScriptIntoSandbox has restrictions on what scripts can be loaded
-      if (sandboxEnv && arg && nodeType === 'script' && arg instanceof HTMLScriptElement) {
-        loadScriptIntoSandbox(arg.src, sandboxEnv)
-          .then(() => {
-            arg.onload?.call(arg, new Event('load'));
-          })
-          .catch((err) => {
-            arg.onerror?.call(arg, new ErrorEvent('error', { error: err }));
-          });
-        return undefined;
       }
       if (isFunction(originalMethod)) {
         return originalMethod.call(this, arg);
@@ -386,8 +553,11 @@ function distortAppend(distortions: DistortionMap) {
     Object.getOwnPropertyDescriptor(Element.prototype, 'prepend'),
     Object.getOwnPropertyDescriptor(Element.prototype, 'after'),
     Object.getOwnPropertyDescriptor(Element.prototype, 'before'),
+    Object.getOwnPropertyDescriptor(Element.prototype, 'replaceWith'),
+    Object.getOwnPropertyDescriptor(Element.prototype, 'replaceChildren'),
     Object.getOwnPropertyDescriptor(Document.prototype, 'append'),
     Object.getOwnPropertyDescriptor(Document.prototype, 'prepend'),
+    Object.getOwnPropertyDescriptor(Document.prototype, 'replaceChildren'),
   ];
 
   for (const descriptor of descriptors) {
@@ -436,7 +606,9 @@ function distortDocument(distortions: DistortionMap) {
     });
   }
 
-  const documentForbiddenMethods = ['write'];
+  // document.write/writeln parse their argument as HTML in the host document,
+  // so they are blocked outright the same way.
+  const documentForbiddenMethods = ['write', 'writeln'];
   for (const method of documentForbiddenMethods) {
     const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, method);
     if (descriptor?.set) {
