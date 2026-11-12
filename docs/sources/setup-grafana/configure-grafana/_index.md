@@ -775,7 +775,15 @@ Set to `true` to disable [brute force login protection by username](https://chea
 
 #### `disable_ip_address_login_protection`
 
-Set to `true` to disable [brute force login protection by IP address](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html#account-lockout). Default is `true`. Anyone from the IP address will be unable to login for 5 minutes if all login attempts are spent within a 5 minute window.
+Set to `true` to disable [brute force login protection by IP address](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html#account-lockout). Default is `false`. Anyone from the IP address will be unable to login for 5 minutes if all login attempts are spent within a 5 minute window. IPv6 clients are counted by their `/64` prefix.
+
+#### `ip_address_login_protection_trusted_proxies`
+
+IP addresses or CIDR ranges, separated by commas or spaces, of reverse proxies in front of Grafana. Default is `127.0.0.0/8, ::1/128`.
+
+IP address login protection counts attempts against the address of the connecting peer. When the peer is in this list, Grafana uses the rightmost `X-Forwarded-For` address that isn't itself a trusted proxy, or `X-Real-IP` if `X-Forwarded-For` isn't set. Trusted proxies must append to `X-Forwarded-For` or overwrite `X-Real-IP`.
+
+If Grafana runs behind a reverse proxy on another host, add that proxy's address. Otherwise, all logins through it share one attempt limit. Set to an empty value to never use these headers.
 
 #### `cookie_secure`
 
