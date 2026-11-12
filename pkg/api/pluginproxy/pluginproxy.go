@@ -200,7 +200,7 @@ func (proxy PluginProxy) director(req *http.Request) {
 	req.Header.Set("X-Grafana-Context", string(ctxJSON))
 
 	proxyutil.ApplyUserHeader(proxy.sendUserHeader, req, proxy.signedInUser)
-	proxyutil.ApplyForwardIDHeader(req, proxy.signedInUser)
+	proxyutil.ClearForwardIDHeader(req)
 
 	if err := addHeaders(&req.Header, proxy.matchedRoute, data); err != nil {
 		writeJSONErr(proxy.resp, proxy.req, 500, "Failed to render plugin headers", err)

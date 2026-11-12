@@ -115,6 +115,19 @@ func ApplyUserHeader(sendUserHeader bool, req *http.Request, user identity.Reque
 	}
 }
 
+// ClearForwardIDHeader removes the signed ID token from a request bound for a host outside Grafana.
+// The token is meant for plugins calling back into Grafana; it carries the user's email, name, role
+// and groups, so it must not reach datasource or plugin route upstreams.
+func ClearForwardIDHeader(req *http.Request) {
+	for name := range req.Header {
+		if strings.EqualFold(name, IDHeaderName) {
+			delete(req.Header, name)
+		}
+	}
+}
+
+// ApplyForwardIDHeader sets the signed ID token of the user. Only use it for requests handled by
+// Grafana plugins, never for requests proxied to an upstream host.
 func ApplyForwardIDHeader(req *http.Request, user identity.Requester) {
 	if user == nil || user.IsNil() {
 		return
