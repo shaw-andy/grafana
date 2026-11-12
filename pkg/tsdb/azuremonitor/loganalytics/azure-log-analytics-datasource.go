@@ -838,7 +838,7 @@ func getCorrelationWorkspaces(ctx context.Context, baseResource string, resource
 		if err != nil {
 			return AzureCorrelationAPIResponse{}, backend.DownstreamError(err)
 		}
-		body, err := io.ReadAll(res.Body)
+		body, err := utils.ReadResponseBody(res.Body)
 		if err != nil {
 			return AzureCorrelationAPIResponse{}, backend.DownstreamError(err)
 		}
@@ -912,19 +912,22 @@ func (e *AzureLogAnalyticsDatasource) unmarshalResponse(res *http.Response) (Azu
 		}
 	}()
 
+	body, err := utils.ReadResponseBody(res.Body)
 	if res.StatusCode/100 != 2 {
-		body, readErr := io.ReadAll(res.Body)
-		if readErr != nil {
-			return AzureLogAnalyticsResponse{}, fmt.Errorf("non-2xx response %s and failed to read body: %w", res.Status, readErr)
+		if err != nil {
+			return AzureLogAnalyticsResponse{}, fmt.Errorf("non-2xx response %s and failed to read body: %w", res.Status, err)
 		}
 		return AzureLogAnalyticsResponse{}, utils.CreateResponseErrorFromStatusCode(res.StatusCode, res.Status, body)
+	}
+	if err != nil {
+		return AzureLogAnalyticsResponse{}, err
 	}
 
 	var data AzureLogAnalyticsResponse
 	// UseNumber preserves int64 precision; downstream converters in
 	// azure-response-table-frame.go type-assert cells to json.Number and
 	// fail on any other numeric type, so this must stay.
-	d := json.NewDecoder(res.Body)
+	d := json.NewDecoder(bytes.NewReader(body))
 	d.UseNumber()
 	if err := d.Decode(&data); err != nil {
 		return AzureLogAnalyticsResponse{}, err
