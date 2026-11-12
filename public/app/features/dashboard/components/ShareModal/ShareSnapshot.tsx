@@ -175,6 +175,9 @@ export class ShareSnapshot extends PureComponent<Props, State> {
       if ('query' in variable) {
         variable.query = '';
       }
+      if ('definition' in variable) {
+        variable.definition = '';
+      }
       if ('options' in variable) {
         variable.options = variable.current && !isEmptyObject(variable.current) ? [variable.current] : [];
       }

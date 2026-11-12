@@ -846,6 +846,9 @@ export function trimDashboardForSnapshot(title: string, time: TimeRange, dash: D
       if ('query' in variable.spec) {
         variable.spec.query = '';
       }
+      if ('definition' in variable.spec) {
+        variable.spec.definition = '';
+      }
       if ('options' in variable.spec && 'current' in variable.spec) {
         variable.spec.options =
           variable.spec.current && !isEmptyObject(variable.spec.current) ? [variable.spec.current] : [];
