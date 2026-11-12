@@ -86,9 +86,7 @@ func (r *RepositoryImpl) Update(ctx context.Context, item *annotations.Item) err
 func (r *RepositoryImpl) Find(ctx context.Context, query *annotations.ItemQuery) ([]*annotations.ItemDTO, error) {
 	// Create a copy of the query to avoid modifying the original
 	q := *query
-	if q.Limit == 0 {
-		q.Limit = 100
-	}
+	q.Limit = annotations.NormalizeQueryLimit(q.Limit)
 
 	// Search without dashboard UID filter is expensive, so check without access control first
 	// nolint: staticcheck
@@ -106,7 +104,7 @@ func (r *RepositoryImpl) Find(ctx context.Context, query *annotations.ItemQuery)
 		q.Limit = int64(len(res))
 	}
 
-	results := make([]*annotations.ItemDTO, 0, q.Limit)
+	results := []*annotations.ItemDTO{}
 	// Page paginates dashboards (used in Authorize → SearchDashboards), not annotation rows (store uses Limit/Offset).
 	q.Page = 1
 
@@ -139,5 +137,7 @@ func (r *RepositoryImpl) Delete(ctx context.Context, params *annotations.DeleteP
 }
 
 func (r *RepositoryImpl) FindTags(ctx context.Context, query *annotations.TagsQuery) (annotations.FindTagsResult, error) {
-	return r.reader.GetTags(ctx, *query)
+	q := *query
+	q.Limit = annotations.NormalizeQueryLimit(q.Limit)
+	return r.reader.GetTags(ctx, q)
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/services/annotations"
 	"github.com/grafana/grafana/pkg/util"
 )
 
@@ -176,10 +177,7 @@ func (s *k8sRESTAdapter) List(ctx context.Context, options *internalversion.List
 		LegacyID: lf.LegacyID,
 	}
 
-	opts.Limit = 100
-	if options.Limit > 0 {
-		opts.Limit = options.Limit
-	}
+	opts.Limit = annotations.NormalizeQueryLimit(options.Limit)
 
 	// Extract continue token from request
 	if options.Continue != "" {

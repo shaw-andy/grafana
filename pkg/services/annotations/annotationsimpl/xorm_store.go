@@ -445,9 +445,7 @@ func (r *xormRepositoryImpl) Get(ctx context.Context, query annotations.ItemQuer
 
 		// order of ORDER BY arguments match the order of a sql index for performance
 		orderBy := " ORDER BY a.org_id, a.epoch_end DESC, a.epoch DESC"
-		if query.Limit > 0 {
-			orderBy += r.db.GetDialect().LimitOffset(query.Limit, query.Offset)
-		}
+		orderBy += r.db.GetDialect().LimitOffset(annotations.NormalizeQueryLimit(query.Limit), query.Offset)
 		sql.WriteString(orderBy + " ) dt on dt.id = annotation.id")
 
 		if err := sess.SQL(sql.String(), params...).Find(&items); err != nil {
@@ -579,9 +577,7 @@ func (r *xormRepositoryImpl) Delete(ctx context.Context, params *annotations.Del
 func (r *xormRepositoryImpl) GetTags(ctx context.Context, query annotations.TagsQuery) (annotations.FindTagsResult, error) {
 	var items []*annotations.Tag
 	err := r.db.WithDbSession(ctx, func(dbSession *db.Session) error {
-		if query.Limit == 0 {
-			query.Limit = 100
-		}
+		query.Limit = annotations.NormalizeQueryLimit(query.Limit)
 
 		var sql bytes.Buffer
 		params := make([]interface{}, 0) //nolint:prealloc

@@ -365,7 +365,7 @@ func TestAPI_GetAnnotationTags(t *testing.T) {
 		{
 			desc:          "applies the default limit when none is supplied",
 			path:          "/api/annotations/tags",
-			expectedLimit: defaultAnnotationsLimit,
+			expectedLimit: annotations.DefaultQueryLimit,
 		},
 		{
 			desc:          "passes an explicit limit through unchanged",

@@ -5,6 +5,22 @@ import (
 	"github.com/grafana/grafana/pkg/components/simplejson"
 )
 
+const (
+	DefaultQueryLimit int64 = 100
+	// MaxQueryLimit matches the cap enforced by dashboard search. Limits come from
+	// callers and end up as slice capacities and SQL LIMIT clauses.
+	MaxQueryLimit int64 = 5000
+)
+
+// NormalizeQueryLimit replaces unset or negative limits with DefaultQueryLimit
+// and caps the rest at MaxQueryLimit.
+func NormalizeQueryLimit(limit int64) int64 {
+	if limit <= 0 {
+		return DefaultQueryLimit
+	}
+	return min(limit, MaxQueryLimit)
+}
+
 type ItemQuery struct {
 	OrgID    int64  `json:"orgId"`
 	From     int64  `json:"from"`
