@@ -2,17 +2,22 @@ package loginattempt
 
 import (
 	"context"
+	"errors"
+)
+
+var (
+	ErrTooManyUserAttempts = errors.New("too many login attempts for user")
+	ErrTooManyIPAttempts   = errors.New("too many login attempts for IP address")
 )
 
 type Service interface {
-	// Add adds a new login attempt record for provided username
-	Add(ctx context.Context, username, ipAddress string) error
-	// Validate checks if username has to many login attempts inside a window.
-	// Will return true if provided username do not have too many attempts.
-	Validate(ctx context.Context, username string) (bool, error)
-	// Validate checks if IP address has to many login attempts inside a window.
-	// Will return true if provided IP address do not have too many attempts.
-	ValidateIPAddress(ctx context.Context, ipAddress string) (bool, error)
+	// Reserve records a login attempt for username and ipAddress before the credentials are checked.
+	// It returns ErrTooManyUserAttempts or ErrTooManyIPAttempts, and records nothing, when the
+	// attempt would exceed the limit. A reserved attempt counts as a failed login until it is released.
+	// The returned id is 0 when nothing was recorded.
+	Reserve(ctx context.Context, username, ipAddress string) (int64, error)
+	// Release removes a reserved attempt, used once the login it was reserved for succeeded.
+	Release(ctx context.Context, attemptID int64) error
 	// Reset resets all login attempts attached to username
 	Reset(ctx context.Context, username string) error
 }

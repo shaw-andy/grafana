@@ -37,24 +37,18 @@ func (c *Password) AuthenticatePassword(ctx context.Context, r *authn.Request, u
 	defer span.End()
 	r.SetMeta(authn.MetaKeyUsername, username)
 
-	ok, err := c.loginAttempts.Validate(ctx, username)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, errPasswordAuthFailed.Errorf("too many consecutive incorrect login attempts for user - login for user temporarily blocked")
-	}
-
-	ok, err = c.loginAttempts.ValidateIPAddress(ctx, web.RemoteAddr(r.HTTPRequest))
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, errPasswordClientTooManyLoginAttempts.Errorf("too many consecutive incorrect login attempts for IP address - login for IP address temporarily blocked")
-	}
-
 	if len(password) == 0 {
 		return nil, errPasswordAuthFailed.Errorf("no password provided")
+	}
+
+	attemptID, err := c.loginAttempts.Reserve(ctx, username, web.RemoteAddr(r.HTTPRequest))
+	switch {
+	case errors.Is(err, loginattempt.ErrTooManyUserAttempts):
+		return nil, errPasswordAuthFailed.Errorf("too many consecutive incorrect login attempts for user - login for user temporarily blocked")
+	case errors.Is(err, loginattempt.ErrTooManyIPAttempts):
+		return nil, errPasswordClientTooManyLoginAttempts.Errorf("too many consecutive incorrect login attempts for IP address - login for IP address temporarily blocked")
+	case err != nil:
+		return nil, err
 	}
 
 	var clientErrs error
@@ -71,12 +65,10 @@ func (c *Password) AuthenticatePassword(ctx context.Context, r *authn.Request, u
 			continue
 		}
 
+		if err := c.loginAttempts.Release(context.WithoutCancel(ctx), attemptID); err != nil {
+			c.log.FromContext(ctx).Warn("Failed to release login attempt after successful login", "error", err)
+		}
 		return identity, nil
-	}
-
-	err = c.loginAttempts.Add(ctx, username, web.RemoteAddr(r.HTTPRequest))
-	if err != nil {
-		return nil, err
 	}
 
 	return nil, errPasswordAuthFailed.Errorf("failed to authenticate identity: %w", clientErrs)
