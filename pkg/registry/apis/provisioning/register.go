@@ -320,6 +320,17 @@ func createJobHistoryConfigFromSettings(cfg *setting.Cfg) *JobHistoryConfig {
 	return &JobHistoryConfig{}
 }
 
+// NewURLValidatorFromConfig builds the validator for repository hosts from [provisioning] allowed_git_urls,
+// an allowlist of hosts, IPs and CIDRs that would otherwise be blocked as internal addresses.
+func NewURLValidatorFromConfig(cfg *setting.Cfg) (*repository.URLValidator, error) {
+	allowListConfig := cfg.SectionWithEnvOverrides("provisioning").Key("allowed_git_urls").Strings(",")
+	allowlist, err := repository.NewAllowlist(allowListConfig)
+	if err != nil {
+		return nil, fmt.Errorf("invalid allowed_git_urls configuration: %w", err)
+	}
+	return repository.NewURLValidator(allowlist, net.DefaultResolver.LookupIPAddr), nil
+}
+
 // RegisterAPIService returns an API builder, from [NewAPIBuilder]. It is called by Wire.
 // This function happily uses services core to Grafana, and does not need to be multi-tenancy-compatible.
 func RegisterAPIService(
@@ -360,16 +371,11 @@ func RegisterAPIService(
 	folderMetadataEnabled := features.IsEnabledGlobally(featuremgmt.FlagProvisioningFolderMetadata) //nolint:staticcheck
 	maxFileSize := cfg.ProvisioningMaxFileSize
 	incrementalPolicy := repository.NewIncrementalSyncPolicy(folderMetadataEnabled, cfg.ProvisioningMaxIncrementalChanges)
-	provisioningSec := cfg.SectionWithEnvOverrides("provisioning")
 
-	// allowed_git_urls contain an allowlist of Git URLs that are allowed to be used for Git repositories.
-	// It should contain enpoints that otherwise would be blocked by the URL validator.
-	allowListConfig := provisioningSec.Key("allowed_git_urls").Strings(",")
-	allowlist, err := repository.NewAllowlist(allowListConfig)
+	urlValidator, err := NewURLValidatorFromConfig(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("invalid allowed_git_urls configuration: %w", err)
+		return nil, err
 	}
-	urlValidator := repository.NewURLValidator(allowlist, net.DefaultResolver.LookupIPAddr)
 	repoValidatorOpts := []repository.ValidatorOption{repository.WithURLValidator(urlValidator)}
 
 	// Register v0alpha1 (preferred version)
