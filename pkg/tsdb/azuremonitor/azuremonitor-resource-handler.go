@@ -25,6 +25,64 @@ func getTarget(original string) (target string, err error) {
 	return
 }
 
+type allowedResourceRoute struct {
+	method string
+	path   *regexp.Regexp
+}
+
+const (
+	resourceSegment = `[^/]+`
+	armResourceURI  = `/subscriptions/` + resourceSegment +
+		`(?:/resourceGroups/` + resourceSegment +
+		`(?:/providers/` + resourceSegment + `(?:/` + resourceSegment + `/` + resourceSegment + `)+)?)?`
+)
+
+// Resource calls run with the data source identity, so only the read-only
+// requests the query editors and resource picker issue are forwarded.
+// Keep in sync with the frontend callers of routeNames in
+// public/app/plugins/datasource/azuremonitor.
+var allowedResourceRoutes = map[string][]allowedResourceRoute{
+	azureMonitor: {
+		{http.MethodGet, regexp.MustCompile(`(?i)^/subscriptions$`)},
+		{http.MethodGet, regexp.MustCompile(`(?i)^/subscriptions/` + resourceSegment + `$`)},
+		{http.MethodGet, regexp.MustCompile(`(?i)^/subscriptions/` + resourceSegment + `/locations$`)},
+		{http.MethodGet, regexp.MustCompile(`(?i)^/subscriptions/` + resourceSegment + `/providers/Microsoft\.OperationalInsights/workspaces$`)},
+		{http.MethodGet, regexp.MustCompile(`(?i)^/providers/` + resourceSegment + `$`)},
+		{http.MethodGet, regexp.MustCompile(`(?i)^` + armResourceURI + `/providers/Microsoft\.Insights/metricNamespaces$`)},
+		{http.MethodGet, regexp.MustCompile(`(?i)^` + armResourceURI + `/providers/Microsoft\.Insights/metricDefinitions$`)},
+		{http.MethodGet, regexp.MustCompile(`(?i)^/subscriptions/` + resourceSegment + `/resourceGroups/` + resourceSegment +
+			`/providers/Microsoft\.OperationalInsights/workspaces/` + resourceSegment + `/tables/` + resourceSegment + `$`)},
+	},
+	azureLogAnalytics: {
+		{http.MethodGet, regexp.MustCompile(`^/v1(?:/` + resourceSegment + `)*/metadata$`)},
+		{http.MethodPost, regexp.MustCompile(`^/usage/basiclogs$`)},
+	},
+	azureResourceGraph: {
+		{http.MethodPost, regexp.MustCompile(`(?i)^/providers/Microsoft\.ResourceGraph/resources$`)},
+	},
+}
+
+var safeResourceSegment = regexp.MustCompile(`^[\p{L}\p{N}._()~-]+$`)
+
+var methodOverrideHeaders = []string{"X-HTTP-Method", "X-HTTP-Method-Override", "X-Method-Override"}
+
+func isAllowedResourceRequest(subDataSource, method, path string) bool {
+	if !strings.HasPrefix(path, "/") {
+		return false
+	}
+	for _, segment := range strings.Split(path[1:], "/") {
+		if !safeResourceSegment.MatchString(segment) || strings.Trim(segment, ".") == "" {
+			return false
+		}
+	}
+	for _, route := range allowedResourceRoutes[subDataSource] {
+		if route.method == method && route.path.MatchString(path) {
+			return true
+		}
+	}
+	return false
+}
+
 type httpServiceProxy struct {
 	logger log.Logger
 }
@@ -144,6 +202,11 @@ func (s *Service) handleResourceReq(subDataSource string) func(rw http.ResponseW
 			return
 		}
 
+		if !isAllowedResourceRequest(subDataSource, req.Method, newPath) {
+			writeErrorResponse(rw, http.StatusForbidden, "resource request not allowed")
+			return
+		}
+
 		dsInfo, err := s.getDataSourceFromHTTPReq(req)
 		if err != nil {
 			writeErrorResponse(rw, http.StatusInternalServerError, fmt.Sprintf("unexpected error %v", err))
@@ -157,8 +220,17 @@ func (s *Service) handleResourceReq(subDataSource string) func(rw http.ResponseW
 			return
 		}
 		req.URL.Path = newPath
+		req.URL.RawPath = ""
 		req.URL.Host = serviceURL.Host
 		req.URL.Scheme = serviceURL.Scheme
+		// Header keys are copied from the plugin request without canonicalization.
+		for key := range req.Header {
+			for _, header := range methodOverrideHeaders {
+				if strings.EqualFold(key, header) {
+					delete(req.Header, key)
+				}
+			}
+		}
 
 		_, err = s.executors[subDataSource].ResourceRequest(rw, req, service.HTTPClient)
 		if err != nil {
