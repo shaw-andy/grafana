@@ -14,6 +14,7 @@ import (
 
 	annotationV0 "github.com/grafana/grafana/apps/annotation/pkg/apis/annotation/v0alpha1"
 	storev1 "github.com/grafana/grafana/pkg/registry/apps/annotation/storepb/v1"
+	"github.com/grafana/grafana/pkg/services/annotations"
 )
 
 // storeGRPC provides a gRPC client implementation of the Store,
@@ -161,7 +162,7 @@ func toProtoListOptions(opts ListOptions) *storev1.ListOptions {
 		PanelId:        opts.PanelID,
 		From:           opts.From,
 		To:             opts.To,
-		Limit:          opts.Limit,
+		Limit:          annotations.NormalizeQueryLimit(opts.Limit),
 		Continue:       opts.Continue,
 		Tags:           opts.Tags,
 		TagsMatchAny:   opts.TagsMatchAny,
@@ -183,7 +184,7 @@ func fromProtoListOptions(opts *storev1.ListOptions) ListOptions {
 		PanelID:        opts.PanelId,
 		From:           opts.From,
 		To:             opts.To,
-		Limit:          opts.Limit,
+		Limit:          annotations.NormalizeQueryLimit(opts.Limit),
 		Continue:       opts.Continue,
 		Tags:           opts.Tags,
 		TagsMatchAny:   opts.TagsMatchAny,
@@ -199,7 +200,7 @@ func toProtoTagListOptions(opts TagListOptions) *storev1.TagListOptions {
 	return &storev1.TagListOptions{
 		Prefix:   opts.Prefix,
 		Contains: opts.Contains,
-		Limit:    int32(opts.Limit),
+		Limit:    int32(annotations.NormalizeQueryLimit(int64(opts.Limit))),
 	}
 }
 
@@ -212,7 +213,7 @@ func fromProtoTagListOptions(opts *storev1.TagListOptions) TagListOptions {
 	return TagListOptions{
 		Prefix:   opts.Prefix,
 		Contains: opts.Contains,
-		Limit:    int(opts.Limit),
+		Limit:    int(annotations.NormalizeQueryLimit(int64(opts.Limit))),
 	}
 }
 

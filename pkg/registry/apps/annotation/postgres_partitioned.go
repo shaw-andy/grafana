@@ -9,6 +9,7 @@ import (
 
 	annotationV0 "github.com/grafana/grafana/apps/annotation/pkg/apis/annotation/v0alpha1"
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/services/annotations"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -286,6 +287,8 @@ func (s *PostgreSQLStore) Delete(ctx context.Context, namespace, name string) er
 
 // List lists annotations based on the provided options
 func (s *PostgreSQLStore) List(ctx context.Context, namespace string, opts ListOptions) (*AnnotationList, error) {
+	opts.Limit = annotations.NormalizeQueryLimit(opts.Limit)
+
 	// Decode continue token and validate limit
 	offset := int64(0)
 	if opts.Continue != "" {
@@ -299,11 +302,7 @@ func (s *PostgreSQLStore) List(ctx context.Context, namespace string, opts ListO
 		offset = token.Offset
 	}
 
-	// Build query
 	limit := opts.Limit
-	if limit == 0 {
-		limit = 100 // default limit
-	}
 	query, args := buildListQuery(namespace, opts, offset, limit)
 
 	// Execute query
@@ -358,6 +357,7 @@ func (s *PostgreSQLStore) List(ctx context.Context, namespace string, opts ListO
 
 // buildListQuery constructs the SQL query and arguments for List
 func buildListQuery(namespace string, opts ListOptions, offset, limit int64) (string, []any) {
+	limit = annotations.NormalizeQueryLimit(limit)
 	var conditions []string
 	var args []any
 	argNum := 1

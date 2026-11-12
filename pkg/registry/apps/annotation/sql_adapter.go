@@ -79,6 +79,10 @@ func (a *sqlAdapter) List(ctx context.Context, namespace string, opts ListOption
 		return nil, err
 	}
 
+	// The repository caps Find at MaxQueryLimit, so the page must leave room for
+	// the extra row used to detect whether another page exists.
+	opts.Limit = min(annotations.NormalizeQueryLimit(opts.Limit), annotations.MaxQueryLimit-1)
+
 	offset := int64(0)
 	if opts.Continue != "" {
 		token, err := decodeContinueToken(opts.Continue)
@@ -211,7 +215,7 @@ func (a *sqlAdapter) ListTags(ctx context.Context, namespace string, opts TagLis
 	}
 	query := &annotations.TagsQuery{
 		OrgID: orgID,
-		Limit: int64(opts.Limit),
+		Limit: annotations.NormalizeQueryLimit(int64(opts.Limit)),
 		Tag:   tag,
 	}
 

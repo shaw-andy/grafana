@@ -16,6 +16,7 @@ import (
 	annotationV0 "github.com/grafana/grafana/apps/annotation/pkg/apis/annotation/v0alpha1"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/services/annotations"
 )
 
 func newSearchHandler(
@@ -95,10 +96,10 @@ func listOptionsFromQueryParams(queryParams url.Values) ListOptions {
 		}
 	}
 
-	opts.Limit = 100
+	opts.Limit = annotations.DefaultQueryLimit
 	if v := queryParams.Get("limit"); v != "" {
-		if limit, err := strconv.ParseInt(v, 10, 64); err == nil && limit > 0 {
-			opts.Limit = limit
+		if limit, err := strconv.ParseInt(v, 10, 64); err == nil {
+			opts.Limit = annotations.NormalizeQueryLimit(limit)
 		}
 	}
 

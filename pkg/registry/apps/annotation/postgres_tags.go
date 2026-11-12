@@ -8,6 +8,8 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+
+	"github.com/grafana/grafana/pkg/services/annotations"
 )
 
 // likeEscaper escapes LIKE/ILIKE pattern metacharacters so a query value is
@@ -77,6 +79,8 @@ func tagCacheKey(namespace, prefix, contains string, limit int) string {
 // ListTags implements the TagProvider interface.
 // We use a cache here because tag queries can be expensive, and they don't change frequently.
 func (s *PostgreSQLStore) ListTags(ctx context.Context, namespace string, opts TagListOptions) ([]Tag, error) {
+	opts.Limit = int(annotations.NormalizeQueryLimit(int64(opts.Limit)))
+
 	// Try cache first
 	cacheKey := tagCacheKey(namespace, opts.Prefix, opts.Contains, opts.Limit)
 	if cached, ok := s.tagCache.get(cacheKey); ok {
@@ -116,13 +120,8 @@ func (s *PostgreSQLStore) ListTags(ctx context.Context, namespace string, opts T
 		ORDER BY tag
 	`
 
-	// Add limit
-	limit := opts.Limit
-	if limit == 0 {
-		limit = 100 // default
-	}
 	query += fmt.Sprintf(" LIMIT $%d", argNum)
-	args = append(args, limit)
+	args = append(args, opts.Limit)
 
 	// Execute query
 	rows, err := s.pool.Query(ctx, query, args...)

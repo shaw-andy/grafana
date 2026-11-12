@@ -21,8 +21,6 @@ import (
 	"github.com/grafana/grafana/pkg/web"
 )
 
-const defaultAnnotationsLimit = 100
-
 // swagger:route GET /annotations annotations getAnnotations
 //
 // Find Annotations.
@@ -45,14 +43,11 @@ func (hs *HTTPServer) GetAnnotations(c *contextmodel.ReqContext) response.Respon
 		DashboardID:  c.QueryInt64("dashboardId"),
 		DashboardUID: c.Query("dashboardUID"),
 		PanelID:      c.QueryInt64("panelId"),
-		Limit:        c.QueryInt64("limit"),
+		Limit:        annotations.NormalizeQueryLimit(c.QueryInt64("limit")),
 		Tags:         c.QueryStrings("tags"),
 		Type:         c.Query("type"),
 		MatchAny:     c.QueryBool("matchAny"),
 		SignedInUser: c.SignedInUser,
-	}
-	if query.Limit == 0 {
-		query.Limit = defaultAnnotationsLimit
 	}
 
 	// When dashboard ID exists without UID, find the UID from dashboards api
@@ -495,12 +490,7 @@ func (hs *HTTPServer) GetAnnotationTags(c *contextmodel.ReqContext) response.Res
 	query := &annotations.TagsQuery{
 		OrgID: c.GetOrgID(),
 		Tag:   c.Query("tag"),
-		Limit: c.QueryInt64("limit"),
-	}
-
-	// Default limit if not specified
-	if query.Limit == 0 {
-		query.Limit = defaultAnnotationsLimit
+		Limit: annotations.NormalizeQueryLimit(c.QueryInt64("limit")),
 	}
 
 	result, err := hs.annotationsRepo.FindTags(c.Req.Context(), query)
