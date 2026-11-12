@@ -147,6 +147,10 @@ type TimeRangeDTO struct {
 	Timezone string
 }
 
+// MaxQueryDataPoints is the hard limit from prometheus, applied to every public dashboard query
+// because the request comes from an unauthenticated caller.
+const MaxQueryDataPoints = int64(11000)
+
 type PublicDashboardQueryDTO struct {
 	IntervalMs      int64
 	MaxDataPoints   int64
