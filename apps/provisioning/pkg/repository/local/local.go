@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -155,6 +156,10 @@ func (r *localRepository) validateRequest(ref string) error {
 // result stays within the root. It blocks path traversal (e.g. "../") that can
 // be introduced by unsanitized resource or folder titles during export.
 func (r *localRepository) resolvePath(p string) (string, error) {
+	if r.path == "" {
+		return "", apierrors.NewBadRequest("the local repository path is not configured or not permitted")
+	}
+
 	// Normalize OS-specific separators and collapse the path first, so a
 	// Windows-style traversal like "..\..\etc" is resolved here instead of
 	// surviving the join and being interpreted by the filesystem. safepath.Clean
@@ -181,7 +186,11 @@ func (r *localRepository) Read(ctx context.Context, filePath string, ref string)
 		return nil, err
 	}
 
-	actualPath := safepath.Join(r.path, filePath)
+	actualPath, err := r.resolvePath(filePath)
+	if err != nil {
+		return nil, err
+	}
+
 	info, err := os.Stat(actualPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, repository.ErrFileNotFound
@@ -198,31 +207,86 @@ func (r *localRepository) Read(ctx context.Context, filePath string, ref string)
 		}, nil
 	}
 
-	if max := r.maxBytes.Load(); max > 0 && info.Size() > max {
+	// Devices and pipes report a size of zero and may never reach EOF, so
+	// they must be rejected before they are opened.
+	if !info.Mode().IsRegular() {
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("the path '%s' is not a regular file", filePath))
+	}
+
+	max := r.maxBytes.Load()
+	if max > 0 && info.Size() > max {
 		return nil, apierrors.NewRequestEntityTooLargeError(
 			fmt.Sprintf("file %q is %d bytes; max allowed is %d bytes", filePath, info.Size(), max),
 		)
 	}
 
-	//nolint:gosec
-	data, err := os.ReadFile(actualPath)
+	data, modified, err := r.readRegularFile(ctx, actualPath, info, filePath, max)
 	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
+		return nil, err
 	}
 
-	hash, _, err := r.calculateFileHash(actualPath)
-	if err != nil {
-		return nil, fmt.Errorf("calculate hash of file: %w", err)
-	}
+	//nolint:gosec
+	hash := sha1.Sum(data)
 
 	return &repository.FileInfo{
 		Path: filePath,
 		Data: data,
-		Hash: hash,
+		Hash: hex.EncodeToString(hash[:]),
 		Modified: &metav1.Time{
-			Time: info.ModTime(),
+			Time: modified,
 		},
 	}, nil
+}
+
+// readRegularFile reads the file at fullPath only if the opened handle is the
+// same regular file that was checked by the caller, so a path swapped for a
+// device, pipe or other file between the stat and the open is refused.
+func (r *localRepository) readRegularFile(ctx context.Context, fullPath string, checked fs.FileInfo, filePath string, max int64) ([]byte, time.Time, error) {
+	// O_NONBLOCK keeps the open from blocking if the path was replaced by a pipe.
+	//nolint:gosec
+	file, err := os.OpenFile(fullPath, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, time.Time{}, repository.ErrFileNotFound
+	} else if err != nil {
+		return nil, time.Time{}, fmt.Errorf("open file: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	opened, err := file.Stat()
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("stat file: %w", err)
+	}
+	if !opened.Mode().IsRegular() || !os.SameFile(checked, opened) {
+		return nil, time.Time{}, apierrors.NewConflict(schema.GroupResource{}, filePath, errors.New("file changed while it was being read"))
+	}
+
+	var reader io.Reader = &contextReader{ctx: ctx, r: file}
+	if max > 0 {
+		reader = io.LimitReader(reader, max+1)
+	}
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("read file: %w", err)
+	}
+	if max > 0 && int64(len(data)) > max {
+		return nil, time.Time{}, apierrors.NewRequestEntityTooLargeError(
+			fmt.Sprintf("file %q exceeds the max allowed size of %d bytes", filePath, max),
+		)
+	}
+
+	return data, opened.ModTime(), nil
+}
+
+type contextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c *contextReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
 }
 
 func (r *localRepository) WithMaxFileSize(maxBytes int64) {
