@@ -27,10 +27,19 @@ func ProvideFactory() *Factory {
 // ClientOptions holds the optional configuration for a GitHub client.
 type ClientOptions struct {
 	customServerURL string
+	transport       http.RoundTripper
 }
 
 // ClientOption customizes how a GitHub client is created.
 type ClientOption func(*ClientOptions)
+
+// WithTransport sets the transport that carries the GitHub API requests. It is ignored when
+// Factory.Client overrides the HTTP client.
+func WithTransport(transport http.RoundTripper) ClientOption {
+	return func(o *ClientOptions) {
+		o.transport = transport
+	}
+}
 
 // WithCustomServerURL resolves a GitHub repo/web URL into the REST API base URL for its
 // deployment type and targets the client at it. An empty url or github.com keeps the default
@@ -69,7 +78,7 @@ func (r *Factory) New(owner, repo string, ghToken common.RawSecureValue, opts ..
 		opt(&options)
 	}
 
-	httpClient := &http.Client{}
+	httpClient := &http.Client{Transport: options.transport}
 	if r.Client != nil {
 		client := *r.Client
 		httpClient = &client

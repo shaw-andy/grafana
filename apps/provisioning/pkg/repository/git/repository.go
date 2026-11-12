@@ -45,6 +45,8 @@ type RepositoryConfig struct {
 	SMIMECertificate string
 	Path             string
 	SkipGitSuffix    bool
+	// Transport carries the git HTTP requests. When nil, http.DefaultTransport is used.
+	Transport http.RoundTripper
 }
 
 // Make sure all public functions of this struct call the (*gitRepository).logger function, to ensure the Git repo details are included.
@@ -78,6 +80,9 @@ func NewRepository(
 		}
 
 		opts = append(opts, options.WithBasicAuth(tokenUser, string(gitConfig.Token)))
+	}
+	if gitConfig.Transport != nil {
+		opts = append(opts, options.WithHTTPClient(&http.Client{Transport: gitConfig.Transport}))
 	}
 
 	client, err := nanogit.NewHTTPClient(gitConfig.URL, opts...)

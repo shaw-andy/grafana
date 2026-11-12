@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"net"
 
 	"github.com/grafana/grafana-app-sdk/logging"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -27,10 +28,21 @@ type extra struct {
 	allowInsecure bool
 	metrics       *repository.OperationMetrics
 	clientMetrics *git.ClientMetrics
+	urlValidator  *repository.URLValidator
 }
 
-func Extra(decrypter repository.Decrypter, factory *Factory, webhookBuilder WebhookURLBuilder, allowInsecure bool, metrics *repository.OperationMetrics, clientMetrics *git.ClientMetrics) repository.Extra {
-	return &extra{
+type ExtraOption func(*extra)
+
+// WithURLValidator sets the validator every connection to the repository host must pass.
+// Without it, connections to loopback, private, link-local and unspecified addresses are refused.
+func WithURLValidator(urlValidator *repository.URLValidator) ExtraOption {
+	return func(e *extra) {
+		e.urlValidator = urlValidator
+	}
+}
+
+func Extra(decrypter repository.Decrypter, factory *Factory, webhookBuilder WebhookURLBuilder, allowInsecure bool, metrics *repository.OperationMetrics, clientMetrics *git.ClientMetrics, opts ...ExtraOption) repository.Extra {
+	e := &extra{
 		decrypter:      decrypter,
 		factory:        factory,
 		webhookBuilder: webhookBuilder,
@@ -38,6 +50,13 @@ func Extra(decrypter repository.Decrypter, factory *Factory, webhookBuilder Webh
 		metrics:        metrics,
 		clientMetrics:  clientMetrics,
 	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	if e.urlValidator == nil {
+		e.urlValidator = repository.NewURLValidator(repository.Allowlist{}, net.DefaultResolver.LookupIPAddr)
+	}
+	return e
 }
 
 func (e *extra) Type() provisioning.RepositoryType {
@@ -70,12 +89,13 @@ func (e *extra) Build(ctx context.Context, r *provisioning.Repository) (reposito
 		CommitSigningKey: signingKey,
 		SigningMethod:    git.SigningMethodFromSpec(r),
 		SMIMECertificate: git.SMIMECertificateFromSpec(r),
+		Transport:        e.urlValidator.Transport(),
 	}, e.metrics, e.clientMetrics)
 	if err != nil {
 		return nil, fmt.Errorf("error creating git repository: %w", err)
 	}
 
-	ghRepo, err := NewRepository(ctx, r, gitRepo, e.factory, token)
+	ghRepo, err := NewRepository(ctx, r, gitRepo, e.factory, token, WithTransport(e.urlValidator.Transport()))
 	if err != nil {
 		return nil, fmt.Errorf("error creating github repository: %w", err)
 	}

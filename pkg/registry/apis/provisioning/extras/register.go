@@ -43,13 +43,21 @@ func ProvideProvisioningOSSRepositoryExtras(
 	// http:// URLs with a token are only allowed in development or when explicitly opted in,
 	// since the token would otherwise travel in cleartext.
 	allowInsecure := cfg.Env == setting.Dev || cfg.ProvisioningAllowInsecure
+	// An invalid allowlist already fails provisioning API registration. Without an option, the
+	// extras fall back to a validator that allows no internal addresses.
+	var gitOpts []git.ExtraOption
+	var githubOpts []github.ExtraOption
+	if urlValidator, err := provisioning.NewURLValidatorFromConfig(cfg); err == nil {
+		gitOpts = append(gitOpts, git.WithURLValidator(urlValidator))
+		githubOpts = append(githubOpts, github.WithURLValidator(urlValidator))
+	}
 	return []repository.Extra{
 		local.Extra(
 			cfg.HomePath,
 			cfg.PermittedProvisioningPaths,
 			operationMetrics,
 		),
-		git.Extra(decrypter, allowInsecure, operationMetrics, clientMetrics),
+		git.Extra(decrypter, allowInsecure, operationMetrics, clientMetrics, gitOpts...),
 		github.Extra(
 			decrypter,
 			ghFactory,
@@ -57,6 +65,7 @@ func ProvideProvisioningOSSRepositoryExtras(
 			allowInsecure,
 			operationMetrics,
 			clientMetrics,
+			githubOpts...,
 		),
 	}
 }

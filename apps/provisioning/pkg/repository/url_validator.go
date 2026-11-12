@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"sync"
 )
 
 type ipAddressResolver func(ctx context.Context, host string) ([]net.IPAddr, error)
@@ -12,6 +13,9 @@ type ipAddressResolver func(ctx context.Context, host string) ([]net.IPAddr, err
 type URLValidator struct {
 	allowlist         Allowlist
 	ipAddressResolver ipAddressResolver
+
+	transportOnce sync.Once
+	transport     *pinnedTransport
 }
 
 func NewURLValidator(allowlist Allowlist, ipAddressResolver ipAddressResolver) *URLValidator {
@@ -29,29 +33,43 @@ func (v *URLValidator) ValidateURL(
 	if err != nil {
 		return err
 	}
+	_, err = v.allowedAddrs(ctx, host)
+	return err
+}
+
+// allowedAddrs resolves host once and returns its addresses if every one of them is allowed.
+// A nil slice without an error means the host is allowlisted by name and may be used as-is.
+func (v *URLValidator) allowedAddrs(ctx context.Context, host string) ([]net.IPAddr, error) {
+	host, err := normalizeHost(host, host)
+	if err != nil {
+		return nil, err
+	}
 
 	if v.allowlist.AllowsHost(host) {
-		return nil
+		return nil, nil
 	}
 
 	if ip := net.ParseIP(host); ip != nil {
-		return validateHostIP(host, ip, v.allowlist)
+		if err := validateHostIP(host, ip, v.allowlist); err != nil {
+			return nil, err
+		}
+		return []net.IPAddr{{IP: ip}}, nil
 	}
 
 	addrs, err := v.ipAddressResolver(ctx, host)
 	if err != nil {
-		return fmt.Errorf("resolve URL host %q: %w", host, err)
+		return nil, fmt.Errorf("resolve URL host %q: %w", host, err)
 	}
 	if len(addrs) == 0 {
-		return fmt.Errorf("URL host %q did not resolve to any IP addresses", host)
+		return nil, fmt.Errorf("URL host %q did not resolve to any IP addresses", host)
 	}
 
 	for _, addr := range addrs {
 		if err := validateHostIP(host, addr.IP, v.allowlist); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return addrs, nil
 }
 
 func urlHostname(rawURL string) (string, error) {
