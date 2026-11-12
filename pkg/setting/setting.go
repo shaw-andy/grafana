@@ -1276,10 +1276,21 @@ func (cfg *Cfg) applyCommandLineDefaultProperties(file *ini.File) {
 			if exists {
 				key.SetValue(value)
 				cfg.appliedCommandLineProperties = append(cfg.appliedCommandLineProperties,
-					fmt.Sprintf("%s=%s", keyString, RedactedValue(keyString, value)))
+					fmt.Sprintf("%s=%s", keyString, redactedCommandLineValue(keyString, section.Name(), key.Name(), value)))
 			}
 		}
 	}
+}
+
+// redactedCommandLineValue checks both the dotted cfg: name and the GF_ environment
+// name, because RedactedValue's patterns are written for environment names and a
+// command-line override must never be logged less redacted than the equivalent
+// environment override.
+func redactedCommandLineValue(propKey, sectionName, keyName, value string) string {
+	if redacted := RedactedValue(propKey, value); redacted != value {
+		return redacted
+	}
+	return RedactedValue(EnvKey(sectionName, keyName), value)
 }
 
 func (cfg *Cfg) applyCommandLineProperties(file *ini.File) {
@@ -1292,7 +1303,8 @@ func (cfg *Cfg) applyCommandLineProperties(file *ini.File) {
 			keyString := sectionName + key.Name()
 			value, exists := cfg.commandLineProps[keyString]
 			if exists {
-				cfg.appliedCommandLineProperties = append(cfg.appliedCommandLineProperties, fmt.Sprintf("%s=%s", keyString, value))
+				cfg.appliedCommandLineProperties = append(cfg.appliedCommandLineProperties,
+					fmt.Sprintf("%s=%s", keyString, redactedCommandLineValue(keyString, section.Name(), key.Name(), value)))
 				key.SetValue(value)
 			}
 		}
@@ -1310,7 +1322,8 @@ func (cfg *Cfg) getCommandLineProperties(args []string) map[string]string {
 		trimmed := strings.TrimPrefix(arg, "cfg:")
 		parts := strings.Split(trimmed, "=")
 		if len(parts) != 2 {
-			cfg.Logger.Error("Invalid command line argument.", "argument", arg)
+			// Only the key is logged: the value may be a secret.
+			cfg.Logger.Error("Invalid command line argument.", "argument", "cfg:"+parts[0])
 			os.Exit(1)
 		}
 
