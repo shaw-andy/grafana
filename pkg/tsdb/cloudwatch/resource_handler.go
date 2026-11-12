@@ -24,7 +24,7 @@ func (ds *DataSource) newResourceMux() *http.ServeMux {
 	mux.HandleFunc("/ec2-instance-attribute", ds.handleResourceReq(ds.handleGetEc2InstanceAttribute))
 	mux.HandleFunc("/resource-arns", ds.handleResourceReq(ds.handleGetResourceArns))
 	mux.HandleFunc("/log-groups", ds.resourceRequestWithHeadersMiddleware(ds.LogGroupsHandler))
-	mux.HandleFunc("/data-sources", ds.resourceRequestMiddleware(ds.DataSourcesHandler))
+	mux.HandleFunc("/data-sources", ds.resourceRequestWithHeadersMiddleware(ds.DataSourcesHandler))
 	mux.HandleFunc("/metrics", ds.resourceRequestMiddleware(ds.MetricsHandler))
 	mux.HandleFunc("/dimension-values", ds.resourceRequestMiddleware(ds.DimensionValuesHandler))
 	mux.HandleFunc("/dimension-keys", ds.resourceRequestMiddleware(ds.DimensionKeysHandler))
@@ -39,7 +39,7 @@ func (ds *DataSource) newResourceMux() *http.ServeMux {
 	return mux
 }
 
-type handleFn func(ctx context.Context, parameters url.Values) ([]suggestData, error)
+type handleFn func(ctx context.Context, parameters url.Values) ([]suggestData, *string, error)
 
 // TODO: merge this and resourceRequestWithHeadersMiddleware
 func (ds *DataSource) handleResourceReq(handleFunc handleFn) func(rw http.ResponseWriter, req *http.Request) {
@@ -51,7 +51,8 @@ func (ds *DataSource) handleResourceReq(handleFunc handleFn) func(rw http.Respon
 			writeResponse(rw, http.StatusBadRequest, fmt.Sprintf("unexpected error %v", err), logger)
 			return
 		}
-		data, err := handleFunc(ctx, req.URL.Query())
+		parameters := req.URL.Query()
+		data, nextToken, err := handleFunc(ctx, parameters)
 		if err != nil {
 			writeResponse(rw, http.StatusBadRequest, fmt.Sprintf("unexpected error %v", err), logger)
 			return
@@ -60,6 +61,11 @@ func (ds *DataSource) handleResourceReq(handleFunc handleFn) func(rw http.Respon
 		if err != nil {
 			writeResponse(rw, http.StatusBadRequest, fmt.Sprintf("unexpected error %v", err), logger)
 			return
+		}
+		for k, vals := range nextPageHeaders(parameters, nextToken) {
+			for _, v := range vals {
+				rw.Header().Add(k, v)
+			}
 		}
 		rw.WriteHeader(http.StatusOK)
 		_, err = rw.Write(body)
@@ -99,19 +105,21 @@ func (ds *DataSource) LogGroupsHandler(ctx context.Context, parameters url.Value
 		return nil, nil, models.NewHttpError("LogGroupsHandler json error", http.StatusInternalServerError, err)
 	}
 
-	var responseHeaders http.Header
-	if nextToken != nil {
-		nextParams := url.Values{}
-		for k, v := range parameters {
-			nextParams[k] = v
-		}
-		nextParams.Set("nextToken", *nextToken)
-		responseHeaders = http.Header{
-			"Link": []string{fmt.Sprintf("<?%s>; rel=\"next\"", nextParams.Encode())},
-		}
-	}
+	return body, nextPageHeaders(parameters, nextToken), nil
+}
 
-	return body, responseHeaders, nil
+func nextPageHeaders(parameters url.Values, nextToken *string) http.Header {
+	if nextToken == nil || *nextToken == "" {
+		return nil
+	}
+	nextParams := url.Values{}
+	for k, v := range parameters {
+		nextParams[k] = v
+	}
+	nextParams.Set("nextToken", *nextToken)
+	return http.Header{
+		"Link": []string{fmt.Sprintf("<?%s>; rel=\"next\"", nextParams.Encode())},
+	}
 }
 
 func (ds *DataSource) resourceRequestWithHeadersMiddleware(handleFunc models.RouteHandlerWithHeadersFunc) func(rw http.ResponseWriter, req *http.Request) {
@@ -143,28 +151,28 @@ func (ds *DataSource) resourceRequestWithHeadersMiddleware(handleFunc models.Rou
 	}
 }
 
-func (ds *DataSource) DataSourcesHandler(ctx context.Context, parameters url.Values) ([]byte, *models.HttpError) {
+func (ds *DataSource) DataSourcesHandler(ctx context.Context, parameters url.Values) ([]byte, http.Header, *models.HttpError) {
 	request, err := resources.ParseDataSourcesRequest(parameters)
 	if err != nil {
-		return nil, models.NewHttpError("error in DataSourcesHandler", http.StatusBadRequest, err)
+		return nil, nil, models.NewHttpError("error in DataSourcesHandler", http.StatusBadRequest, err)
 	}
 
 	service, err := ds.GetDataSourcesService(ctx, request.Region)
 	if err != nil {
-		return nil, models.NewHttpError("GetDataSourcesService error", http.StatusInternalServerError, err)
+		return nil, nil, models.NewHttpError("GetDataSourcesService error", http.StatusInternalServerError, err)
 	}
 
-	dataSources, err := service.GetDataSources(ctx, request)
+	dataSources, nextToken, err := service.GetDataSources(ctx, request)
 	if err != nil {
-		return nil, models.NewHttpError("GetDataSources error", http.StatusInternalServerError, err)
+		return nil, nil, models.NewHttpError("GetDataSources error", http.StatusInternalServerError, err)
 	}
 
 	dataSourcesResponse, err := json.Marshal(dataSources)
 	if err != nil {
-		return nil, models.NewHttpError("DataSourcesHandler json error", http.StatusInternalServerError, err)
+		return nil, nil, models.NewHttpError("DataSourcesHandler json error", http.StatusInternalServerError, err)
 	}
 
-	return dataSourcesResponse, nil
+	return dataSourcesResponse, nextPageHeaders(parameters, nextToken), nil
 }
 
 func (ds *DataSource) MetricsHandler(ctx context.Context, parameters url.Values) ([]byte, *models.HttpError) {
@@ -369,7 +377,7 @@ func (ds *DataSource) GetLogGroupsService(ctx context.Context, region string) (m
 	if err != nil {
 		return nil, err
 	}
-	return services.NewLogGroupsService(NewLogsAPI(awsConfig), features.IsEnabled(ctx, features.FlagCloudWatchCrossAccountQuerying)), nil
+	return services.NewLogGroupsService(NewLogsAPI(awsConfig), features.IsEnabled(ctx, features.FlagCloudWatchCrossAccountQuerying), ds.resourcePageLimit()), nil
 }
 
 func (ds *DataSource) GetDataSourcesService(ctx context.Context, region string) (models.DataSourcesProvider, error) {
@@ -377,7 +385,7 @@ func (ds *DataSource) GetDataSourcesService(ctx context.Context, region string) 
 	if err != nil {
 		return nil, err
 	}
-	return services.NewDataSourcesService(NewLogsAPI(awsConfig), features.IsEnabled(ctx, features.FlagCloudWatchCrossAccountQuerying)), nil
+	return services.NewDataSourcesService(NewLogsAPI(awsConfig), features.IsEnabled(ctx, features.FlagCloudWatchCrossAccountQuerying), ds.resourcePageLimit()), nil
 }
 
 func (ds *DataSource) GetListMetricsService(ctx context.Context, region string) (models.ListMetricsProvider, error) {
@@ -393,7 +401,7 @@ func (ds *DataSource) GetAccountsService(ctx context.Context, region string) (mo
 	if err != nil {
 		return nil, err
 	}
-	return services.NewAccountsService(NewOAMAPI(awsCfg)), nil
+	return services.NewAccountsService(NewOAMAPI(awsCfg), ds.resourcePageLimit()), nil
 }
 
 func (ds *DataSource) GetRegionsService(ctx context.Context, region string) (models.RegionsAPIProvider, error) {

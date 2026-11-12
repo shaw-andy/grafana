@@ -19,7 +19,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi"
 	resourcegroupstaggingapitypes "github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi/types"
+	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
+
+// Without MaxResults, DescribeInstances may return every matching instance in a single page.
+const ec2DescribeInstancesPageSize = int32(1000)
+
+const orgAdminRole = "Admin"
+
+var errUnfilteredRequest = errors.New("at least one filter is required")
 
 type suggestData struct {
 	Text  string `json:"text"`
@@ -41,14 +49,30 @@ func parseMultiSelectValue(input string) []string {
 	return []string{trimmedInput}
 }
 
-func (ds *DataSource) handleGetEbsVolumeIds(ctx context.Context, parameters url.Values) ([]suggestData, error) {
+func isOrgAdmin(ctx context.Context) bool {
+	user := backend.UserFromContext(ctx)
+	return user != nil && user.Role == orgAdminRole
+}
+
+func nextTokenParam(parameters url.Values) *string {
+	if token := parameters.Get("nextToken"); token != "" {
+		return &token
+	}
+	return nil
+}
+
+func (ds *DataSource) resourcePageLimit() int {
+	return max(ds.Settings.GrafanaSettings.ListMetricsPageLimit, 1)
+}
+
+func (ds *DataSource) handleGetEbsVolumeIds(ctx context.Context, parameters url.Values) ([]suggestData, *string, error) {
 	region := parameters.Get("region")
 	instanceId := parameters.Get("instanceId")
 
 	instanceIds := parseMultiSelectValue(instanceId)
-	instances, err := ds.ec2DescribeInstances(ctx, region, nil, instanceIds)
+	instances, nextToken, err := ds.ec2DescribeInstances(ctx, region, nil, instanceIds, nextTokenParam(parameters))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	result := make([]suggestData, 0)
@@ -60,10 +84,10 @@ func (ds *DataSource) handleGetEbsVolumeIds(ctx context.Context, parameters url.
 		}
 	}
 
-	return result, nil
+	return result, nextToken, nil
 }
 
-func (ds *DataSource) handleGetEc2InstanceAttribute(ctx context.Context, parameters url.Values) ([]suggestData, error) {
+func (ds *DataSource) handleGetEc2InstanceAttribute(ctx context.Context, parameters url.Values) ([]suggestData, *string, error) {
 	region := parameters.Get("region")
 	attributeName := parameters.Get("attributeName")
 	filterJson := parameters.Get("filters")
@@ -71,10 +95,11 @@ func (ds *DataSource) handleGetEc2InstanceAttribute(ctx context.Context, paramet
 	filterMap := map[string]any{}
 	err := json.Unmarshal([]byte(filterJson), &filterMap)
 	if err != nil {
-		return nil, fmt.Errorf("error unmarshaling filter: %v", err)
+		return nil, nil, fmt.Errorf("error unmarshaling filter: %v", err)
 	}
 
 	var filters []ec2types.Filter
+	hasFilter := false
 	for k, v := range filterMap {
 		if vv, ok := v.([]any); ok {
 			var values []string
@@ -87,12 +112,17 @@ func (ds *DataSource) handleGetEc2InstanceAttribute(ctx context.Context, paramet
 				Name:   aws.String(k),
 				Values: values,
 			})
+			hasFilter = hasFilter || (k != "" && len(values) > 0)
 		}
 	}
 
-	instances, err := ds.ec2DescribeInstances(ctx, region, filters, nil)
+	if !hasFilter && !isOrgAdmin(ctx) {
+		return nil, nil, errUnfilteredRequest
+	}
+
+	instances, nextToken, err := ds.ec2DescribeInstances(ctx, region, filters, nil, nextTokenParam(parameters))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	result := make([]suggestData, 0)
@@ -101,7 +131,7 @@ func (ds *DataSource) handleGetEc2InstanceAttribute(ctx context.Context, paramet
 		for _, instance := range reservation.Instances {
 			data, found, err := getInstanceAttributeValue(attributeName, instance)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if !found {
 				continue
@@ -119,7 +149,7 @@ func (ds *DataSource) handleGetEc2InstanceAttribute(ctx context.Context, paramet
 		return result[i].Text < result[j].Text
 	})
 
-	return result, nil
+	return result, nextToken, nil
 }
 
 func getInstanceAttributeValue(attributeName string, instance ec2types.Instance) (value string, found bool, err error) {
@@ -175,7 +205,7 @@ func getInstanceAttributeValue(attributeName string, instance ec2types.Instance)
 	return data, true, nil
 }
 
-func (ds *DataSource) handleGetResourceArns(ctx context.Context, parameters url.Values) ([]suggestData, error) {
+func (ds *DataSource) handleGetResourceArns(ctx context.Context, parameters url.Values) ([]suggestData, *string, error) {
 	region := parameters.Get("region")
 	resourceType := parameters.Get("resourceType")
 	tagsJson := parameters.Get("tags")
@@ -183,10 +213,11 @@ func (ds *DataSource) handleGetResourceArns(ctx context.Context, parameters url.
 	tagsMap := map[string]any{}
 	err := json.Unmarshal([]byte(tagsJson), &tagsMap)
 	if err != nil {
-		return nil, fmt.Errorf("error unmarshaling filter: %v", err)
+		return nil, nil, fmt.Errorf("error unmarshaling filter: %v", err)
 	}
 
 	var filters []resourcegroupstaggingapitypes.TagFilter
+	hasFilter := false
 	for k, v := range tagsMap {
 		if vv, ok := v.([]any); ok {
 			var values []string
@@ -199,14 +230,19 @@ func (ds *DataSource) handleGetResourceArns(ctx context.Context, parameters url.
 				Key:    aws.String(k),
 				Values: values,
 			})
+			hasFilter = hasFilter || k != ""
 		}
+	}
+
+	if !hasFilter && !isOrgAdmin(ctx) {
+		return nil, nil, errUnfilteredRequest
 	}
 
 	resourceTypes := []string{resourceType}
 
-	resources, err := ds.resourceGroupsGetResources(ctx, region, filters, resourceTypes)
+	resources, nextToken, err := ds.resourceGroupsGetResources(ctx, region, filters, resourceTypes, nextTokenParam(parameters))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	result := make([]suggestData, 0)
@@ -215,66 +251,78 @@ func (ds *DataSource) handleGetResourceArns(ctx context.Context, parameters url.
 		result = append(result, suggestData{Text: data, Value: data, Label: data})
 	}
 
-	return result, nil
+	return result, nextToken, nil
 }
 
-func (ds *DataSource) ec2DescribeInstances(ctx context.Context, region string, filters []ec2types.Filter, instanceIds []string) (*ec2.DescribeInstancesOutput, error) {
+func (ds *DataSource) ec2DescribeInstances(ctx context.Context, region string, filters []ec2types.Filter, instanceIds []string, nextToken *string) (*ec2.DescribeInstancesOutput, *string, error) {
 	params := &ec2.DescribeInstancesInput{
 		Filters:     filters,
 		InstanceIds: instanceIds,
+		NextToken:   nextToken,
+	}
+	// MaxResults cannot be combined with InstanceIds.
+	if len(instanceIds) == 0 {
+		params.MaxResults = aws.Int32(ec2DescribeInstancesPageSize)
 	}
 
 	client, err := ds.getEC2Client(ctx, region)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	resp := &ec2.DescribeInstancesOutput{}
-	pager := ec2.NewDescribeInstancesPaginator(client, params)
-	for pager.HasMorePages() {
-		page, err := pager.NextPage(ctx)
+	for range ds.resourcePageLimit() {
+		page, err := client.DescribeInstances(ctx, params)
 		if err != nil {
-			return resp, fmt.Errorf("describe instances pager failed: %w", err)
+			return nil, nil, fmt.Errorf("describe instances pager failed: %w", err)
 		}
 		resp.Reservations = append(resp.Reservations, page.Reservations...)
+		if aws.ToString(page.NextToken) == "" {
+			return resp, nil, nil
+		}
+		params.NextToken = page.NextToken
 	}
-	return resp, nil
+	return resp, params.NextToken, nil
 }
 
 func (ds *DataSource) resourceGroupsGetResources(ctx context.Context, region string, filters []resourcegroupstaggingapitypes.TagFilter,
-	resourceTypes []string) (*resourcegroupstaggingapi.GetResourcesOutput, error) {
+	resourceTypes []string, paginationToken *string) (*resourcegroupstaggingapi.GetResourcesOutput, *string, error) {
 	params := &resourcegroupstaggingapi.GetResourcesInput{
 		ResourceTypeFilters: resourceTypes,
 		TagFilters:          filters,
+		PaginationToken:     paginationToken,
 	}
 
 	client, err := ds.getRGTAClient(ctx, region)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var resp resourcegroupstaggingapi.GetResourcesOutput
-	paginator := resourcegroupstaggingapi.NewGetResourcesPaginator(client, params)
-	for paginator.HasMorePages() {
-		page, err := paginator.NextPage(ctx)
+	for range ds.resourcePageLimit() {
+		page, err := client.GetResources(ctx, params)
 		if err != nil {
-			return nil, fmt.Errorf("get resource groups paginator failed: %w", err)
+			return nil, nil, fmt.Errorf("get resource groups paginator failed: %w", err)
 		}
 		resp.ResourceTagMappingList = append(resp.ResourceTagMappingList, page.ResourceTagMappingList...)
+		if aws.ToString(page.PaginationToken) == "" {
+			return &resp, nil, nil
+		}
+		params.PaginationToken = page.PaginationToken
 	}
 
-	return &resp, nil
+	return &resp, params.PaginationToken, nil
 }
 
 // legacy route, will be removed once GovCloud supports Cross Account Observability
-func (ds *DataSource) handleGetLogGroups(ctx context.Context, parameters url.Values) ([]suggestData, error) {
+func (ds *DataSource) handleGetLogGroups(ctx context.Context, parameters url.Values) ([]suggestData, *string, error) {
 	region := parameters.Get("region")
 	limit := parameters.Get("limit")
 	logGroupNamePrefix := parameters.Get("logGroupNamePrefix")
 
 	logsClient, err := ds.getCWLogsClient(ctx, region)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	logGroupLimit := defaultLogGroupLimit
@@ -290,7 +338,7 @@ func (ds *DataSource) handleGetLogGroups(ctx context.Context, parameters url.Val
 	var response *cloudwatchlogs.DescribeLogGroupsOutput
 	response, err = logsClient.DescribeLogGroups(ctx, input)
 	if err != nil || response == nil {
-		return nil, err
+		return nil, nil, err
 	}
 	result := make([]suggestData, 0)
 	for _, logGroup := range response.LogGroups {
@@ -298,5 +346,5 @@ func (ds *DataSource) handleGetLogGroups(ctx context.Context, parameters url.Val
 		result = append(result, suggestData{Text: logGroupName, Value: logGroupName, Label: logGroupName})
 	}
 
-	return result, nil
+	return result, nil, nil
 }

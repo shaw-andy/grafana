@@ -16,16 +16,17 @@ var ErrAccessDeniedException = errors.New("access denied. please check your IAM 
 
 type AccountsService struct {
 	models.OAMAPIProvider
+	pageLimit int
 }
 
-var NewAccountsService = func(oamClient models.OAMAPIProvider) models.AccountsProvider {
-	return &AccountsService{oamClient}
+var NewAccountsService = func(oamClient models.OAMAPIProvider, pageLimit int) models.AccountsProvider {
+	return &AccountsService{OAMAPIProvider: oamClient, pageLimit: pageLimit}
 }
 
 func (a *AccountsService) GetAccountsForCurrentUserOrRole(ctx context.Context) ([]resources.ResourceResponse[resources.Account], error) {
 	var nextToken *string
 	sinks := []oamtypes.ListSinksItem{}
-	for {
+	for range max(a.pageLimit, 1) {
 		response, err := a.ListSinks(ctx, &oam.ListSinksInput{NextToken: nextToken})
 		if err != nil {
 			smithyErr := &smithy.GenericAPIError{}
@@ -56,7 +57,7 @@ func (a *AccountsService) GetAccountsForCurrentUserOrRole(ctx context.Context) (
 	}}
 
 	nextToken = nil
-	for {
+	for range max(a.pageLimit, 1) {
 		links, err := a.ListAttachedLinks(ctx, &oam.ListAttachedLinksInput{
 			SinkIdentifier: sinkIdentifier,
 			NextToken:      nextToken,

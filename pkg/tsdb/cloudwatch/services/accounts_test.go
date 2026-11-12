@@ -21,7 +21,7 @@ func TestHandleGetAccounts(t *testing.T) {
 	t.Run("Should return an error in case of insufficient permissions from ListSinks", func(t *testing.T) {
 		fakeOAMClient := &mocks.FakeOAMClient{}
 		fakeOAMClient.On("ListSinks", mock.Anything).Return(&oam.ListSinksOutput{}, fmt.Errorf("%w", &smithy.GenericAPIError{Code: "AccessDeniedException", Message: "this is bad"}))
-		accounts := NewAccountsService(fakeOAMClient)
+		accounts := NewAccountsService(fakeOAMClient, 100)
 
 		resp, err := accounts.GetAccountsForCurrentUserOrRole(context.Background())
 
@@ -34,7 +34,7 @@ func TestHandleGetAccounts(t *testing.T) {
 	t.Run("Should return an error in case of any error from ListSinks", func(t *testing.T) {
 		fakeOAMClient := &mocks.FakeOAMClient{}
 		fakeOAMClient.On("ListSinks", mock.Anything).Return(&oam.ListSinksOutput{}, fmt.Errorf("some error"))
-		accounts := NewAccountsService(fakeOAMClient)
+		accounts := NewAccountsService(fakeOAMClient, 100)
 
 		resp, err := accounts.GetAccountsForCurrentUserOrRole(context.Background())
 
@@ -46,7 +46,7 @@ func TestHandleGetAccounts(t *testing.T) {
 	t.Run("Should return empty array in case no monitoring account exists", func(t *testing.T) {
 		fakeOAMClient := &mocks.FakeOAMClient{}
 		fakeOAMClient.On("ListSinks", mock.Anything).Return(&oam.ListSinksOutput{}, nil)
-		accounts := NewAccountsService(fakeOAMClient)
+		accounts := NewAccountsService(fakeOAMClient, 100)
 
 		resp, err := accounts.GetAccountsForCurrentUserOrRole(context.Background())
 
@@ -70,7 +70,7 @@ func TestHandleGetAccounts(t *testing.T) {
 			NextToken: nil,
 		}, nil)
 		fakeOAMClient.On("ListAttachedLinks", mock.Anything).Return(&oam.ListAttachedLinksOutput{}, nil)
-		accounts := NewAccountsService(fakeOAMClient)
+		accounts := NewAccountsService(fakeOAMClient, 100)
 
 		resp, err := accounts.GetAccountsForCurrentUserOrRole(context.Background())
 
@@ -110,7 +110,7 @@ func TestHandleGetAccounts(t *testing.T) {
 			},
 			NextToken: nil,
 		}, nil)
-		accounts := NewAccountsService(fakeOAMClient)
+		accounts := NewAccountsService(fakeOAMClient, 100)
 
 		resp, err := accounts.GetAccountsForCurrentUserOrRole(context.Background())
 
@@ -141,7 +141,7 @@ func TestHandleGetAccounts(t *testing.T) {
 			NextToken: nil,
 		}, nil).Once()
 		fakeOAMClient.On("ListAttachedLinks", mock.Anything).Return(&oam.ListAttachedLinksOutput{}, nil)
-		accounts := NewAccountsService(fakeOAMClient)
+		accounts := NewAccountsService(fakeOAMClient, 100)
 
 		_, _ = accounts.GetAccountsForCurrentUserOrRole(context.Background())
 
@@ -156,7 +156,7 @@ func TestHandleGetAccounts(t *testing.T) {
 			Items: []oamtypes.ListSinksItem{{Name: aws.String("Account 1"), Arn: aws.String("arn:aws:logs:us-east-1:123456789012:log-group:my-log-group1")}},
 		}, nil)
 		fakeOAMClient.On("ListAttachedLinks", mock.Anything).Return(&oam.ListAttachedLinksOutput{}, fmt.Errorf("some error")).Once()
-		accounts := NewAccountsService(fakeOAMClient)
+		accounts := NewAccountsService(fakeOAMClient, 100)
 
 		resp, err := accounts.GetAccountsForCurrentUserOrRole(context.Background())
 

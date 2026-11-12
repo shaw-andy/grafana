@@ -42,7 +42,7 @@ type LogGroupsProvider interface {
 }
 
 type DataSourcesProvider interface {
-	GetDataSources(ctx context.Context, request resources.DataSourcesRequest) ([]resources.ResourceResponse[resources.LogDataSource], error)
+	GetDataSources(ctx context.Context, request resources.DataSourcesRequest) ([]resources.ResourceResponse[resources.LogDataSource], *string, error)
 }
 
 type AccountsProvider interface {

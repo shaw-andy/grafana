@@ -55,10 +55,10 @@ type DataSourcesService struct {
 	mock.Mock
 }
 
-func (l *DataSourcesService) GetDataSources(_ context.Context, request resources.DataSourcesRequest) ([]resources.ResourceResponse[resources.LogDataSource], error) {
+func (l *DataSourcesService) GetDataSources(_ context.Context, request resources.DataSourcesRequest) ([]resources.ResourceResponse[resources.LogDataSource], *string, error) {
 	args := l.Called(request)
 
-	return args.Get(0).([]resources.ResourceResponse[resources.LogDataSource]), args.Error(1)
+	return args.Get(0).([]resources.ResourceResponse[resources.LogDataSource]), nil, args.Error(1)
 }
 
 type MockLogEvents struct {
