@@ -111,7 +111,7 @@ func (cfg *Cfg) applyFeatureToggleCmdOverrides(file *ini.File) {
 		section.Key(keyName).SetValue(value)
 		if !already[propKey] {
 			cfg.appliedCommandLineProperties = append(cfg.appliedCommandLineProperties,
-				fmt.Sprintf("%s=%s", propKey, RedactedValue(propKey, value)))
+				fmt.Sprintf("%s=%s", propKey, redactedCommandLineValue(propKey, section.Name(), keyName, value)))
 		}
 	}
 }
