@@ -14,6 +14,7 @@ import (
 	"github.com/grafana/grafana/pkg/api/response"
 	"github.com/grafana/grafana/pkg/api/routing"
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/middleware/csrf"
 	"github.com/grafana/grafana/pkg/services/auth"
 	"github.com/grafana/grafana/pkg/services/auth/authtest"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
@@ -284,8 +285,8 @@ func TestHTTPServer_RotateUserAuthToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
+			cfg := setting.NewCfg()
 			server := SetupAPITestServer(t, func(hs *HTTPServer) {
-				cfg := setting.NewCfg()
 				cfg.LoginCookieName = "grafana_session"
 				cfg.LoginMaxLifetime = 10 * time.Hour
 				hs.Cfg = cfg
@@ -297,8 +298,10 @@ func TestHTTPServer_RotateUserAuthToken(t *testing.T) {
 					},
 				}
 			})
+			server.Mux.UseMiddleware(csrf.ProvideCSRFFilter(cfg).Middleware())
 
 			req := server.NewPostRequest("/api/user/auth-tokens/rotate", nil)
+			req.Header.Set("Origin", server.TestServer.URL)
 			if tt.cookie != nil {
 				req.AddCookie(tt.cookie)
 			}
