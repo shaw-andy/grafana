@@ -47,8 +47,9 @@ func TestHeadlessScreenshotService(t *testing.T) {
 			TimeoutOpts: rendering.TimeoutOpts{
 				Timeout: DefaultTimeout,
 			},
-			Path:            "d-solo/foo/bar?from=now-6h&orgId=2&panelId=4&to=now-2h",
-			ConcurrentLimit: cfg.RendererConcurrentRequestLimit,
+			Path:              "d-solo/foo/bar?from=now-6h&orgId=2&panelId=4&to=now-2h",
+			ConcurrentLimit:   cfg.RendererConcurrentRequestLimit,
+			ConcurrencyBudget: rendering.AlertingConcurrencyBudget,
 		},
 		ErrorOpts: rendering.ErrorOpts{
 			ErrorConcurrentLimitReached: true,

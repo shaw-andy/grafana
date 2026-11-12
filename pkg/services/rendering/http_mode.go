@@ -99,7 +99,7 @@ func (rs *RenderingService) doRequestAndWriteToFile(ctx context.Context, renderT
 	}
 
 	// gives service some additional time to timeout and return possible errors.
-	reqContext, cancel := context.WithTimeout(ctx, getRequestTimeout(timeoutOpts))
+	reqContext, cancel := context.WithTimeout(ctx, rs.requestTimeout(timeoutOpts))
 	defer cancel()
 
 	resp, err := rs.doRequest(reqContext, rendererURL, headers)
@@ -185,6 +185,12 @@ func (rs *RenderingService) writeResponseToFile(ctx context.Context, resp *http.
 		return ErrTimeout
 	}
 
+	maxSize := rs.maxResponseSize()
+	if resp.ContentLength > maxSize {
+		logger.Error("Remote rendering response is too large", "contentLength", resp.ContentLength, "maxSize", maxSize)
+		return ErrResponseTooLarge
+	}
+
 	//nolint:gosec
 	out, err := os.Create(filePath)
 	if err != nil {
@@ -198,7 +204,23 @@ func (rs *RenderingService) writeResponseToFile(ctx context.Context, resp *http.
 		}
 	}()
 
-	_, err = io.Copy(out, resp.Body)
+	written, err := io.Copy(out, io.LimitReader(resp.Body, maxSize))
+	if err == nil && written == maxSize {
+		// Probe for data past the limit without writing it, so the file never exceeds maxSize.
+		var probe [1]byte
+		n, probeErr := io.ReadFull(resp.Body, probe[:])
+		switch {
+		case n > 0:
+			_ = out.Close()
+			if removeErr := os.Remove(filePath); removeErr != nil {
+				logger.Warn("Failed to remove oversized rendering response", "path", filePath, "err", removeErr)
+			}
+			logger.Error("Remote rendering response is too large", "maxSize", maxSize)
+			return ErrResponseTooLarge
+		case !errors.Is(probeErr, io.EOF):
+			err = probeErr
+		}
+	}
 	if err != nil {
 		// check that we didn't timeout while receiving the response.
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {

@@ -116,8 +116,9 @@ func (s *HeadlessScreenshotService) Take(ctx context.Context, opts ScreenshotOpt
 			TimeoutOpts: rendering.TimeoutOpts{
 				Timeout: opts.Timeout,
 			},
-			ConcurrentLimit: s.cfg.RendererConcurrentRequestLimit,
-			Path:            u.String(),
+			ConcurrentLimit:   s.cfg.RendererConcurrentRequestLimit,
+			ConcurrencyBudget: rendering.AlertingConcurrencyBudget,
+			Path:              u.String(),
 		},
 		ErrorOpts: rendering.ErrorOpts{
 			ErrorConcurrentLimitReached: true,

@@ -7,7 +7,6 @@ import (
 	"encoding/gob"
 	"errors"
 	"fmt"
-	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -32,16 +31,17 @@ import (
 var _ Service = (*RenderingService)(nil)
 
 type RenderingService struct {
-	log                 log.Logger
-	renderAction        renderFunc
-	renderCSVAction     renderCSVFunc
-	domain              string
-	inProgressCount     atomic.Int32
-	version             string
-	versionMutex        sync.RWMutex
-	capabilities        []Capability
-	rendererCallbackURL string
-	netClient           *http.Client
+	log                     log.Logger
+	renderAction            renderFunc
+	renderCSVAction         renderCSVFunc
+	domain                  string
+	inProgressCount         atomic.Int32
+	alertingInProgressCount atomic.Int32
+	version                 string
+	versionMutex            sync.RWMutex
+	capabilities            []Capability
+	rendererCallbackURL     string
+	netClient               *http.Client
 
 	perRequestRenderKeyProvider renderKeyProvider
 	Cfg                         *setting.Cfg
@@ -306,14 +306,15 @@ func (rs *RenderingService) render(ctx context.Context, renderType RenderType, o
 		return rs.renderUnavailableImage(), nil
 	}
 
-	newInProgressCount := rs.inProgressCount.Add(1)
+	opts, err := rs.boundOpts(opts)
+	if err != nil {
+		return nil, err
+	}
 
-	defer func() {
-		metrics.MRenderingQueue.Set(float64(rs.inProgressCount.Add(-1)))
-	}()
-	metrics.MRenderingQueue.Set(float64(newInProgressCount))
+	release, ok := rs.acquireSlot(opts.CommonOpts)
+	defer release()
 
-	if opts.ConcurrentLimit > 0 && int(newInProgressCount) > opts.ConcurrentLimit {
+	if !ok {
 		logger.Warn("Could not render image, hit the currency limit", "concurrencyLimit", opts.ConcurrentLimit, "path", opts.Path)
 		if opts.ErrorConcurrentLimitReached {
 			return nil, ErrConcurrentLimitReached
@@ -336,9 +337,6 @@ func (rs *RenderingService) render(ctx context.Context, renderType RenderType, o
 	}
 
 	logger.Info("Rendering", "path", opts.Path, "userID", opts.UserID)
-	if math.IsInf(opts.DeviceScaleFactor, 0) || math.IsNaN(opts.DeviceScaleFactor) || opts.DeviceScaleFactor == 0 {
-		opts.DeviceScaleFactor = 1
-	}
 	renderKey, err := renderKeyProvider.get(ctx, opts.AuthOpts)
 	if err != nil {
 		return nil, err
@@ -380,14 +378,16 @@ func (rs *RenderingService) renderCSV(ctx context.Context, opts CSVOpts, renderK
 		return nil, ErrRenderUnavailable
 	}
 
-	newInProgressCount := rs.inProgressCount.Add(1)
+	common, err := rs.boundCommonOpts(opts.CommonOpts)
+	if err != nil {
+		return nil, err
+	}
+	opts.CommonOpts = common
 
-	defer func() {
-		metrics.MRenderingQueue.Set(float64(rs.inProgressCount.Add(-1)))
-	}()
-	metrics.MRenderingQueue.Set(float64(newInProgressCount))
+	release, ok := rs.acquireSlot(opts.CommonOpts)
+	defer release()
 
-	if opts.ConcurrentLimit > 0 && int(newInProgressCount) > opts.ConcurrentLimit {
+	if !ok {
 		return nil, ErrConcurrentLimitReached
 	}
 
