@@ -383,7 +383,7 @@ Returns errors intermittently based on a configurable error rate, with optional 
 | **Error rate**        | Percentage of requests that return an error. Default: `50`.                                                                     |
 | **Status code**       | HTTP status code returned with the error. Default: `400`.                                                                       |
 | **Error source**      | Source of the error: `Plugin` (plugin error) or `Downstream` (downstream service error).                                        |
-| **Query delay**       | Base delay applied to each request in Go duration syntax, for example `1s` or `500ms`. Default: `5s`.                           |
+| **Query delay**       | Base delay applied to each request in Go duration syntax, for example `1s` or `500ms`. Default: `5s`. Maximum: `5s`.            |
 | **Delay variability** | Randomizes the query delay by plus or minus this percentage. For example, `100` on a `1s` delay sleeps between 0 and 2 seconds. |
 | **Error message**     | Message returned with the error. Default: `Flaky query error`.                                                                  |
 
@@ -405,7 +405,7 @@ Returns a single data point with a timestamp one hour before the query time rang
 
 ### Slow Query
 
-Introduces a configurable delay before returning random walk data. Set the delay duration in the **String Input** field using Go duration syntax (for example, `5s`, `1m`, `500ms`). Default: `5s`.
+Introduces a configurable delay before returning random walk data. Set the delay duration in the **String Input** field using Go duration syntax (for example, `5s` or `500ms`). Default: `5s`. Delays longer than `5s` are ignored, and the delays of all queries in one request add up to at most `5s`.
 
 ## Metadata scenarios
 

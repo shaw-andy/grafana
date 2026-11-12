@@ -128,7 +128,7 @@ Select **Flaky Query** to simulate a data source that fails part of the time. Se
 
 ### Timeouts
 
-Select **Slow Query** and set the **String Input** field to a duration longer than your evaluation interval (for example, `30s` for a rule evaluated every `10s`). The default delay is `5s`. Use this to verify timeout behavior and confirm that alerts transition to the expected state when queries take too long.
+Select **Slow Query** and set the **String Input** field to the delay to apply. The default and maximum delay is `5s`, and longer values are ignored. To test timeouts, set `evaluation_timeout` in the `[unified_alerting]` configuration section to a value shorter than the delay, for example `2s` with a `5s` delay. Use this to verify timeout behavior and confirm that alerts transition to the expected state when queries take too long.
 
 ## Limitations
 

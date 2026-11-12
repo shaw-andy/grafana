@@ -98,9 +98,9 @@ These errors occur when running TestData scenarios.
 
 **Solutions:**
 
-1. Check the **String Input** field, which controls the delay duration. The default is `5s`.
+1. Check the **String Input** field, which controls the delay duration. The default and maximum is `5s`, and longer values are ignored.
 1. Reduce the value to a shorter duration (for example, `1s` or `500ms`).
-1. The field accepts Go duration syntax: `5s` (seconds), `1m` (minutes), `500ms` (milliseconds).
+1. The field accepts Go duration syntax: `5s` (seconds), `500ms` (milliseconds).
 
 ### Unexpected error from Conditional Error
 
