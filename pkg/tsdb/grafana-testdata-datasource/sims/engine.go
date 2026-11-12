@@ -1,6 +1,7 @@
 package sims
 
 import (
+	"container/list"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -29,8 +30,25 @@ type SimulationEngine struct {
 	// The running instances
 	running map[string]Simulation
 
+	// Recency and active stream count for each key in running
+	live map[string]*liveSimulation
+	// Keys in running, most recently used at the front
+	lru *list.List
+
 	// safe changes
 	mutex sync.Mutex
+}
+
+// Simulation keys come from query JSON, resource paths and stream paths, so the
+// number of retained simulations and the size of each key must stay bounded.
+const (
+	liveSimulationLimit = 32
+	simulationUIDLimit  = 128
+)
+
+type liveSimulation struct {
+	elem    *list.Element
+	streams int
 }
 
 func (s *SimulationEngine) register(info simulationInfo) error {
@@ -59,6 +77,8 @@ func NewSimulationEngine() (*SimulationEngine, error) {
 	s := &SimulationEngine{
 		registry: make(map[string]simulationInfo),
 		running:  make(map[string]Simulation),
+		live:     make(map[string]*liveSimulation),
+		lru:      list.New(),
 		logger:   backend.NewLoggerWith("logger", "tsdb.sims"),
 	}
 	// Initialize each type
@@ -78,6 +98,13 @@ func NewSimulationEngine() (*SimulationEngine, error) {
 }
 
 func (s *SimulationEngine) Lookup(info simulationState) (Simulation, error) {
+	return s.lookup(info, false)
+}
+
+// lookup returns the running simulation for info.Key, creating it if needed.
+// When stream is true the simulation is pinned against eviction until
+// releaseStream is called with the returned simulation.
+func (s *SimulationEngine) lookup(info simulationState, stream bool) (Simulation, error) {
 	hz := info.Key.TickHZ
 	if hz < (1 / 60.0) {
 		return nil, fmt.Errorf("frequency is too slow")
@@ -88,13 +115,20 @@ func (s *SimulationEngine) Lookup(info simulationState) (Simulation, error) {
 	if info.Key.Type == "" {
 		return nil, fmt.Errorf("missing simulation type")
 	}
+	if len(info.Key.UID) > simulationUIDLimit {
+		return nil, fmt.Errorf("simulation uid is longer than %d bytes", simulationUIDLimit)
+	}
 
 	key := info.Key.String()
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	v, ok := s.running[key]
-	if ok {
+	if v, ok := s.running[key]; ok {
+		entry := s.live[key]
+		s.lru.MoveToFront(entry.elem)
+		if stream {
+			entry.streams++
+		}
 		return v, nil
 	}
 
@@ -103,11 +137,59 @@ func (s *SimulationEngine) Lookup(info simulationState) (Simulation, error) {
 		return nil, fmt.Errorf("unknown simulation type")
 	}
 
-	v, err := t.create(info)
-	if err == nil {
-		s.running[key] = v
+	if len(s.running) >= liveSimulationLimit && !s.evictLeastRecentlyUsed() {
+		return nil, fmt.Errorf("too many running simulations")
 	}
-	return v, err
+
+	v, err := t.create(info)
+	if err != nil {
+		return nil, err
+	}
+	entry := &liveSimulation{elem: s.lru.PushFront(key)}
+	if stream {
+		entry.streams = 1
+	}
+	s.running[key] = v
+	s.live[key] = entry
+	return v, nil
+}
+
+// evictLeastRecentlyUsed removes the least recently used simulation that has no
+// active stream. It must be called with the mutex held.
+func (s *SimulationEngine) evictLeastRecentlyUsed() bool {
+	for e := s.lru.Back(); e != nil; e = e.Prev() {
+		key := e.Value.(string)
+		if s.live[key].streams > 0 {
+			continue
+		}
+		s.removeLocked(key)
+		return true
+	}
+	return false
+}
+
+func (s *SimulationEngine) removeLocked(key string) {
+	sim := s.running[key]
+	s.lru.Remove(s.live[key].elem)
+	delete(s.live, key)
+	delete(s.running, key)
+	if err := sim.Close(); err != nil {
+		s.logger.Warn("Failed to close simulation", "key", key, "error", err)
+	}
+}
+
+func (s *SimulationEngine) releaseStream(key string, sim Simulation) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if s.running[key] != sim {
+		return
+	}
+	entry := s.live[key]
+	entry.streams--
+	if entry.streams <= 0 {
+		s.removeLocked(key)
+	}
 }
 
 type simulationQuery struct {
@@ -178,7 +260,7 @@ func (s *SimulationEngine) QueryData(ctx context.Context, req *backend.QueryData
 	return resp, nil
 }
 
-func (s *SimulationEngine) getSimFromPath(path string) (Simulation, error) {
+func parseSimulationPath(path string) (simulationKey, error) {
 	idx := strings.Index(path, "sim/")
 	if idx >= 0 {
 		path = path[idx+4:]
@@ -186,14 +268,14 @@ func (s *SimulationEngine) getSimFromPath(path string) (Simulation, error) {
 
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
-		return nil, fmt.Errorf("missing frequency")
+		return simulationKey{}, fmt.Errorf("missing frequency")
 	}
 	if !strings.HasSuffix(parts[1], "hz") {
-		return nil, fmt.Errorf("invalid path frequency.  Expecting `hz` suffix")
+		return simulationKey{}, fmt.Errorf("invalid path frequency.  Expecting `hz` suffix")
 	}
 	hz, err := strconv.ParseFloat(strings.TrimSuffix(parts[1], "hz"), 64)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing frequency from: %s", parts[1])
+		return simulationKey{}, fmt.Errorf("error parsing frequency from: %s", parts[1])
 	}
 	if len(parts) == 2 {
 		parts = append(parts, "") // empty UID
@@ -205,9 +287,16 @@ func (s *SimulationEngine) getSimFromPath(path string) (Simulation, error) {
 		UID:    parts[2],
 	}
 	if path != key.String() {
-		return nil, fmt.Errorf("path should match: %s", key.String())
+		return simulationKey{}, fmt.Errorf("path should match: %s", key.String())
 	}
+	return key, nil
+}
 
+func (s *SimulationEngine) getSimFromPath(path string) (Simulation, error) {
+	key, err := parseSimulationPath(path)
+	if err != nil {
+		return nil, err
+	}
 	return s.Lookup(simulationState{
 		Key: key,
 	})
@@ -223,19 +312,36 @@ func (s *SimulationEngine) GetSimulationHandler(rw http.ResponseWriter, req *htt
 		}
 		result = v
 	} else if strings.HasPrefix(path, "/sim/") {
-		sim, err := s.getSimFromPath(path)
+		key, err := parseSimulationPath(path)
 		if err != nil {
 			http.Error(rw, err.Error(), http.StatusNotFound)
 			return
 		}
 
-		// With a POST, update the values
+		// With a POST, update the values. The body is parsed and passed to create
+		// so an invalid config never leaves a new simulation behind.
+		state := simulationState{Key: key}
+		var body map[string]any
 		if req.Method == "POST" {
-			body, err := getBodyFromRequest(req)
-			if err == nil {
-				err = sim.SetConfig(body)
-			}
+			body, err = getBodyFromRequest(req)
 			if err != nil {
+				http.Error(rw, err.Error(), http.StatusBadRequest)
+				return
+			}
+			state.Config = body
+		}
+
+		sim, err := s.Lookup(state)
+		if err != nil {
+			status := http.StatusNotFound
+			if body != nil {
+				status = http.StatusBadRequest
+			}
+			http.Error(rw, err.Error(), status)
+			return
+		}
+		if body != nil {
+			if err := sim.SetConfig(body); err != nil {
 				http.Error(rw, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -272,10 +378,15 @@ func (s *SimulationEngine) SubscribeStream(ctx context.Context, req *backend.Sub
 }
 
 func (s *SimulationEngine) RunStream(ctx context.Context, req *backend.RunStreamRequest, sender *backend.StreamSender) error {
-	sim, err := s.getSimFromPath(req.Path) // includes sim
+	key, err := parseSimulationPath(req.Path) // includes sim
 	if err != nil {
 		return err
 	}
+	sim, err := s.lookup(simulationState{Key: key}, true)
+	if err != nil {
+		return err
+	}
+	defer s.releaseStream(key.String(), sim)
 
 	frequency := 1.0 / sim.GetState().Key.TickHZ
 	ticker := time.NewTicker(time.Duration(frequency * float64(time.Second)))
