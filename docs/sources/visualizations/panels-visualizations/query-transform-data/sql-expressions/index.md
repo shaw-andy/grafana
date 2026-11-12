@@ -307,7 +307,13 @@ Grafana enforces the following limits on SQL expressions. Administrators can con
 - **Query length**: The SQL text can't exceed `sql_expression_query_length_limit` characters. The default is `10000`.
 - **Timeout**: Grafana cancels a SQL expression that runs longer than `sql_expression_timeout`. The default is `10s`.
 
-For each limit, a value of `0` means no limit.
+For each of these limits, a value of `0` means no limit.
+
+Grafana also bounds the memory a SQL expression can use while it runs. These limits can't be disabled; a value of `0` or less uses the default:
+
+- **Value bytes**: The string and JSON values that the query builds, for example with `REPEAT`, `CONCAT`, `REPLACE`, or `JSON_ARRAY`, can't exceed `sql_expression_value_bytes_limit` bytes plus four times the size of the input. The default is `262144` (256 KiB). Grafana checks each value before it's built, and the query fails when the limit is reached.
+- **Processed cells**: The cells produced by all steps of the query, including joins, sorts, and recursive common table expressions, can't exceed `sql_expression_processed_cell_limit` plus ten times the number of input cells. The default is `1000000`. If the query exceeds this limit, it fails.
+- **Patterns**: `LIKE` and regular expression patterns can't be longer than 10000 bytes, and `CAST(... AS BINARY(n))` accepts lengths up to `65535`.
 
 ### Regular expression limitations in SQL expressions
 
