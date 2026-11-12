@@ -2,6 +2,7 @@ package iam
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	authzlib "github.com/grafana/authlib/authz"
@@ -14,6 +15,7 @@ import (
 	legacyiamv0 "github.com/grafana/grafana/pkg/apis/iam/v0alpha1"
 	"github.com/grafana/grafana/pkg/registry/apis/iam/display"
 	"github.com/grafana/grafana/pkg/registry/apis/iam/legacy"
+	"github.com/grafana/grafana/pkg/registry/apis/iam/sso"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	gfauthorizer "github.com/grafana/grafana/pkg/services/apiserver/auth/authorizer"
 )
@@ -80,19 +82,7 @@ func newIAMAuthorizer(
 	resourceAuthorizer[iamv0.UserResourceInfo.GetName()] = newUserAuthorizer(accessClient)
 	resourceAuthorizer[iamv0.AuthInfoResourceInfo.GetName()] = serviceIdentityAuthorizer
 	resourceAuthorizer[iamv0.TeamResourceInfo.GetName()] = newTeamAuthorizer(accessClient)
-	// The SSOSetting kind had no k8s-API consumers, so no authorizer was ever
-	// registered. Interim: allow authenticated identities; real settings:write
-	// RBAC is a follow-up (tracked with the SSO settings migration).
-	resourceAuthorizer[legacyiamv0.SSOSettingResourceInfo.GetName()] = authorizer.AuthorizerFunc(func(ctx context.Context, attr authorizer.Attributes) (authorizer.Decision, string, error) {
-		requester, err := identity.GetRequester(ctx)
-		if err != nil || requester == nil {
-			return authorizer.DecisionDeny, "cannot access ssosettings without an identity", nil
-		}
-		if requester.IsIdentityType(authlib.TypeAnonymous) {
-			return authorizer.DecisionDeny, "anonymous identities cannot access ssosettings", nil
-		}
-		return authorizer.DecisionAllow, "", nil
-	})
+	resourceAuthorizer[legacyiamv0.SSOSettingResourceInfo.GetName()] = newSSOSettingAuthorizer(legacyAccessClient)
 	resourceAuthorizer["searchUsers"] = serviceAuthorizer
 	resourceAuthorizer["searchTeams"] = serviceAuthorizer
 	// TODO: Implement fine-grained authorization for external group mapping search on the search level
@@ -315,9 +305,92 @@ func newServiceAccountAuthorizer(accessClient authlib.AccessClient) authorizer.A
 	return allowListAuthorizer(base)
 }
 
+// newSSOSettingAuthorizer applies the settings:read / settings:write checks of
+// the legacy /api/v1/sso-settings routes, scoped to the provider in the request
+// name. Nameless list and create only pass the action check here; the
+// SSOSetting storage then checks every provider it returns or writes.
+func newSSOSettingAuthorizer(accessClient authlib.AccessClient) authorizer.Authorizer {
+	return authorizer.AuthorizerFunc(func(ctx context.Context, attr authorizer.Attributes) (authorizer.Decision, string, error) {
+		if !attr.IsResourceRequest() {
+			return authorizer.DecisionNoOpinion, "", nil
+		}
+		ident, ok := authlib.AuthInfoFrom(ctx)
+		if !ok {
+			return authorizer.DecisionDeny, "", errors.New("no identity found for request")
+		}
+		if ident.GetIdentityType() == authlib.TypeAnonymous {
+			return authorizer.DecisionDeny, "anonymous identities cannot access ssosettings", nil
+		}
+
+		// The login-config singleton is secret-free and served by a custom route,
+		// not by the SSOSetting storage.
+		if attr.GetName() == sso.LoginConfigName && attr.GetVerb() == utils.VerbGet && attr.GetSubresource() == "" {
+			return authorizer.DecisionAllow, "", nil
+		}
+
+		if attr.GetSubresource() != "" {
+			return authorizer.DecisionDeny, "ssosettings has no subresources", nil
+		}
+		if attr.GetName() == "" && attr.GetVerb() != utils.VerbList && attr.GetVerb() != utils.VerbCreate {
+			return authorizer.DecisionDeny, fmt.Sprintf("ssosettings %s requires a provider name", attr.GetVerb()), nil
+		}
+		if accessClient == nil {
+			return authorizer.DecisionDeny, "no access client configured for ssosettings", nil
+		}
+
+		res, err := accessClient.Check(ctx, ident, authlib.CheckRequest{
+			Verb:      attr.GetVerb(),
+			Group:     attr.GetAPIGroup(),
+			Resource:  attr.GetResource(),
+			Namespace: attr.GetNamespace(),
+			Name:      attr.GetName(),
+		}, "")
+		if err != nil {
+			return authorizer.DecisionDeny, "", err
+		}
+		if !res.Allowed {
+			return authorizer.DecisionDeny, "requires settings permission for the sso provider", nil
+		}
+		return authorizer.DecisionAllow, "", nil
+	})
+}
+
+func ssoSettingAuthorizerOptions() accesscontrol.ResourceAuthorizerOptions {
+	return accesscontrol.ResourceAuthorizerOptions{
+		Resource: legacyiamv0.SSOSettingResourceInfo.GetName(),
+		Mapping: map[string]string{
+			utils.VerbGet:              accesscontrol.ActionSettingsRead,
+			utils.VerbList:             accesscontrol.ActionSettingsRead,
+			utils.VerbWatch:            accesscontrol.ActionSettingsRead,
+			utils.VerbCreate:           accesscontrol.ActionSettingsWrite,
+			utils.VerbUpdate:           accesscontrol.ActionSettingsWrite,
+			utils.VerbPatch:            accesscontrol.ActionSettingsWrite,
+			utils.VerbDelete:           accesscontrol.ActionSettingsWrite,
+			utils.VerbDeleteCollection: accesscontrol.ActionSettingsWrite,
+		},
+		Resolver: accesscontrol.ResourceResolverFunc(func(_ context.Context, _ authlib.NamespaceInfo, name string) ([]string, error) {
+			return []string{accesscontrol.ScopeSettingsOAuth(name)}, nil
+		}),
+	}
+}
+
+// ssoSettingAccessClient is the access client the SSOSetting storage uses to
+// check the provider of each object it reads or writes. It mirrors the client
+// behind the SSOSetting authorizer and denies everything when none is wired.
+func (b *IdentityAccessManagementAPIBuilder) ssoSettingAccessClient() authlib.AccessClient {
+	if b.ac != nil {
+		return accesscontrol.NewLegacyAccessClient(b.ac, ssoSettingAuthorizerOptions())
+	}
+	if b.accessClient != nil {
+		return b.accessClient
+	}
+	return authlib.FixedAccessClient(false)
+}
+
 func newLegacyAccessClient(ac accesscontrol.AccessControl, store legacy.LegacyIdentityStore) authlib.AccessClient {
 	client := accesscontrol.NewLegacyAccessClient(
 		ac,
+		ssoSettingAuthorizerOptions(),
 		accesscontrol.ResourceAuthorizerOptions{
 			Resource: "display",
 			Unchecked: map[string]bool{
