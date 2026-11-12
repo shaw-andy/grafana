@@ -1,4 +1,4 @@
-import { type PluginError, renderMarkdown } from '@grafana/data';
+import { type PluginError, renderMarkdown, textUtil } from '@grafana/data';
 import { getBackendSrv, isFetchError } from '@grafana/runtime';
 import { installPluginMeta, logPluginMetaError, uninstallPluginMeta } from '@grafana/runtime/internal';
 import { accessControlQueryParam } from 'app/core/utils/accessControl';
@@ -48,11 +48,11 @@ export async function getPluginDetails(id: string): Promise<CatalogPluginDetails
     grafanaDependency: dependencies?.grafanaDependency ?? dependencies?.grafanaVersion ?? '',
     pluginDependencies: dependencies?.plugins || [],
     links: local?.info.links || remote?.json?.info.links || [],
-    readme: localReadme || remote?.readme,
+    readme: localReadme || sanitizeRemoteHtml(remote?.readme),
     versions,
     statusContext: remote?.statusContext ?? '',
     iam: remote?.json?.iam,
-    changelog: remote?.changelog || localChangelog,
+    changelog: sanitizeRemoteHtml(remote?.changelog) || localChangelog,
     licenseUrl: remote?.licenseUrl,
     documentationUrl: remote?.documentationUrl,
     sponsorshipUrl: remote?.sponsorshipUrl,
@@ -62,6 +62,12 @@ export async function getPluginDetails(id: string): Promise<CatalogPluginDetails
     signature: local?.signature,
     screenshots: remote?.json?.info.screenshots || local?.info.screenshots,
   };
+}
+
+// The catalog serves readme and changelog as already-rendered HTML, so it gets the same sanitizer
+// renderMarkdown applies to local files, without being parsed as markdown again.
+function sanitizeRemoteHtml(html: string | undefined): string | undefined {
+  return html ? textUtil.sanitizeTextPanelContent(html) : html;
 }
 
 export async function getPluginInsights(id: string, version: string | undefined): Promise<CatalogPluginInsights> {
