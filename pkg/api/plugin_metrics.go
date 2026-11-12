@@ -7,6 +7,7 @@ import (
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 
+	"github.com/grafana/grafana/pkg/middleware"
 	"github.com/grafana/grafana/pkg/plugins"
 	"github.com/grafana/grafana/pkg/web"
 )
@@ -20,8 +21,8 @@ func (hs *HTTPServer) pluginMetricsEndpoint(ctx *web.Context) {
 		return
 	}
 
-	if hs.metricsEndpointBasicAuthEnabled() && !BasicAuthenticatedRequest(ctx.Req, hs.Cfg.MetricsEndpointBasicAuthUsername, hs.Cfg.MetricsEndpointBasicAuthPassword) {
-		ctx.Resp.WriteHeader(http.StatusUnauthorized)
+	if !middleware.MetricsScrapeAuthorized(hs.Cfg, ctx.Req) {
+		middleware.WriteMetricsUnauthorized(ctx.Resp)
 		return
 	}
 

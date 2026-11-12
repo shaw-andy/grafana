@@ -185,7 +185,7 @@ func (s *frontendService) addMiddlewares(m *web.Mux) {
 }
 
 func (s *frontendService) registerRoutes(m *web.Mux) {
-	s.routeGet(m, "/metrics", promhttp.HandlerFor(s.promGatherer, promhttp.HandlerOpts{EnableOpenMetrics: true}))
+	s.routeGet(m, "/metrics", middleware.MetricsScrapeHandler(s.cfg, promhttp.HandlerFor(s.promGatherer, promhttp.HandlerOpts{EnableOpenMetrics: true})))
 
 	// Frontend service doesn't (yet?) serve any assets, so explicitly 404
 	// them so we can get logs for them

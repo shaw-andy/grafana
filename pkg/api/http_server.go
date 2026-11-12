@@ -759,9 +759,8 @@ func (hs *HTTPServer) metricsEndpoint(ctx *web.Context) {
 		return
 	}
 
-	if hs.metricsEndpointBasicAuthEnabled() && !BasicAuthenticatedRequest(ctx.Req, hs.Cfg.MetricsEndpointBasicAuthUsername, hs.Cfg.MetricsEndpointBasicAuthPassword) {
-		ctx.Resp.Header().Set("WWW-Authenticate", `Basic realm="Grafana"`)
-		ctx.Resp.WriteHeader(http.StatusUnauthorized)
+	if !middleware.MetricsScrapeAuthorized(hs.Cfg, ctx.Req) {
+		middleware.WriteMetricsUnauthorized(ctx.Resp)
 		return
 	}
 
@@ -883,10 +882,6 @@ func (hs *HTTPServer) mapStatic(m *web.Mux, rootDir string, dir string, prefix s
 			Exclude:     exclude,
 		},
 	))
-}
-
-func (hs *HTTPServer) metricsEndpointBasicAuthEnabled() bool {
-	return hs.Cfg.MetricsEndpointBasicAuthUsername != "" && hs.Cfg.MetricsEndpointBasicAuthPassword != ""
 }
 
 func (hs *HTTPServer) getDefaultCiphers(tlsVersion uint16, protocol string) []uint16 {

@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/grafana/dskit/services"
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/middleware"
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
@@ -111,7 +112,7 @@ func (s *instrumentationService) stop(failureReason error) error {
 
 func (s *instrumentationService) newInstrumentationServer() (*http.Server, *mux.Router) {
 	router := mux.NewRouter()
-	router.Handle("/metrics", promhttp.HandlerFor(s.promGatherer, promhttp.HandlerOpts{EnableOpenMetrics: true}))
+	router.Handle("/metrics", middleware.MetricsScrapeHandler(s.cfg, promhttp.HandlerFor(s.promGatherer, promhttp.HandlerOpts{EnableOpenMetrics: true})))
 
 	RegisterHealthEndpoints(router, s.healthNotifier)
 

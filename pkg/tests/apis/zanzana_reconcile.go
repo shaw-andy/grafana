@@ -3,6 +3,7 @@ package apis
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"testing"
@@ -121,10 +122,12 @@ func ensureZanzanaStoreForOrg1(t *testing.T, helper *K8sTestHelper) {
 // fetchMetricFamilies scrapes the test server's /metrics endpoint and returns
 // the parsed Prometheus metric families, or nil on transport/parse failure.
 func fetchMetricFamilies(helper *K8sTestHelper) map[string]*dto.MetricFamily {
+	cfg := helper.GetEnv().Cfg
+	creds := base64.StdEncoding.EncodeToString([]byte(cfg.MetricsEndpointBasicAuthUsername + ":" + cfg.MetricsEndpointBasicAuthPassword))
 	rsp := DoRequest(helper, RequestParams{
-		User:   helper.Org1.Admin,
-		Path:   "/metrics",
-		Accept: "text/plain",
+		Path:    "/metrics",
+		Accept:  "text/plain",
+		Headers: map[string]string{"Authorization": "Basic " + creds},
 	}, &struct{}{})
 	if rsp.Response == nil || rsp.Response.StatusCode != http.StatusOK {
 		return nil

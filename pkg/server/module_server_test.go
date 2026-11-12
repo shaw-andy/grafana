@@ -31,6 +31,9 @@ func TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServer(t *tes
 	cfg.GRPCServer.Network = "tcp"
 	cfg.GRPCServer.Address = "localhost:10000"
 	cfg.Target = []string{modules.StorageServer}
+	cfg.MetricsEndpointEnabled = true
+	cfg.MetricsEndpointBasicAuthUsername = "metrics-user"
+	cfg.MetricsEndpointBasicAuthPassword = "metrics-password"
 
 	ms, err := InitializeModuleServer(cfg, Options{}, api.ServerOptions{})
 	require.NoError(t, err)
@@ -45,7 +48,12 @@ func TestIntegrationWillRunInstrumentationServerWhenTargetHasNoHttpServer(t *tes
 		client := http.Client{
 			Timeout: 1 * time.Second,
 		}
-		res, err := client.Get("http://localhost:3001/metrics")
+		req, err := http.NewRequest(http.MethodGet, "http://localhost:3001/metrics", nil)
+		if err != nil {
+			return false
+		}
+		req.SetBasicAuth(cfg.MetricsEndpointBasicAuthUsername, cfg.MetricsEndpointBasicAuthPassword)
+		res, err := client.Do(req)
 		if err != nil {
 			return false
 		}
