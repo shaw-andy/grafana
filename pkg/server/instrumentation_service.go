@@ -119,6 +119,7 @@ func (s *instrumentationService) newInstrumentationServer() (*http.Server, *mux.
 	srv := &http.Server{
 		// 5s timeout for header reads to avoid Slowloris attacks (https://thetooth.io/blog/slowloris-attack/)
 		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       setting.DefaultIdleTimeout,
 		Addr:              addr,
 		Handler:           router,
 	}

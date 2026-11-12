@@ -366,8 +366,24 @@ For example, given a CDN URL like `https://cdn.myserver.com`, Grafana tries to l
 
 #### `read_timeout`
 
-Sets the maximum time using a duration format (5s/5m/5ms) before timing out read of an incoming request and closing idle connections.
-`0` means there is no timeout for reading the request.
+Sets the maximum time using a duration format (5s/5m/5ms) for reading an entire incoming request, including the body.
+`0` means there is no timeout for reading the request body; `read_header_timeout` and `idle_timeout` still apply. Default is `30s`.
+
+#### `read_header_timeout`
+
+Sets the maximum time using a duration format (5s/5m/5ms) for reading the headers of an incoming request.
+Values less than or equal to `0` use the default. Default is `10s`.
+
+#### `idle_timeout`
+
+Sets the maximum time using a duration format (5s/5m/5ms) a keep-alive connection may stay idle between requests.
+Values less than or equal to `0` use the default. Default is `30s`.
+
+#### `write_timeout`
+
+Sets the maximum time using a duration format (5s/5m/5ms) for writing a response to a client that hasn't signed in, including static assets, anonymous access, and public dashboard requests.
+Responses to signed-in users aren't limited by this setting.
+Values less than or equal to `0` use the default. Default is `30s`.
 
 <hr />
 

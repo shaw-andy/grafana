@@ -12,6 +12,7 @@ import (
 	_ "github.com/grafana/pyroscope-go/godeltaprof/http/pprof" // registers godeltaprof pprof handlers
 
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/setting"
 )
 
 const (
@@ -142,11 +143,13 @@ func setupProfiling(profile bool, profileAddr string, profilePort uint64, blockR
 		runtime.SetMutexProfileFraction(profileDiagnostics.mutexRate)
 
 		go func() {
-			// TODO: We should enable the linter and fix G114 here.
-			//	G114: Use of net/http serve function that has no support for setting timeouts (gosec)
-			//
-			//nolint:gosec
-			err := http.ListenAndServe(fmt.Sprintf("%s:%d", profileDiagnostics.addr, profileDiagnostics.port), nil)
+			// No WriteTimeout: CPU profiles and execution traces stream for as long as the caller asks.
+			srv := &http.Server{
+				Addr:              fmt.Sprintf("%s:%d", profileDiagnostics.addr, profileDiagnostics.port),
+				ReadHeaderTimeout: setting.DefaultReadHeaderTimeout,
+				IdleTimeout:       setting.DefaultIdleTimeout,
+			}
+			err := srv.ListenAndServe()
 			if err != nil {
 				panic(err)
 			}
