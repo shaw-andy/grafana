@@ -811,21 +811,47 @@ func getTracesQueryUrl(azurePortalUrl string) (string, error) {
 	return portalUrl, nil
 }
 
+// buildCorrelationURL keeps the request on the configured Azure Monitor host: the
+// resource is a caller-supplied value and must only ever contribute path segments.
+func buildCorrelationURL(serviceURL string, resource string, operationId string) (*url.URL, error) {
+	base, err := url.Parse(serviceURL)
+	if err != nil || base.Scheme == "" || base.Host == "" || base.User != nil {
+		return nil, fmt.Errorf("invalid Azure Monitor service URL")
+	}
+
+	resourceURL, err := url.Parse(resource)
+	if err != nil || resourceURL.Scheme != "" || resourceURL.Host != "" || resourceURL.User != nil ||
+		resourceURL.Opaque != "" || resourceURL.RawQuery != "" || resourceURL.ForceQuery || resourceURL.Fragment != "" ||
+		!strings.HasPrefix(resourceURL.Path, "/") || strings.HasPrefix(resourceURL.Path, "//") {
+		return nil, fmt.Errorf("invalid resource %q for correlation request: expected an Azure resource ID path", resource)
+	}
+
+	if operationId == "" {
+		return nil, fmt.Errorf("operation ID is required for correlation request")
+	}
+
+	correlationURL := &url.URL{Scheme: base.Scheme, Host: base.Host, Path: base.Path, RawPath: base.RawPath}
+	return correlationURL.JoinPath(resourceURL.EscapedPath(), "providers", "microsoft.insights", "transactions", url.PathEscape(operationId)), nil
+}
+
 func getCorrelationWorkspaces(ctx context.Context, baseResource string, resourcesMap map[string]bool, dsInfo types.DatasourceInfo, operationId string) (map[string]bool, error) {
 	azMonService := dsInfo.Services["Azure Monitor"]
-	correlationUrl := azMonService.URL + fmt.Sprintf("%s/providers/microsoft.insights/transactions/%s", baseResource, operationId)
+	correlationUrl, err := buildCorrelationURL(azMonService.URL, baseResource, operationId)
+	if err != nil {
+		return nil, err
+	}
 
-	callCorrelationAPI := func(url string) (AzureCorrelationAPIResponse, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer([]byte{}))
+	callCorrelationAPI := func(correlationUrl *url.URL) (AzureCorrelationAPIResponse, error) {
+		target := *correlationUrl
+		values := url.Values{}
+		values.Add("api-version", "2019-10-17-preview")
+		target.RawQuery = values.Encode()
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 		if err != nil {
 			return AzureCorrelationAPIResponse{}, fmt.Errorf("%v: %w", "failed to create request", err)
 		}
-		req.URL.Path = url
 		req.Header.Set("Content-Type", "application/json")
-		values := req.URL.Query()
-		values.Add("api-version", "2019-10-17-preview")
-		req.URL.RawQuery = values.Encode()
-		req.Method = "GET"
 
 		_, span := tracing.DefaultTracer().Start(ctx, "azure traces correlation request", trace.WithAttributes(
 			attribute.String("target", req.URL.String()),
@@ -875,7 +901,7 @@ func getCorrelationWorkspaces(ctx context.Context, baseResource string, resource
 	var nextLink *string
 	var correlationResponse AzureCorrelationAPIResponse
 
-	correlationResponse, err := callCorrelationAPI(correlationUrl)
+	correlationResponse, err = callCorrelationAPI(correlationUrl)
 	if err != nil {
 		return nil, err
 	}
