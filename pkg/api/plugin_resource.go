@@ -13,6 +13,7 @@ import (
 	"github.com/grafana/grafana/pkg/middleware/requestmeta"
 	"github.com/grafana/grafana/pkg/plugins"
 	"github.com/grafana/grafana/pkg/plugins/httpresponsesender"
+	ac "github.com/grafana/grafana/pkg/services/accesscontrol"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
 	"github.com/grafana/grafana/pkg/services/datasources"
 	"github.com/grafana/grafana/pkg/util/proxyutil"
@@ -54,6 +55,25 @@ func (hs *HTTPServer) callPluginResource(c *contextmodel.ReqContext, pluginID st
 }
 
 func (hs *HTTPServer) callPluginResourceWithDataSource(c *contextmodel.ReqContext, pluginID string, ds *datasources.DataSource) {
+	req, err := hs.pluginResourceRequest(c)
+	if err != nil {
+		c.JsonApiErr(http.StatusBadRequest, "Failed for create plugin resource request", err)
+		return
+	}
+
+	if datasources.ResourceCallRequiresWrite(pluginID, req.URL.Path) {
+		evaluator := ac.EvalPermission(datasources.ActionWrite, datasources.ScopeProvider.GetResourceScopeUID(ds.UID))
+		allowed, err := hs.AccessControl.Evaluate(c.Req.Context(), c.SignedInUser, evaluator)
+		if err != nil {
+			c.JsonApiErr(http.StatusInternalServerError, "Failed to evaluate datasource permissions", err)
+			return
+		}
+		if !allowed {
+			c.JsonApiErr(http.StatusForbidden, "Access denied to datasource resource", nil)
+			return
+		}
+	}
+
 	pCtx, err := hs.pluginContextProvider.GetWithDataSource(c.Req.Context(), pluginID, c.SignedInUser, ds)
 	if err != nil {
 		if errors.Is(err, plugins.ErrPluginNotRegistered) {
@@ -67,12 +87,6 @@ func (hs *HTTPServer) callPluginResourceWithDataSource(c *contextmodel.ReqContex
 	err = hs.DataSourceRequestValidator.Validate(ds.URL, ds.JsonDataMap(), c.Req)
 	if err != nil {
 		c.JsonApiErr(http.StatusForbidden, "Access denied", err)
-		return
-	}
-
-	req, err := hs.pluginResourceRequest(c)
-	if err != nil {
-		c.JsonApiErr(http.StatusBadRequest, "Failed for create plugin resource request", err)
 		return
 	}
 

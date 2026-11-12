@@ -2,7 +2,10 @@ package datasource
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
 
 	authn "github.com/grafana/authlib/authn"
@@ -70,4 +73,33 @@ func (b *DataSourceAPIBuilder) GetAuthorizer() authorizer.Authorizer {
 			recordAuthzDecision(group, sub, verb, caller, "deny", "access_denied")
 			return authorizer.DecisionDeny, "access denied", nil
 		})
+}
+
+// authorizeEdit returns nil only when the requester in ctx may update the
+// datasource with the given UID.
+func (b *DataSourceAPIBuilder) authorizeEdit(ctx context.Context, namespace, uid string) error {
+	gr := b.datasourceResourceInfo.GroupResource()
+	if b.accessClient == nil || uid == "" {
+		return apierrors.NewForbidden(gr, uid, errors.New("datasource edit permission is required"))
+	}
+
+	user, err := identity.GetRequester(ctx)
+	if err != nil {
+		return apierrors.NewUnauthorized("valid user is required")
+	}
+
+	rsp, err := b.accessClient.Check(ctx, user, authlib.CheckRequest{
+		Group:     b.GetGroupVersion().Group,
+		Resource:  "datasources",
+		Namespace: namespace,
+		Name:      uid,
+		Verb:      utils.VerbUpdate,
+	}, "")
+	if err != nil {
+		return apierrors.NewInternalError(fmt.Errorf("failed to check permissions: %w", err))
+	}
+	if !rsp.Allowed {
+		return apierrors.NewForbidden(gr, uid, errors.New("datasource edit permission is required"))
+	}
+	return nil
 }

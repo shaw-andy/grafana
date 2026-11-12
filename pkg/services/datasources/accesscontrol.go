@@ -1,6 +1,12 @@
 package datasources
 
-import "github.com/grafana/grafana/pkg/services/accesscontrol"
+import (
+	"net/url"
+	"path"
+	"strings"
+
+	"github.com/grafana/grafana/pkg/services/accesscontrol"
+)
 
 const (
 	ScopeRoot   = "datasources"
@@ -47,3 +53,38 @@ var (
 		accesscontrol.EvalPermission(ActionWrite),
 	)
 )
+
+// writeProtectedResources lists plugin resource paths that return datasource
+// configuration only the datasource's editors may read, keyed by plugin ID.
+var writeProtectedResources = map[string][]string{
+	// Returns the instance AWS external ID that IAM trust policies rely on.
+	"cloudwatch": {"/external-id"},
+}
+
+// ResourceCallRequiresWrite reports whether a datasource resource call to the
+// given plugin must be authorized with ActionWrite on that datasource rather
+// than ActionQuery. resourcePath is the CallResourceRequest path.
+func ResourceCallRequiresWrite(pluginID, resourcePath string) bool {
+	protected, ok := writeProtectedResources[pluginID]
+	if !ok {
+		return false
+	}
+
+	// Mirror how the plugin SDK HTTP adapter rebuilds the request so that
+	// encoded, host-prefixed, or unclean forms of a protected path still match.
+	p := resourcePath
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	u, err := url.Parse(p)
+	if err != nil {
+		return true
+	}
+	cleaned := path.Clean("/" + u.Path)
+	for _, pp := range protected {
+		if strings.EqualFold(cleaned, pp) {
+			return true
+		}
+	}
+	return false
+}
