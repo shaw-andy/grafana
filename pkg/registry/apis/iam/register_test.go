@@ -132,44 +132,75 @@ func TestNewAPIService_WiresSSOStore(t *testing.T) {
 	require.NotNil(t, b.ssoLegacyStore)
 }
 
-func TestNewAPIService_AuthorizesSSOSettings(t *testing.T) {
-	b := NewAPIService(
-		nil,
-		nil,
-		legacysql.NewDatabaseProvider(nil),
-		&NoopApiInstaller[*iamv0.RoleBinding]{ResourceInfo: iamv0.RoleBindingInfo},
-		&NoopApiInstaller[*iamv0.Role]{ResourceInfo: iamv0.RoleInfo},
-		&NoopApiInstaller[*iamv0.GlobalRole]{ResourceInfo: iamv0.GlobalRoleInfo},
-		&NoopApiInstaller[*iamv0.TeamLBACRule]{ResourceInfo: iamv0.TeamLBACRuleInfo},
-		nil,
-		prometheus.NewRegistry(),
-		nil,
-		nil,
-		tracing.InitializeTracerForTest(),
-		resourcepermission.NewMappersRegistry(),
-		nil,
-	)
+type ssoCheckRecorder struct {
+	authlib.AccessClient
+	allowed  bool
+	requests []authlib.CheckRequest
+}
 
-	// Serving the kind is moot unless the standalone authorizer allows it; the
-	// flat fall-through would otherwise deny every ssosettings request.
+func (r *ssoCheckRecorder) Check(_ context.Context, _ authlib.AuthInfo, req authlib.CheckRequest, _ string) (authlib.CheckResponse, error) {
+	r.requests = append(r.requests, req)
+	return authlib.CheckResponse{Allowed: r.allowed}, nil
+}
+
+func TestNewAPIService_AuthorizesSSOSettings(t *testing.T) {
+	newBuilder := func(access authlib.AccessClient) *IdentityAccessManagementAPIBuilder {
+		return NewAPIService(
+			access,
+			nil,
+			legacysql.NewDatabaseProvider(nil),
+			&NoopApiInstaller[*iamv0.RoleBinding]{ResourceInfo: iamv0.RoleBindingInfo},
+			&NoopApiInstaller[*iamv0.Role]{ResourceInfo: iamv0.RoleInfo},
+			&NoopApiInstaller[*iamv0.GlobalRole]{ResourceInfo: iamv0.GlobalRoleInfo},
+			&NoopApiInstaller[*iamv0.TeamLBACRule]{ResourceInfo: iamv0.TeamLBACRuleInfo},
+			nil,
+			prometheus.NewRegistry(),
+			nil,
+			nil,
+			tracing.InitializeTracerForTest(),
+			resourcepermission.NewMappersRegistry(),
+			nil,
+		)
+	}
+
 	attrs := authorizer.AttributesRecord{
+		APIGroup:        legacyiamv0.SchemeGroupVersion.Group,
 		Resource:        legacyiamv0.SSOSettingResourceInfo.GetName(),
+		Namespace:       "default",
+		Name:            "github",
 		ResourceRequest: true,
 		Verb:            "get",
 	}
+	user := &identity.StaticRequester{Type: authlib.TypeAccessPolicy}
 
-	t.Run("allows an authenticated identity", func(t *testing.T) {
-		ctx := identity.WithRequester(context.Background(), &identity.StaticRequester{Type: authlib.TypeAccessPolicy})
-		decision, _, err := b.authorizer.Authorize(ctx, attrs)
+	t.Run("allows when the access client allows the provider", func(t *testing.T) {
+		access := &ssoCheckRecorder{allowed: true}
+		decision, _, err := newBuilder(access).authorizer.Authorize(identity.WithRequester(context.Background(), user), attrs)
 		require.NoError(t, err)
 		require.Equal(t, authorizer.DecisionAllow, decision)
+		require.Equal(t, []authlib.CheckRequest{{
+			Verb:      "get",
+			Group:     legacyiamv0.SchemeGroupVersion.Group,
+			Resource:  legacyiamv0.SSOSettingResourceInfo.GetName(),
+			Namespace: "default",
+			Name:      "github",
+		}}, access.requests)
+	})
+
+	t.Run("denies an authenticated identity the access client does not allow", func(t *testing.T) {
+		access := &ssoCheckRecorder{allowed: false}
+		decision, _, err := newBuilder(access).authorizer.Authorize(identity.WithRequester(context.Background(), user), attrs)
+		require.NoError(t, err)
+		require.Equal(t, authorizer.DecisionDeny, decision)
 	})
 
 	t.Run("denies an anonymous identity", func(t *testing.T) {
+		access := &ssoCheckRecorder{allowed: true}
 		ctx := identity.WithRequester(context.Background(), &identity.StaticRequester{Type: authlib.TypeAnonymous})
-		decision, _, err := b.authorizer.Authorize(ctx, attrs)
+		decision, _, err := newBuilder(access).authorizer.Authorize(ctx, attrs)
 		require.NoError(t, err)
 		require.Equal(t, authorizer.DecisionDeny, decision)
+		require.Empty(t, access.requests)
 	})
 }
 

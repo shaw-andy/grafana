@@ -235,6 +235,7 @@ func NewAPIService(
 	teamLBACAuthorizer := newTeamLBACRuleAuthorizer(teamLBACApiInstaller.GetAuthorizer())
 	resourceAuthorizer := gfauthorizer.NewResourceAuthorizer(accessClient)
 	userAuthorizer := newUserAuthorizer(accessClient)
+	ssoSettingAuthorizer := newSSOSettingAuthorizer(accessClient)
 
 	resourceParentProvider := iamauthorizer.NewApiParentProvider(
 		iamauthorizer.NewRemoteConfigProvider(authorizerDialConfigs, tokenExchanger),
@@ -336,12 +337,7 @@ func NewAPIService(
 				}
 
 				if a.GetResource() == legacyiamv0.SSOSettingResourceInfo.GetName() {
-					// Interim parity with the in-process authorizer: allow any
-					// authenticated identity (real settings RBAC is a follow-up).
-					if user.GetIdentityType() == types.TypeAnonymous {
-						return authorizer.DecisionDeny, "anonymous identities cannot access ssosettings", nil
-					}
-					return authorizer.DecisionAllow, "", nil
+					return ssoSettingAuthorizer.Authorize(ctx, a)
 				}
 
 				return authorizer.DecisionDeny, "access denied", nil
@@ -491,6 +487,7 @@ func (b *IdentityAccessManagementAPIBuilder) UpdateAPIGroupInfo(apiGroupInfo *ge
 	// SSO settings apis
 	if enableSsoSettingsApi && b.ssoLegacyStore != nil {
 		ssoResource := legacyiamv0.SSOSettingResourceInfo
+		var redacted rest.Storage
 		// With an MT-Settings client the SSOSetting kind rides the dual-writer (mode-gated
 		// reads/writes); without it (on-prem) the legacy store serves alone.
 		if b.ssoSettingsClient != nil && opts.DualWriteBuilder != nil {
@@ -502,20 +499,24 @@ func (b *IdentityAccessManagementAPIBuilder) UpdateAPIGroupInfo(apiGroupInfo *ge
 			}
 			// The legacy adapter returns the raw secret on Create so the dual-writer
 			// forwards it to MT-Settings; redact it back out of the client response.
-			redacted, err := sso.NewRedactingStore(dw)
+			redacted, err = sso.NewRedactingStore(dw)
 			if err != nil {
 				return err
 			}
-			storage[ssoResource.StoragePath()] = redacted
 		} else {
 			// Legacy serves alone, but its Create still returns the raw input, so
 			// redact the response here too.
-			redacted, err := sso.NewRedactingStore(b.ssoLegacyStore)
+			var err error
+			redacted, err = sso.NewRedactingStore(b.ssoLegacyStore)
 			if err != nil {
 				return err
 			}
-			storage[ssoResource.StoragePath()] = redacted
 		}
+		authorized, err := sso.NewAuthorizingStore(redacted, b.ssoSettingAccessClient())
+		if err != nil {
+			return err
+		}
+		storage[ssoResource.StoragePath()] = authorized
 	}
 
 	if enableRolesApi {
