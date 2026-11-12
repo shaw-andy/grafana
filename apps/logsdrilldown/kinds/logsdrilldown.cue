@@ -13,6 +13,7 @@ LogsDrilldownSpecv1alpha1: {
 
 logsdrilldownv1alpha1: {
 	kind: "LogsDrilldown" // note: must be uppercase
+	validation: operations: ["CREATE", "UPDATE"]
 	schema: {
 		spec: LogsDrilldownSpecv1alpha1
 	}

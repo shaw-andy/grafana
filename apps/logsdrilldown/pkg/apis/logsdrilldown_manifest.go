@@ -50,7 +50,15 @@ var appManifestData = app.ManifestData{
 					Plural:     "LogsDrilldowns",
 					Scope:      "Namespaced",
 					Conversion: false,
-					Schema:     &versionSchemaLogsDrilldownv1alpha1,
+					Admission: &app.AdmissionCapabilities{
+						Validation: &app.ValidationCapability{
+							Operations: []app.AdmissionOperation{
+								app.AdmissionOperationCreate,
+								app.AdmissionOperationUpdate,
+							},
+						},
+					},
+					Schema: &versionSchemaLogsDrilldownv1alpha1,
 				},
 
 				{

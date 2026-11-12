@@ -1,11 +1,37 @@
 package logsdrilldown
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"strings"
+
+	"github.com/grafana/grafana-app-sdk/app"
 
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 )
+
+// validateLogsDrilldownOwner ensures a LogsDrilldown is only stored under the requester's own name.
+func validateLogsDrilldownOwner(ctx context.Context, req *app.AdmissionRequest) error {
+	u, err := identity.GetRequester(ctx)
+	if err != nil {
+		return fmt.Errorf("valid user is required: %w", err)
+	}
+
+	if u.GetIsGrafanaAdmin() {
+		return nil
+	}
+
+	if req.Object == nil {
+		return errors.New("object is required")
+	}
+
+	if !compareResourceNameAndUserUID(req.Object.GetName(), u) {
+		return errors.New("name must match service:user_uid")
+	}
+
+	return nil
+}
 
 func compareResourceNameAndUserUID(name string, u identity.Requester) bool {
 	parsedName, err := parseName(name)

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 
 	"github.com/grafana/grafana-app-sdk/app"
 	"github.com/grafana/grafana-app-sdk/logging"
@@ -14,7 +15,19 @@ import (
 	logsdrilldownv1beta1 "github.com/grafana/grafana/apps/logsdrilldown/pkg/apis/logsdrilldown/v1beta1"
 )
 
+type Config struct {
+	// LogsDrilldownValidator rejects LogsDrilldown writes the requester is not allowed to store,
+	// such as another user's settings. It runs on the object that is about to be persisted,
+	// because create authorization does not see the object name.
+	LogsDrilldownValidator simple.KindValidator
+}
+
 func New(cfg app.Config) (app.App, error) {
+	specificConfig, ok := cfg.SpecificConfig.(*Config)
+	if !ok || specificConfig == nil || specificConfig.LogsDrilldownValidator == nil {
+		return nil, errors.New("logsdrilldown app requires a LogsDrilldown validator")
+	}
+
 	simpleConfig := simple.AppConfig{
 		Name:       "logsdrilldown",
 		KubeConfig: cfg.KubeConfig,
@@ -27,7 +40,8 @@ func New(cfg app.Config) (app.App, error) {
 		},
 		ManagedKinds: []simple.AppManagedKind{
 			{
-				Kind: logsdrilldownv1alpha1.LogsDrilldownKind(),
+				Kind:      logsdrilldownv1alpha1.LogsDrilldownKind(),
+				Validator: specificConfig.LogsDrilldownValidator,
 			},
 			{
 				Kind: logsdrilldownv1alpha1.LogsDrilldownDefaultsKind(),
