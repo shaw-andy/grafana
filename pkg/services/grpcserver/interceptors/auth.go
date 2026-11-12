@@ -75,7 +75,7 @@ func (a *authenticator) tokenAuth(ctx context.Context) (context.Context, error) 
 
 	signedInUser, err := a.getSignedInUser(ctx, token)
 	if err != nil {
-		a.logger.Warn("request with invalid token", "error", err, "token", token)
+		a.logger.Warn("request with invalid token", "error", err)
 		return ctx, status.Error(codes.Unauthenticated, "invalid token")
 	}
 
