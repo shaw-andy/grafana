@@ -35,6 +35,9 @@ type TLSConfig struct {
 	CAFile             string
 	ServerName         string
 	InsecureSkipVerify bool
+	// AllowInsecure must be set to dial without TLS. Inline requests carry plaintext
+	// secure values and every call carries an access token, so plaintext is opt-in only.
+	AllowInsecure bool
 }
 
 func NewGRPCInlineClient(tokenExchanger authnlib.TokenExchanger, tracer trace.Tracer, address string, tlsConfig TLSConfig, clientLoadBalancingEnabled bool) (*GRPCInlineClient, error) {
@@ -47,6 +50,9 @@ func NewGRPCInlineClient(tokenExchanger authnlib.TokenExchanger, tracer trace.Tr
 
 		opts = append(opts, grpc.WithTransportCredentials(creds))
 	} else {
+		if !tlsConfig.AllowInsecure {
+			return nil, fmt.Errorf("refusing to connect to grpc server at %s without TLS: enable TLS or explicitly allow insecure connections", address)
+		}
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 

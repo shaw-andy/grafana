@@ -69,6 +69,7 @@ type StorageOptions struct {
 	SecretsManagerGrpcClientLoadBalancing bool
 	SecretsManagerGrpcServerAddress       string
 	SecretsManagerGrpcServerUseTLS        bool
+	SecretsManagerGrpcServerAllowInsecure bool
 	SecretsManagerGrpcServerTLSSkipVerify bool
 	SecretsManagerGrpcServerTLSServerName string
 	SecretsManagerGrpcServerTLSCAFile     string
@@ -172,6 +173,7 @@ func NewStorageOptions() *StorageOptions {
 		GrpcClientAuthenticationTokenNamespace: "*",
 		GrpcClientAuthenticationAllowInsecure:  false,
 		GrpcClientKeepaliveTime:                DefaultGrpcClientKeepaliveTime,
+		SecretsManagerGrpcServerUseTLS:         true,
 		BlobThresholdBytes:                     BlobThresholdDefault,
 		UnifiedStorageConfig:                   make(map[string]setting.UnifiedStorageConfig),
 	}
@@ -196,7 +198,8 @@ func (o *StorageOptions) AddFlags(fs *pflag.FlagSet) {
 	// Secrets Manager Configuration flags
 	fs.BoolVar(&o.SecretsManagerGrpcClientEnable, "grafana.secrets-manager.grpc-client-enable", false, "Enable gRPC client for secrets manager")
 	fs.StringVar(&o.SecretsManagerGrpcServerAddress, "grafana.secrets-manager.grpc-server-address", "", "gRPC server address for secrets manager")
-	fs.BoolVar(&o.SecretsManagerGrpcServerUseTLS, "grafana.secrets-manager.grpc-server-use-tls", false, "Use TLS for gRPC server communication")
+	fs.BoolVar(&o.SecretsManagerGrpcServerUseTLS, "grafana.secrets-manager.grpc-server-use-tls", true, "Use TLS for gRPC server communication")
+	fs.BoolVar(&o.SecretsManagerGrpcServerAllowInsecure, "grafana.secrets-manager.grpc-server-allow-insecure", false, "Allow a plaintext gRPC connection to the secrets manager when TLS is disabled")
 	fs.BoolVar(&o.SecretsManagerGrpcServerTLSSkipVerify, "grafana.secrets-manager.grpc-server-tls-skip-verify", false, "Skip TLS verification for gRPC server")
 	fs.StringVar(&o.SecretsManagerGrpcServerTLSServerName, "grafana.secrets-manager.grpc-server-tls-server-name", "", "Server name for TLS verification")
 	fs.StringVar(&o.SecretsManagerGrpcServerTLSCAFile, "grafana.secrets-manager.grpc-server-tls-ca-file", "", "CA file for TLS verification")
@@ -245,6 +248,9 @@ func (o *StorageOptions) Validate() []error {
 		if o.SecretsManagerGrpcServerUseTLS && !o.SecretsManagerGrpcServerTLSSkipVerify && o.SecretsManagerGrpcServerTLSCAFile == "" {
 			errs = append(errs, fmt.Errorf("secrets manager grpc server ca file is required for secrets manager grpc client"))
 		}
+		if !o.SecretsManagerGrpcServerUseTLS && !o.SecretsManagerGrpcServerAllowInsecure {
+			errs = append(errs, fmt.Errorf("secrets manager grpc client requires TLS unless insecure connections are explicitly allowed"))
+		}
 	}
 	return errs
 }
@@ -289,6 +295,7 @@ func (o *StorageOptions) ApplyTo(serverConfig *genericapiserver.RecommendedConfi
 			CAFile:             o.SecretsManagerGrpcServerTLSCAFile,
 			ServerName:         o.SecretsManagerGrpcServerTLSServerName,
 			InsecureSkipVerify: o.SecretsManagerGrpcServerTLSSkipVerify,
+			AllowInsecure:      o.SecretsManagerGrpcServerAllowInsecure,
 		}
 		inlineSecureValueService, err := inlinesecurevalue.NewGRPCSecureValueService(
 			&grpcutils.GrpcClientConfig{

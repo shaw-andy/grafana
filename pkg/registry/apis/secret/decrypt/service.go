@@ -48,8 +48,8 @@ func ProvideDecryptService(cfg *setting.Cfg, tracer trace.Tracer, decryptStorage
 func readTLSFromConfig(cfg *setting.Cfg) TLSConfig {
 	if !cfg.SecretsManagement.GrpcServerUseTLS {
 		return TLSConfig{
-			UseTLS:             false,
-			InsecureSkipVerify: true,
+			UseTLS:        false,
+			AllowInsecure: cfg.SecretsManagement.GrpcServerAllowInsecure,
 		}
 	}
 
