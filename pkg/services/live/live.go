@@ -61,6 +61,13 @@ var (
 	tracer   = otel.Tracer("github.com/grafana/grafana/pkg/services/live")
 )
 
+const (
+	// Centrifuge applies this limit to websocket messages when the configured limit is not positive.
+	defaultLiveMessageSizeLimit = 65536
+	// Allowance for the channel name and JSON framing around data in an HTTP publish body.
+	httpPublishEnvelopeSize = 4096
+)
+
 // CoreGrafanaScope list of core features
 type CoreGrafanaScope struct {
 	Features map[string]model.ChannelHandlerFactory
@@ -1096,10 +1103,29 @@ func (g *GrafanaLive) ClientCount(ns string, channel string) (int, error) {
 	return len(p.Presence), nil
 }
 
+// messageSizeLimit returns the limit the websocket transport enforces on client messages.
+func (g *GrafanaLive) messageSizeLimit() int {
+	if g.Cfg.LiveMessageSizeLimit <= 0 {
+		return defaultLiveMessageSizeLimit
+	}
+	return g.Cfg.LiveMessageSizeLimit
+}
+
 func (g *GrafanaLive) HandleHTTPPublish(ctx *contextmodel.ReqContext) response.Response {
+	messageSizeLimit := g.messageSizeLimit()
+	if ctx.Req.Body != nil {
+		ctx.Req.Body = http.MaxBytesReader(ctx.Resp, ctx.Req.Body, int64(messageSizeLimit+httpPublishEnvelopeSize))
+	}
 	cmd := model.LivePublishCmd{}
 	if err := web.Bind(ctx.Req, &cmd); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return response.Error(http.StatusRequestEntityTooLarge, "message too large", nil)
+		}
 		return response.Error(http.StatusBadRequest, "bad request data", err)
+	}
+	if len(cmd.Data) > messageSizeLimit {
+		return response.Error(http.StatusRequestEntityTooLarge, "message too large", nil)
 	}
 	addr, err := live.ParseChannel(cmd.Channel)
 	if err != nil {
@@ -1158,7 +1184,7 @@ func (g *GrafanaLive) HandleHTTPPublish(ctx *contextmodel.ReqContext) response.R
 		return response.Error(code, text, nil)
 	}
 	if reply.Data != nil {
-		err = g.Publish(ctx.GetNamespace(), cmd.Channel, cmd.Data)
+		err = g.Publish(ctx.GetNamespace(), cmd.Channel, reply.Data)
 		if err != nil {
 			logger.Error("Error publish to channel", "error", err, "channel", cmd.Channel)
 			return response.Error(http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
