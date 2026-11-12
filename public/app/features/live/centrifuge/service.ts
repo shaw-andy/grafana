@@ -66,6 +66,23 @@ const defaultStreamingFrameOptions: Readonly<StreamingFrameOptions> = {
 
 const dataStreamShutdownDelayInMs = 5000;
 
+// Must match jwtWebsocketProtocolPrefix in pkg/services/authn/clients/jwt.go.
+const jwtWebsocketProtocolPrefix = 'grafana-jwt.';
+
+// Browsers cannot set headers on a websocket, so the JWT URL login token is offered as a subprotocol next to
+// the one Centrifuge negotiates instead of being put in the websocket URL, where proxies and traces record it.
+function websocketWithUrlToken(token: string | null) {
+  // A subprotocol must be an HTTP token; anything else would make the WebSocket constructor throw.
+  if (!token || !/^[A-Za-z0-9._~-]+$/.test(token)) {
+    return null;
+  }
+
+  const WebSocketImpl = globalThis.WebSocket;
+  return function (url: string, protocol?: string) {
+    return new WebSocketImpl(url, [protocol || 'centrifuge-json', `${jwtWebsocketProtocolPrefix}${token}`]);
+  };
+}
+
 export class CentrifugeService implements CentrifugeSrv {
   readonly open = new Map<string, CentrifugeLiveChannel>();
   private readonly liveDataStreamByChannelId: Record<LiveChannelId, LiveDataStream> = {};
@@ -79,15 +96,11 @@ export class CentrifugeService implements CentrifugeSrv {
   constructor(private deps: CentrifugeSrvDeps) {
     this.dataStreamSubscriberReadiness = deps.dataStreamSubscriberReadiness.pipe(share(), startWith(true));
 
-    let liveUrl = `${deps.appUrl.replace(/^http/, 'ws')}/api/live/ws`;
-
-    const token = deps.grafanaAuthToken;
-    if (token !== null && token !== '') {
-      liveUrl += '?auth_token=' + token;
-    }
+    const liveUrl = `${deps.appUrl.replace(/^http/, 'ws')}/api/live/ws`;
 
     this.centrifuge = new Centrifuge(liveUrl, {
       timeout: 30000,
+      websocket: websocketWithUrlToken(deps.grafanaAuthToken),
     });
     // orgRole is set when logged in *or* anonymous users can use grafana
     if (deps.liveEnabled && deps.orgRole !== '') {

@@ -260,7 +260,7 @@ export class BackendSrv implements BackendService {
 
     const token = loadUrlToken();
     if (token !== null && token !== '') {
-      if (config.jwtUrlLogin && config.jwtHeaderName) {
+      if (config.jwtUrlLogin && config.jwtHeaderName && isGrafanaRequestUrl(options.url)) {
         options.headers = options.headers ?? {};
         options.headers[config.jwtHeaderName] = `${token}`;
       }
@@ -691,6 +691,24 @@ export class BackendSrv implements BackendService {
       showErrorAlert: false,
     });
   }
+}
+
+// The URL login token authenticates as the user, so it is only sent to this Grafana instance and never
+// to other origins that requests can target, such as dashboard fetch actions.
+function isGrafanaRequestUrl(url: string): boolean {
+  let target: URL;
+  try {
+    target = new URL(url, document.baseURI);
+  } catch {
+    return false;
+  }
+
+  if (target.origin !== window.location.origin) {
+    return false;
+  }
+
+  const basePath = (config.appSubUrl ?? '').replace(/\/+$/, '');
+  return basePath === '' || target.pathname === basePath || target.pathname.startsWith(`${basePath}/`);
 }
 
 function isHtmlResponse(value: string): boolean {

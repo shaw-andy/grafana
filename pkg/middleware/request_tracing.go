@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/grafana/grafana/pkg/infra/tracing"
+	"github.com/grafana/grafana/pkg/util"
 	"github.com/grafana/grafana/pkg/web"
 )
 
@@ -92,6 +93,16 @@ func ShouldTraceAllPaths(req *http.Request) bool {
 	return true
 }
 
+// sanitizedRequestURI masks credentials that can arrive in the query string, such as
+// the JWT URL login token, because the span is started before authentication runs.
+func sanitizedRequestURI(req *http.Request) string {
+	uri, err := util.SanitizeURI(req.RequestURI)
+	if err != nil {
+		return req.URL.Path
+	}
+	return uri
+}
+
 func RequestTracing(tracer trace.Tracer, shouldTrace func(*http.Request) bool) web.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -107,7 +118,7 @@ func RequestTracing(tracer trace.Tracer, shouldTrace func(*http.Request) bool) w
 			spanName := fmt.Sprintf("HTTP %s <unknown>", req.Method)
 
 			ctx, span := tracer.Start(ctx, spanName, trace.WithAttributes(
-				semconv.HTTPURLKey.String(req.RequestURI),
+				semconv.HTTPURLKey.String(sanitizedRequestURI(req)),
 				// url.path is the routed path with any serve_from_sub_path prefix
 				// already trimmed (unlike RequestURI), so downstream consumers such
 				// as the tracing endpoint filter can match on a stable value.
