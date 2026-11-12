@@ -278,7 +278,8 @@ func limitExpression(e mysql.Expression, limits *queryLimits) (mysql.Expression,
 // buildsValues reports whether an expression of type t can return a value
 // whose size is not fixed by its type.
 func buildsValues(t mysql.Type) bool {
-	return !(types.IsNumber(t) || types.IsBoolean(t) || types.IsTime(t) || types.IsTimespan(t) || types.IsYear(t))
+	fixedSize := types.IsNumber(t) || types.IsBoolean(t) || types.IsTime(t) || types.IsTimespan(t) || types.IsYear(t)
+	return !fixedSize
 }
 
 // boundedExpr evaluates the arguments of fn, refuses the call if the value it
