@@ -18,6 +18,11 @@ func newTracingCfg(grafanaCfg *setting.Cfg) (pCfg.Tracing, error) {
 	if !tracingCfg.OTelExporterEnabled() {
 		return pCfg.Tracing{}, nil
 	}
+	// The plugin SDK dials the forwarded address with plaintext gRPC and has no
+	// TLS option, so only hand it a collector the operator marked as insecure.
+	if !tracingCfg.Insecure {
+		return pCfg.Tracing{}, nil
+	}
 	return pCfg.Tracing{
 		OpenTelemetry: pCfg.OpenTelemetryCfg{
 			Address:          tracingCfg.Address,
