@@ -2,6 +2,7 @@ package loginattempttest
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/grafana/grafana/pkg/services/loginattempt"
 )
@@ -11,6 +12,10 @@ var _ loginattempt.Service = new(FakeLoginAttemptService)
 type FakeLoginAttemptService struct {
 	ExpectedValid bool
 	ExpectedErr   error
+}
+
+func (f FakeLoginAttemptService) ClientIPAddress(r *http.Request) string {
+	return r.RemoteAddr
 }
 
 func (f FakeLoginAttemptService) Add(ctx context.Context, username, IPAddress string) error {

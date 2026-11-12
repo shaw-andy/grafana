@@ -2,9 +2,13 @@ package loginattempt
 
 import (
 	"context"
+	"net/http"
 )
 
 type Service interface {
+	// ClientIPAddress returns the address that login attempts from r are counted against.
+	// Forwarding headers are only used when the peer is a trusted proxy.
+	ClientIPAddress(r *http.Request) string
 	// Add adds a new login attempt record for provided username
 	Add(ctx context.Context, username, ipAddress string) error
 	// Validate checks if username has to many login attempts inside a window.

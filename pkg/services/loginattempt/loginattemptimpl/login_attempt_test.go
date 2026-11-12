@@ -3,6 +3,9 @@ package loginattemptimpl
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -277,6 +280,120 @@ func TestService_ValidateIPAddress(t *testing.T) {
 			ok, err := service.ValidateIPAddress(context.Background(), "192.168.1.1")
 			assert.Equal(t, tt.expected, ok)
 			assert.Equal(t, tt.expectedErr, err)
+		})
+	}
+}
+
+func TestService_ClientIPAddress(t *testing.T) {
+	_, loopback, _ := net.ParseCIDR("127.0.0.0/8")
+	_, proxyNet, _ := net.ParseCIDR("10.0.0.0/24")
+	trusted := []*net.IPNet{loopback, proxyNet}
+
+	testCases := []struct {
+		name       string
+		trusted    []*net.IPNet
+		remoteAddr string
+		headers    map[string][]string
+		expected   string
+	}{
+		{
+			name:       "untrusted peer is counted by its own address",
+			trusted:    trusted,
+			remoteAddr: "203.0.113.10:1234",
+			expected:   "203.0.113.10",
+		},
+		{
+			name:       "forwarding headers from an untrusted peer are ignored",
+			trusted:    trusted,
+			remoteAddr: "203.0.113.10:1234",
+			headers: map[string][]string{
+				"X-Forwarded-For": {"198.51.100.7"},
+				"X-Real-Ip":       {"198.51.100.8"},
+			},
+			expected: "203.0.113.10",
+		},
+		{
+			name:       "forwarding headers are ignored when no proxy is trusted",
+			remoteAddr: "127.0.0.1:1234",
+			headers:    map[string][]string{"X-Forwarded-For": {"198.51.100.7"}},
+			expected:   "127.0.0.1",
+		},
+		{
+			name:       "trusted proxy uses the address it appended",
+			trusted:    trusted,
+			remoteAddr: "127.0.0.1:1234",
+			headers:    map[string][]string{"X-Forwarded-For": {"198.51.100.7"}},
+			expected:   "198.51.100.7",
+		},
+		{
+			name:       "client supplied entries left of the appended address are ignored",
+			trusted:    trusted,
+			remoteAddr: "127.0.0.1:1234",
+			headers:    map[string][]string{"X-Forwarded-For": {"192.0.2.99, 198.51.100.7"}},
+			expected:   "198.51.100.7",
+		},
+		{
+			name:       "trusted proxy hops are skipped",
+			trusted:    trusted,
+			remoteAddr: "127.0.0.1:1234",
+			headers:    map[string][]string{"X-Forwarded-For": {"192.0.2.99, 198.51.100.7", "10.0.0.5"}},
+			expected:   "198.51.100.7",
+		},
+		{
+			name:       "malformed entry stops the walk at the last trusted hop",
+			trusted:    trusted,
+			remoteAddr: "127.0.0.1:1234",
+			headers:    map[string][]string{"X-Forwarded-For": {"192.0.2.99, not-an-ip, 10.0.0.5"}},
+			expected:   "10.0.0.5",
+		},
+		{
+			name:       "trusted proxy without X-Forwarded-For uses X-Real-IP",
+			trusted:    trusted,
+			remoteAddr: "127.0.0.1:1234",
+			headers:    map[string][]string{"X-Real-Ip": {"198.51.100.8"}},
+			expected:   "198.51.100.8",
+		},
+		{
+			name:       "trusted proxy without forwarding headers is counted by its own address",
+			trusted:    trusted,
+			remoteAddr: "127.0.0.1:1234",
+			expected:   "127.0.0.1",
+		},
+		{
+			name:       "IPv6 peer is counted by its /64 prefix",
+			trusted:    trusted,
+			remoteAddr: "[2001:db8:0:1:aaaa:bbbb:cccc:dddd]:1234",
+			headers:    map[string][]string{"X-Forwarded-For": {"198.51.100.7"}},
+			expected:   "2001:db8:0:1::/64",
+		},
+		{
+			name:       "unix socket peer is treated as local",
+			trusted:    trusted,
+			remoteAddr: "@",
+			headers:    map[string][]string{"X-Forwarded-For": {"198.51.100.7"}},
+			expected:   "198.51.100.7",
+		},
+		{
+			name:       "IPv4-mapped IPv6 peer is counted as IPv4",
+			trusted:    trusted,
+			remoteAddr: "[::ffff:203.0.113.10]:1234",
+			expected:   "203.0.113.10",
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := setting.NewCfg()
+			cfg.IPAddressLoginProtectionTrustedProxies = tt.trusted
+			service := &Service{cfg: cfg}
+
+			req := httptest.NewRequest(http.MethodPost, "/login", nil)
+			req.RemoteAddr = tt.remoteAddr
+			for k, v := range tt.headers {
+				req.Header[k] = v
+			}
+
+			assert.Equal(t, tt.expected, service.ClientIPAddress(req))
 		})
 	}
 }

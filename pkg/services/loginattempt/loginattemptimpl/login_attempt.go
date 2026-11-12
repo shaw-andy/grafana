@@ -2,6 +2,8 @@ package loginattemptimpl
 
 import (
 	"context"
+	"net"
+	"net/http"
 	"strings"
 	"time"
 
@@ -44,6 +46,67 @@ func (s *Service) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
+}
+
+func (s *Service) ClientIPAddress(r *http.Request) string {
+	peer := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(peer); err == nil {
+		peer = host
+	}
+	peerIP := net.ParseIP(peer)
+	if peerIP == nil {
+		// Unix socket connections do not carry an IP address and can only come
+		// from the local host.
+		peerIP = net.IPv4(127, 0, 0, 1)
+	}
+	if !s.isTrustedProxy(peerIP) {
+		return attemptAddress(peerIP)
+	}
+
+	// Each proxy appends the address it received the request from, so entries
+	// left of the last untrusted hop can be set by the client.
+	var hops []string
+	for _, value := range r.Header.Values("X-Forwarded-For") {
+		hops = append(hops, strings.Split(value, ",")...)
+	}
+	client := peerIP
+	for i := len(hops) - 1; i >= 0; i-- {
+		ip := net.ParseIP(strings.TrimSpace(hops[i]))
+		if ip == nil {
+			break
+		}
+		client = ip
+		if !s.isTrustedProxy(ip) {
+			return attemptAddress(client)
+		}
+	}
+	if len(hops) > 0 {
+		return attemptAddress(client)
+	}
+
+	if ip := net.ParseIP(strings.TrimSpace(r.Header.Get("X-Real-IP"))); ip != nil {
+		return attemptAddress(ip)
+	}
+	return attemptAddress(peerIP)
+}
+
+// attemptAddress counts IPv6 clients by their /64 prefix, since a single host
+// is usually assigned a whole /64 and could otherwise rotate addresses freely.
+func attemptAddress(ip net.IP) string {
+	if ip4 := ip.To4(); ip4 != nil {
+		return ip4.String()
+	}
+	prefix := net.IPNet{IP: ip.Mask(net.CIDRMask(64, 128)), Mask: net.CIDRMask(64, 128)}
+	return prefix.String()
+}
+
+func (s *Service) isTrustedProxy(ip net.IP) bool {
+	for _, ipNet := range s.cfg.IPAddressLoginProtectionTrustedProxies {
+		if ipNet.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) Add(ctx context.Context, username, IPAddress string) error {

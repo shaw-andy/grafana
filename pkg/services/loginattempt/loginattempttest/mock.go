@@ -2,6 +2,7 @@ package loginattempttest
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/grafana/grafana/pkg/services/loginattempt"
 )
@@ -15,6 +16,10 @@ type MockLoginAttemptService struct {
 
 	ExpectedValid bool
 	ExpectedErr   error
+}
+
+func (f *MockLoginAttemptService) ClientIPAddress(r *http.Request) string {
+	return r.RemoteAddr
 }
 
 func (f *MockLoginAttemptService) Add(ctx context.Context, username, ipAddress string) error {
