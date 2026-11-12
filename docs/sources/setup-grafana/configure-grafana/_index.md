@@ -1823,7 +1823,7 @@ Sets a global limit on number of correlations that can be created. Default is -1
 
 #### `alerting_rule_evaluation_results`
 
-Limit the number of query evaluation results per alert rule. If the condition query of an alert rule produces more results than this limit, the evaluation results in an error. Default is -1 (unlimited).
+Limit the number of query evaluation results per alert rule. If the condition query of an alert rule produces more results than this limit, the evaluation results in an error. The value must be positive. A missing, zero, or negative value uses the default. Default is `1000`.
 
 <hr>
 
