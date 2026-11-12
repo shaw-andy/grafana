@@ -17,6 +17,7 @@ type store interface {
 	CreateLoginAttempt(ctx context.Context, cmd CreateLoginAttemptCommand) (loginattempt.LoginAttempt, error)
 	DeleteOldLoginAttempts(ctx context.Context, cmd DeleteOldLoginAttemptsCommand) (int64, error)
 	DeleteLoginAttempts(ctx context.Context, cmd DeleteLoginAttemptsCommand) error
+	DeleteLoginAttempt(ctx context.Context, id int64) error
 	GetUserLoginAttemptCount(ctx context.Context, query GetUserLoginAttemptCountQuery) (int64, error)
 	GetIPLoginAttemptCount(ctx context.Context, query GetIPLoginAttemptCountQuery) (int64, error)
 }
@@ -60,6 +61,13 @@ func (xs *xormStore) DeleteOldLoginAttempts(ctx context.Context, cmd DeleteOldLo
 func (xs *xormStore) DeleteLoginAttempts(ctx context.Context, cmd DeleteLoginAttemptsCommand) error {
 	return xs.db.WithDbSession(ctx, func(sess *db.Session) error {
 		_, err := sess.Exec("DELETE FROM login_attempt WHERE username = ?", cmd.Username)
+		return err
+	})
+}
+
+func (xs *xormStore) DeleteLoginAttempt(ctx context.Context, id int64) error {
+	return xs.db.WithDbSession(ctx, func(sess *db.Session) error {
+		_, err := sess.Exec("DELETE FROM login_attempt WHERE id = ?", id)
 		return err
 	})
 }

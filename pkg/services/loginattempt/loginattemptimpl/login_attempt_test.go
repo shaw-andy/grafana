@@ -15,7 +15,7 @@ import (
 	"github.com/grafana/grafana/pkg/util/testutil"
 )
 
-func TestService_Validate(t *testing.T) {
+func TestService_ReserveUser(t *testing.T) {
 	const maxInvalidLoginAttempts = 5
 
 	testCases := []struct {
@@ -119,17 +119,21 @@ func TestService_Validate(t *testing.T) {
 			cfg.BruteForceLoginProtectionMaxAttempts = maxInvalidLoginAttempts
 			cfg.DisableBruteForceLoginProtection = tt.disableProtection
 			cfg.DisableUsernameLoginProtection = tt.disableUsernameProtection
+			cfg.DisableIPAddressLoginProtection = true
 			service := &Service{
 				store: fakeStore{
-					ExpectedCount: tt.loginAttempts,
-					ExpectedErr:   tt.expectedErr,
+					// the count includes the attempt being reserved
+					ExpectedCount: tt.loginAttempts + 1,
 				},
 				cfg: cfg,
 			}
 
-			ok, err := service.Validate(context.Background(), "test")
-			assert.Equal(t, tt.expected, ok)
-			assert.Equal(t, tt.expectedErr, err)
+			_, err := service.Reserve(context.Background(), "test", "192.168.1.1")
+			if tt.expected {
+				assert.NoError(t, err)
+			} else {
+				assert.ErrorIs(t, err, loginattempt.ErrTooManyUserAttempts)
+			}
 		})
 	}
 }
@@ -141,29 +145,35 @@ func TestIntegrationUserLoginAttempts(t *testing.T) {
 	cfg := setting.NewCfg()
 	cfg.DisableBruteForceLoginProtection = false
 	cfg.DisableUsernameLoginProtection = false
+	cfg.DisableIPAddressLoginProtection = true
 	cfg.BruteForceLoginProtectionMaxAttempts = 5
 	db := db.InitTestDB(t) //nolint:staticcheck // legacy shared-DB test setup; migrate to NewTestStore
 	service := ProvideService(db, cfg, nil)
 
-	// add multiple login attempts with different uppercases, they all should be counted as the same user
-	_ = service.Add(ctx, "admin", "[::1]")
-	_ = service.Add(ctx, "Admin", "[::1]")
-	_ = service.Add(ctx, "aDmin", "[::1]")
-	_ = service.Add(ctx, "adMin", "[::1]")
-	_ = service.Add(ctx, "admIn", "[::1]")
-	_ = service.Add(ctx, "admIN", "[::1]")
+	// reserve multiple login attempts with different uppercases, they all should be counted as the same user
+	for _, username := range []string{"admin", "Admin", "aDmin", "adMin", "admIn"} {
+		_, err := service.Reserve(ctx, username, "[::1]")
+		assert.NoError(t, err)
+	}
 
-	// validate the number of attempts is correct for all the different uppercases
+	// the attempt over the limit is rejected and not recorded
+	_, err := service.Reserve(ctx, "admIN", "[::1]")
+	assert.ErrorIs(t, err, loginattempt.ErrTooManyUserAttempts)
+
 	count, err := service.store.GetUserLoginAttemptCount(ctx, GetUserLoginAttemptCountQuery{Username: "admin"})
 	assert.Nil(t, err)
-	assert.Equal(t, int64(6), count)
+	assert.Equal(t, int64(5), count)
 
-	ok, err := service.Validate(ctx, "admin")
-	assert.False(t, ok)
+	// a released attempt no longer counts towards the limit
+	id, err := service.Reserve(ctx, "other", "[::1]")
+	assert.NoError(t, err)
+	assert.NoError(t, service.Release(ctx, id))
+	count, err = service.store.GetUserLoginAttemptCount(ctx, GetUserLoginAttemptCountQuery{Username: "other"})
 	assert.Nil(t, err)
+	assert.Equal(t, int64(0), count)
 }
 
-func TestService_ValidateIPAddress(t *testing.T) {
+func TestService_ReserveIPAddress(t *testing.T) {
 	const maxInvalidLoginAttempts = 5
 
 	testCases := []struct {
@@ -266,17 +276,21 @@ func TestService_ValidateIPAddress(t *testing.T) {
 			cfg.BruteForceLoginProtectionMaxAttempts = maxInvalidLoginAttempts
 			cfg.DisableBruteForceLoginProtection = tt.disableProtection
 			cfg.DisableIPAddressLoginProtection = tt.disableIPProtection
+			cfg.DisableUsernameLoginProtection = true
 			service := &Service{
 				store: fakeStore{
-					ExpectedCount: tt.loginAttempts,
-					ExpectedErr:   tt.expectedErr,
+					// the count includes the attempt being reserved
+					ExpectedCount: tt.loginAttempts + 1,
 				},
 				cfg: cfg,
 			}
 
-			ok, err := service.ValidateIPAddress(context.Background(), "192.168.1.1")
-			assert.Equal(t, tt.expected, ok)
-			assert.Equal(t, tt.expectedErr, err)
+			_, err := service.Reserve(context.Background(), "test", "192.168.1.1")
+			if tt.expected {
+				assert.NoError(t, err)
+			} else {
+				assert.ErrorIs(t, err, loginattempt.ErrTooManyIPAttempts)
+			}
 		})
 	}
 }
@@ -292,20 +306,24 @@ func TestIntegrationIPLoginAttempts(t *testing.T) {
 	db := db.InitTestDB(t) //nolint:staticcheck // legacy shared-DB test setup; migrate to NewTestStore
 	service := ProvideService(db, cfg, nil)
 
-	_ = service.Add(ctx, "user1", "192.168.1.1")
-	_ = service.Add(ctx, "user2", "10.0.0.123")
-	_ = service.Add(ctx, "user3", "192.168.1.1")
-	_ = service.Add(ctx, "user4", "[::1]")
-	_ = service.Add(ctx, "user5", "192.168.1.1")
-	_ = service.Add(ctx, "user6", "192.168.1.1")
+	for _, a := range []struct{ username, ip string }{
+		{"user1", "192.168.1.1"},
+		{"user2", "10.0.0.123"},
+		{"user3", "192.168.1.1"},
+		{"user4", "[::1]"},
+		{"user5", "192.168.1.1"},
+	} {
+		_, err := service.Reserve(ctx, a.username, a.ip)
+		assert.NoError(t, err)
+	}
+
+	// the attempt over the limit is rejected and not recorded
+	_, err := service.Reserve(ctx, "user6", "192.168.1.1")
+	assert.ErrorIs(t, err, loginattempt.ErrTooManyIPAttempts)
 
 	count, err := service.store.GetIPLoginAttemptCount(ctx, GetIPLoginAttemptCountQuery{IPAddress: "192.168.1.1"})
 	assert.Nil(t, err)
-	assert.Equal(t, int64(4), count)
-
-	ok, err := service.ValidateIPAddress(ctx, "192.168.1.1")
-	assert.False(t, ok)
-	assert.Nil(t, err)
+	assert.Equal(t, int64(3), count)
 }
 
 // TestIPv6AddressSupport verifies that various IPv6 address formats can be stored properly with the new column length, testing various IPv6 address formats that could be encountered.
@@ -352,9 +370,9 @@ func TestIntegrationIPv6AddressSupport(t *testing.T) {
 			// Verify that the address length is within our new limit of 50 characters
 			assert.LessOrEqual(t, len(ipAddress), 50, "IP address should fit in VARCHAR(50)")
 
-			// Test that we can add login attempts with this IPv6 address
-			err := service.Add(ctx, username, ipAddress)
-			assert.NoError(t, err, "Should be able to add login attempt with IPv6 address: %s", ipAddress)
+			// Test that we can reserve login attempts with this IPv6 address
+			_, err := service.Reserve(ctx, username, ipAddress)
+			assert.NoError(t, err, "Should be able to reserve login attempt with IPv6 address: %s", ipAddress)
 
 			// Verify that the login attempt was stored correctly
 			count, err := store.GetIPLoginAttemptCount(ctx, GetIPLoginAttemptCountQuery{
@@ -363,11 +381,6 @@ func TestIntegrationIPv6AddressSupport(t *testing.T) {
 			})
 			assert.NoError(t, err, "Should be able to query login attempts for IPv6 address: %s", ipAddress)
 			assert.Equal(t, int64(1), count, "Should have 1 login attempt for IPv6 address: %s", ipAddress)
-
-			// Test IP-based validation
-			ok, err := service.ValidateIPAddress(ctx, ipAddress)
-			assert.NoError(t, err, "Should be able to validate IPv6 address: %s", ipAddress)
-			assert.True(t, ok, "IPv6 address should be valid: %s", ipAddress)
 		})
 	}
 }
@@ -397,5 +410,9 @@ func (f fakeStore) DeleteOldLoginAttempts(ctx context.Context, command DeleteOld
 }
 
 func (f fakeStore) DeleteLoginAttempts(ctx context.Context, command DeleteLoginAttemptsCommand) error {
+	return f.ExpectedErr
+}
+
+func (f fakeStore) DeleteLoginAttempt(ctx context.Context, id int64) error {
 	return f.ExpectedErr
 }

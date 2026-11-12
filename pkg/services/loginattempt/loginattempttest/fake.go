@@ -13,18 +13,20 @@ type FakeLoginAttemptService struct {
 	ExpectedErr   error
 }
 
-func (f FakeLoginAttemptService) Add(ctx context.Context, username, IPAddress string) error {
+func (f FakeLoginAttemptService) Reserve(ctx context.Context, username, ipAddress string) (int64, error) {
+	if f.ExpectedErr != nil {
+		return 0, f.ExpectedErr
+	}
+	if !f.ExpectedValid {
+		return 0, loginattempt.ErrTooManyUserAttempts
+	}
+	return 0, nil
+}
+
+func (f FakeLoginAttemptService) Release(ctx context.Context, attemptID int64) error {
 	return f.ExpectedErr
 }
 
 func (f FakeLoginAttemptService) Reset(ctx context.Context, username string) error {
 	return f.ExpectedErr
-}
-
-func (f FakeLoginAttemptService) Validate(ctx context.Context, username string) (bool, error) {
-	return f.ExpectedValid, f.ExpectedErr
-}
-
-func (f FakeLoginAttemptService) ValidateIPAddress(ctx context.Context, IpAddress string) (bool, error) {
-	return f.ExpectedValid, f.ExpectedErr
 }
