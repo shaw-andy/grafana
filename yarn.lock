@@ -1914,7 +1914,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@eslint-community/regexpp@npm:^4.12.1, @eslint-community/regexpp@npm:^4.12.2":
+"@eslint-community/regexpp@npm:4.12.2, @eslint-community/regexpp@npm:^4.12.1, @eslint-community/regexpp@npm:^4.12.2":
   version: 4.12.2
   resolution: "@eslint-community/regexpp@npm:4.12.2"
   checksum: 10/049b280fddf71dd325514e0a520024969431dc3a8b02fa77476e6820e9122f28ab4c9168c11821f91a27982d2453bcd7a66193356ea84e84fb7c8d793be1ba0c
@@ -20045,6 +20045,7 @@ __metadata:
     "@emotion/css": "npm:11.13.5"
     "@emotion/eslint-plugin": "npm:11.12.0"
     "@emotion/react": "npm:11.14.0"
+    "@eslint-community/regexpp": "npm:4.12.2"
     "@fingerprintjs/fingerprintjs": "npm:^3.4.2"
     "@floating-ui/dom": "npm:^1.7.6"
     "@floating-ui/react": "npm:0.27.20"

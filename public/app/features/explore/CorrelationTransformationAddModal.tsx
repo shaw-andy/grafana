@@ -1,6 +1,6 @@
 import { css } from '@emotion/css';
 import { useId, useState, useMemo, useEffect } from 'react';
-import Highlighter from 'react-highlight-words';
+import Highlighter, { type Chunk, type FindChunks } from 'react-highlight-words';
 import { useForm, Controller } from 'react-hook-form';
 
 import { type DataLinkTransformationConfig, type ScopedVars } from '@grafana/data';
@@ -12,6 +12,7 @@ import {
   getTransformOptions,
   type TransformationFieldDetails,
 } from '../correlations/Forms/types';
+import { findTransformationRegexMatches, isValidTransformationRegex } from '../correlations/transformationRegex';
 import { getTransformationVars } from '../correlations/transformations';
 
 interface CorrelationTransformationAddModalProps {
@@ -25,6 +26,15 @@ interface ShowFormFields {
   expressionDetails: TransformationFieldDetails;
   mapValueDetails: TransformationFieldDetails;
 }
+
+const findExpressionChunks = ({ searchWords, textToHighlight }: FindChunks): Chunk[] =>
+  searchWords.flatMap((expression) =>
+    typeof expression === 'string' && expression
+      ? (findTransformationRegexMatches(expression, textToHighlight) ?? [])
+          .filter(({ start, end }) => start < end)
+          .map(({ start, end }) => ({ start, end }))
+      : []
+  );
 
 const LabelWithTooltip = ({ label, tooltipText }: { label: string; tooltipText: string }) => (
   <Stack gap={1} direction="row" wrap="wrap" alignItems="flex-start">
@@ -92,12 +102,7 @@ export const CorrelationTransformationAddModal = ({
       const expression = formValues.expression;
       let isExpressionValid = false;
       if (expression !== undefined) {
-        isExpressionValid = true;
-        try {
-          new RegExp(expression);
-        } catch (e) {
-          isExpressionValid = false;
-        }
+        isExpressionValid = isValidTransformationRegex(expression);
       } else {
         isExpressionValid = !formFieldsVis.expressionDetails.show;
       }
@@ -172,7 +177,7 @@ export const CorrelationTransformationAddModal = ({
             <Highlighter
               textToHighlight={exampleValue}
               searchWords={[isExpValid ? (getValues('expression') ?? '') : '']}
-              autoEscape={false}
+              findChunks={findExpressionChunks}
             />
           </pre>
           <Field label={t('explore.correlation-transformation-add-modal.label-type', 'Type')}>
