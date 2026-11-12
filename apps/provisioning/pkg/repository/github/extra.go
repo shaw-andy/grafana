@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/grafana/grafana-app-sdk/logging"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -27,10 +28,22 @@ type extra struct {
 	allowInsecure bool
 	metrics       *repository.OperationMetrics
 	clientMetrics *git.ClientMetrics
+	httpTransport http.RoundTripper
 }
 
-func Extra(decrypter repository.Decrypter, factory *Factory, webhookBuilder WebhookURLBuilder, allowInsecure bool, metrics *repository.OperationMetrics, clientMetrics *git.ClientMetrics) repository.Extra {
-	return &extra{
+type ExtraOption func(*extra)
+
+// WithExtraHTTPTransport sets the transport used for both git and GitHub API
+// requests, typically one built by repository.NewHTTPTransport with the
+// configured allowlist.
+func WithExtraHTTPTransport(transport http.RoundTripper) ExtraOption {
+	return func(e *extra) {
+		e.httpTransport = transport
+	}
+}
+
+func Extra(decrypter repository.Decrypter, factory *Factory, webhookBuilder WebhookURLBuilder, allowInsecure bool, metrics *repository.OperationMetrics, clientMetrics *git.ClientMetrics, opts ...ExtraOption) repository.Extra {
+	e := &extra{
 		decrypter:      decrypter,
 		factory:        factory,
 		webhookBuilder: webhookBuilder,
@@ -38,6 +51,10 @@ func Extra(decrypter repository.Decrypter, factory *Factory, webhookBuilder Webh
 		metrics:        metrics,
 		clientMetrics:  clientMetrics,
 	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
 }
 
 func (e *extra) Type() provisioning.RepositoryType {
@@ -70,12 +87,17 @@ func (e *extra) Build(ctx context.Context, r *provisioning.Repository) (reposito
 		CommitSigningKey: signingKey,
 		SigningMethod:    git.SigningMethodFromSpec(r),
 		SMIMECertificate: git.SMIMECertificateFromSpec(r),
+		HTTPTransport:    e.httpTransport,
 	}, e.metrics, e.clientMetrics)
 	if err != nil {
 		return nil, fmt.Errorf("error creating git repository: %w", err)
 	}
 
-	ghRepo, err := NewRepository(ctx, r, gitRepo, e.factory, token)
+	var clientOpts []ClientOption
+	if e.httpTransport != nil {
+		clientOpts = append(clientOpts, WithHTTPTransport(e.httpTransport))
+	}
+	ghRepo, err := NewRepository(ctx, r, gitRepo, e.factory, token, clientOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("error creating github repository: %w", err)
 	}

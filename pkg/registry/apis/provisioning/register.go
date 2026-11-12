@@ -320,6 +320,17 @@ func createJobHistoryConfigFromSettings(cfg *setting.Cfg) *JobHistoryConfig {
 	return &JobHistoryConfig{}
 }
 
+// AllowedGitURLs parses [provisioning] allowed_git_urls: endpoints that may be
+// used by Git repositories even though they resolve to an otherwise-blocked address.
+func AllowedGitURLs(cfg *setting.Cfg) (repository.Allowlist, error) {
+	entries := cfg.SectionWithEnvOverrides("provisioning").Key("allowed_git_urls").Strings(",")
+	allowlist, err := repository.NewAllowlist(entries)
+	if err != nil {
+		return repository.Allowlist{}, fmt.Errorf("invalid allowed_git_urls configuration: %w", err)
+	}
+	return allowlist, nil
+}
+
 // RegisterAPIService returns an API builder, from [NewAPIBuilder]. It is called by Wire.
 // This function happily uses services core to Grafana, and does not need to be multi-tenancy-compatible.
 func RegisterAPIService(
@@ -360,14 +371,10 @@ func RegisterAPIService(
 	folderMetadataEnabled := features.IsEnabledGlobally(featuremgmt.FlagProvisioningFolderMetadata) //nolint:staticcheck
 	maxFileSize := cfg.ProvisioningMaxFileSize
 	incrementalPolicy := repository.NewIncrementalSyncPolicy(folderMetadataEnabled, cfg.ProvisioningMaxIncrementalChanges)
-	provisioningSec := cfg.SectionWithEnvOverrides("provisioning")
 
-	// allowed_git_urls contain an allowlist of Git URLs that are allowed to be used for Git repositories.
-	// It should contain enpoints that otherwise would be blocked by the URL validator.
-	allowListConfig := provisioningSec.Key("allowed_git_urls").Strings(",")
-	allowlist, err := repository.NewAllowlist(allowListConfig)
+	allowlist, err := AllowedGitURLs(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("invalid allowed_git_urls configuration: %w", err)
+		return nil, err
 	}
 	urlValidator := repository.NewURLValidator(allowlist, net.DefaultResolver.LookupIPAddr)
 	repoValidatorOpts := []repository.ValidatorOption{repository.WithURLValidator(urlValidator)}

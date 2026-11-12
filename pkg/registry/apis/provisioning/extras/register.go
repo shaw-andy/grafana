@@ -43,13 +43,20 @@ func ProvideProvisioningOSSRepositoryExtras(
 	// http:// URLs with a token are only allowed in development or when explicitly opted in,
 	// since the token would otherwise travel in cleartext.
 	allowInsecure := cfg.Env == setting.Dev || cfg.ProvisioningAllowInsecure
+	// An invalid allowlist also fails provisioning.RegisterAPIService at startup;
+	// until then, fall back to allowing only public addresses.
+	allowlist, err := provisioning.AllowedGitURLs(cfg)
+	if err != nil {
+		allowlist = repository.Allowlist{}
+	}
+	transport := repository.NewHTTPTransport(allowlist)
 	return []repository.Extra{
 		local.Extra(
 			cfg.HomePath,
 			cfg.PermittedProvisioningPaths,
 			operationMetrics,
 		),
-		git.Extra(decrypter, allowInsecure, operationMetrics, clientMetrics),
+		git.Extra(decrypter, allowInsecure, operationMetrics, clientMetrics, git.WithHTTPTransport(transport)),
 		github.Extra(
 			decrypter,
 			ghFactory,
@@ -57,6 +64,7 @@ func ProvideProvisioningOSSRepositoryExtras(
 			allowInsecure,
 			operationMetrics,
 			clientMetrics,
+			github.WithExtraHTTPTransport(transport),
 		),
 	}
 }

@@ -51,8 +51,9 @@ func NewRepository(
 	gitRepo git.GitRepository,
 	factory *Factory,
 	token common.RawSecureValue,
+	opts ...ClientOption,
 ) (GithubRepository, error) {
-	return newRepository(ctx, config, gitRepo, factory, token, WithCustomServerURL(gitRepo.URL()))
+	return newRepository(ctx, config, gitRepo, factory, token, append(opts, WithCustomServerURL(gitRepo.URL()))...)
 }
 
 func newRepository(
