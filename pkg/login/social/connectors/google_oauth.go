@@ -364,7 +364,7 @@ func (s *SocialGoogle) getGroupsPage(ctx context.Context, client *http.Client, u
 }
 
 func (s *SocialGoogle) isHDAllowed(hd string) error {
-	if s.validateHD {
+	if !s.validateHD {
 		return nil
 	}
 
@@ -372,7 +372,10 @@ func (s *SocialGoogle) isHDAllowed(hd string) error {
 		return nil
 	}
 
-	if slices.Contains(s.info.AllowedDomains, hd) {
+	// Accounts outside a Google Workspace carry no hd claim and must not match an empty allowed domain entry.
+	if hd != "" && slices.ContainsFunc(s.info.AllowedDomains, func(domain string) bool {
+		return strings.EqualFold(domain, hd)
+	}) {
 		return nil
 	}
 
