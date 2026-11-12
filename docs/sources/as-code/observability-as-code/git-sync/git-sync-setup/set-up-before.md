@@ -76,7 +76,7 @@ Git Sync doesn't route over AWS PrivateLink or Private Data Source Connect (PDC)
 This setting is available for Grafana v13.0.4 and Grafana v13.1.1 and later. It only applies to self-managed Grafana (OSS and Enterprise), but it's not configurable in Grafana Cloud.
 {{< /admonition >}}
 
-While public Git servers such as `github.com`, `gitlab.com`, and `bitbucket.org` resolve to public addresses and are always allowed, by default Git Sync rejects repository URLs with a host that resolves to a loopback, a private (RFC 1918), link-local, or an unspecified address. This protects your Grafana instance against server-side request forgery (SSRF).
+While public Git servers such as `github.com`, `gitlab.com`, and `bitbucket.org` resolve to public addresses and are always allowed, by default Git Sync rejects repository URLs with a host that resolves to a loopback, private (RFC 1918), link-local, unspecified, shared (`100.64.0.0/10`), multicast, benchmarking, documentation, or other reserved address. This protects your Grafana instance against server-side request forgery (SSRF).
 
 If you connect Git Sync to a Git server on a private network such as a self-hosted GitHub Enterprise, GitLab, or Bitbucket instance reachable only through an internal address, add its host to the `allowed_git_urls` allowlist:
 
