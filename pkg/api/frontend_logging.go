@@ -8,6 +8,7 @@ import (
 
 	"github.com/grafana/grafana/pkg/api/frontendlogging"
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/services/contexthandler"
 	"github.com/grafana/grafana/pkg/web"
 )
 
@@ -26,6 +27,7 @@ func GrafanaJavascriptAgentLogMessageHandler(store *frontendlogging.SourceMapSto
 			if err != nil {
 				hs.log.Error("could not write to response", "err", err)
 			}
+			return
 		}
 
 		// Meta object is standard across event types, adding it globally.
@@ -117,6 +119,13 @@ func (hs *HTTPServer) frontendLogEndpoints() web.Handler {
 
 	return func(ctx *web.Context) {
 		if ctx.Req.Method == http.MethodPost && ctx.Req.URL.Path == grafanaJavascriptAgentEndpointPath {
+			// log.frontend.api_key is delivered to every browser in the frontend settings,
+			// so only a signed-in session can authorize writes to the server log.
+			reqCtx := contexthandler.FromContext(ctx.Req.Context())
+			if reqCtx == nil || !reqCtx.IsSignedIn {
+				ctx.Resp.WriteHeader(http.StatusUnauthorized)
+				return
+			}
 			if !rateLimiter.AllowN(time.Now(), 1) {
 				ctx.Resp.WriteHeader(http.StatusTooManyRequests)
 				return
