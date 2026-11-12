@@ -223,6 +223,14 @@ type WebhookRepository interface {
 	SubscribedEvents() []string
 }
 
+// PreviewSigningRepository is implemented by repositories that can sign the
+// URLs of pull request preview images. The key is derived from a secret that
+// only Grafana and the git provider hold, so a preview URL cannot be forged
+// from the parts that appear in it.
+type PreviewSigningRepository interface {
+	PreviewSigningKey() ([]byte, error)
+}
+
 type FileAction string
 
 const (

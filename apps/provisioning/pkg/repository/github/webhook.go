@@ -2,6 +2,8 @@ package github
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -25,6 +27,10 @@ type GithubWebhookRepository interface {
 // processing, so fail the build if it ever stops satisfying the full contract.
 var _ repository.PullRequestRepo = (*githubWebhookRepository)(nil)
 
+// Pull request previews are only produced for webhook repositories, so this is
+// the type that signs their image URLs.
+var _ repository.PreviewSigningRepository = (*githubWebhookRepository)(nil)
+
 type githubWebhookRepository struct {
 	GithubRepository
 	webhookURL string
@@ -41,6 +47,17 @@ func NewGithubWebhookRepository(
 		webhookURL:       webhookURL,
 		secret:           secret,
 	}
+}
+
+// PreviewSigningKey derives a key from the webhook secret so the secret itself
+// is never used directly to sign anything other than webhook deliveries.
+func (r *githubWebhookRepository) PreviewSigningKey() ([]byte, error) {
+	if r.secret.IsZero() {
+		return nil, fmt.Errorf("missing webhook secret")
+	}
+	mac := hmac.New(sha256.New, []byte(r.secret))
+	mac.Write([]byte("grafana-provisioning-preview-url"))
+	return mac.Sum(nil), nil
 }
 
 func (r *githubWebhookRepository) VerifyRequest(req *http.Request) (*repository.VerifiedWebhookRequest, error) {

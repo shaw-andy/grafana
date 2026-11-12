@@ -6,7 +6,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net/url"
+	"path"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/mock"
@@ -1422,7 +1425,7 @@ func TestCalculateChanges(t *testing.T) {
 				URL: "http://github.com/pr/",
 			}
 
-			info, err := evaluator.Evaluate(context.Background(), reader, pullRequest, tt.changes, progress)
+			info, err := evaluator.Evaluate(context.Background(), signingReader{reader}, pullRequest, tt.changes, progress)
 			if tt.expectedError != "" {
 				require.EqualError(t, err, tt.expectedError)
 				return
@@ -1435,8 +1438,12 @@ func TestCalculateChanges(t *testing.T) {
 			for i, change := range info.Changes {
 				require.Equal(t, tt.expectedInfo.Changes[i].GrafanaURL, change.GrafanaURL)
 				require.Equal(t, tt.expectedInfo.Changes[i].PreviewURL, change.PreviewURL)
-				require.Equal(t, tt.expectedInfo.Changes[i].GrafanaScreenshotURL, change.GrafanaScreenshotURL)
-				require.Equal(t, tt.expectedInfo.Changes[i].PreviewScreenshotURL, change.PreviewScreenshotURL)
+				var renderedRepo provisioning.ResourceRepositoryInfo
+				if change.Parsed != nil {
+					renderedRepo = change.Parsed.Repo
+				}
+				requirePreviewScreenshotURL(t, tt.expectedInfo.Changes[i].GrafanaScreenshotURL, change.GrafanaScreenshotURL, renderedRepo)
+				requirePreviewScreenshotURL(t, tt.expectedInfo.Changes[i].PreviewScreenshotURL, change.PreviewScreenshotURL, renderedRepo)
 				require.Equal(t, tt.expectedInfo.Changes[i].Error, change.Error)
 			}
 		})
@@ -1974,6 +1981,7 @@ func TestRenderScreenshotFromGrafanaURL(t *testing.T) {
 		setupMock  func(renderer *MockScreenshotRenderer)
 		wantSnap   string
 		wantErr    string
+		noKey      bool
 	}{
 		{
 			name:       "invalid grafana url",
@@ -2026,6 +2034,16 @@ func TestRenderScreenshotFromGrafanaURL(t *testing.T) {
 			},
 			wantSnap: "http://host/screenshots/123.png",
 		},
+		{
+			name:       "relative path without signing key",
+			baseURL:    "http://host/",
+			grafanaURL: "http://host/d/uid/dashboard",
+			noKey:      true,
+			setupMock: func(renderer *MockScreenshotRenderer) {
+				renderer.On("RenderScreenshot", mock.Anything, mock.Anything, "d/uid/dashboard", mock.Anything).Return("screenshots/123.png", nil)
+			},
+			wantErr: "missing preview signing key",
+		},
 	}
 
 	metrics := registerScreenshotMetrics(prometheus.NewPedanticRegistry())
@@ -2039,7 +2057,11 @@ func TestRenderScreenshotFromGrafanaURL(t *testing.T) {
 				Name:      "repo",
 			}
 
-			got, err := renderScreenshotFromGrafanaURL(context.Background(), tt.baseURL, renderer, repo, tt.grafanaURL, metrics)
+			key := testPreviewKey
+			if tt.noKey {
+				key = nil
+			}
+			got, err := renderScreenshotFromGrafanaURL(context.Background(), tt.baseURL, renderer, repo, key, tt.grafanaURL, metrics)
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tt.wantErr)
@@ -2047,9 +2069,36 @@ func TestRenderScreenshotFromGrafanaURL(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			require.Equal(t, tt.wantSnap, got)
+			requirePreviewScreenshotURL(t, tt.wantSnap, got, repo)
 		})
 	}
+}
+
+var testPreviewKey = []byte("placeholder-preview-key")
+
+type signingReader struct {
+	*repository.MockReader
+}
+
+func (signingReader) PreviewSigningKey() ([]byte, error) { return testPreviewKey, nil }
+
+// requirePreviewScreenshotURL compares a screenshot URL ignoring the signature
+// that Grafana appends to its own render URLs, and checks that signature.
+// Fixture CDN URLs (https://cdn...) are returned by blob storage as-is and are not signed.
+func requirePreviewScreenshotURL(t *testing.T, want, got string, repo provisioning.ResourceRepositoryInfo) {
+	t.Helper()
+	if want == "" || strings.HasPrefix(want, "https://cdn") {
+		require.Equal(t, want, got)
+		return
+	}
+	u, err := url.Parse(got)
+	require.NoError(t, err)
+	query := u.Query()
+	u.RawQuery = ""
+	require.Equal(t, want, u.String())
+	sig, err := ParsePreviewSignature(query, time.Now())
+	require.NoError(t, err)
+	require.True(t, sig.Verify(testPreviewKey, repo.Namespace, repo.Name, path.Base(u.Path)))
 }
 
 func TestHasStrippedMetadata(t *testing.T) {
