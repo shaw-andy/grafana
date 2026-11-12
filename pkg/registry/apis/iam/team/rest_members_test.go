@@ -148,6 +148,35 @@ func TestTeamMembersREST_Connect(t *testing.T) {
 		require.Equal(t, "u2", resp.Items[1].User)
 	})
 
+	t.Run("zero limit with a positive offset does not panic", func(t *testing.T) {
+		for _, rawQuery := range []string{"limit=0&offset=1", "limit=nope&offset=1"} {
+			t.Run(rawQuery, func(t *testing.T) {
+				g := &mockGetter{team: teamWithMembers("team1",
+					member("u1", "member", false),
+					member("u2", "member", false),
+				)}
+				handler := NewTeamMembersREST(g, tracing.NewNoopTracerService())
+				ctx := identity.WithRequester(context.Background(), &identity.StaticRequester{Namespace: "default"})
+				responder := &mockResponder{}
+				h, err := handler.Connect(ctx, "team1", nil, responder)
+				require.NoError(t, err)
+
+				rr := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, "/members?"+rawQuery, nil).WithContext(ctx)
+				require.NotPanics(t, func() {
+					h.ServeHTTP(rr, req)
+				})
+				if rr.Code == http.StatusBadRequest || rr.Code == http.StatusUnprocessableEntity {
+					return
+				}
+				require.True(t, responder.called)
+				require.NoError(t, responder.err)
+				resp := responder.obj.(*iamv0alpha1.GetTeamMembersResponse)
+				require.NotEmpty(t, resp.Items)
+			})
+		}
+	})
+
 	t.Run("rejects limit above max", func(t *testing.T) {
 		g := &mockGetter{team: teamWithMembers("team1")}
 		handler := NewTeamMembersREST(g, tracing.NewNoopTracerService())
