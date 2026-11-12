@@ -26,7 +26,15 @@ type Tree struct {
 	lex       *lexer
 	token     [1]item // one-token lookahead for parser.
 	peekCount int
+	depth     int
 }
+
+// The parser recurses once per nesting level and a Go stack overflow cannot be
+// recovered, so input size and nesting are bounded before they can exhaust the stack.
+const (
+	maxExpressionLength = 16 * 1024
+	maxNestingDepth     = 100
+)
 
 // Func holds the structure of a parsed function call.
 type Func struct {
@@ -136,6 +144,18 @@ func (t *Tree) startParse(funcs []map[string]Func, lex *lexer) {
 	t.Root = nil
 	t.lex = lex
 	t.funcs = funcs
+	t.depth = 0
+}
+
+func (t *Tree) enter() {
+	t.depth++
+	if t.depth > maxNestingDepth {
+		t.errorf("expression exceeds maximum nesting depth of %d", maxNestingDepth)
+	}
+}
+
+func (t *Tree) leave() {
+	t.depth--
 }
 
 // stopParse terminates parsing.
@@ -149,6 +169,10 @@ func (t *Tree) stopParse() {
 // Parse parses the expression definition string to construct a representation
 // of the expression for execution.
 func (t *Tree) Parse(text string, funcs ...map[string]Func) (err error) {
+	if len(text) > maxExpressionLength {
+		t.Root = nil
+		return fmt.Errorf("expr: expression length %d exceeds maximum of %d bytes", len(text), maxExpressionLength)
+	}
 	defer t.recover(&err)
 	t.startParse(funcs, lex(text))
 	t.Text = text
@@ -184,6 +208,8 @@ param -> number | "string" | queryVar
 
 // O is A {"||" A} in the grammar.
 func (t *Tree) O() Node {
+	t.enter()
+	defer t.leave()
 	n := t.A()
 	for {
 		switch t.peek().typ {
@@ -266,6 +292,8 @@ func (t *Tree) F() Node {
 	case itemNumber, itemFunc, itemVar:
 		return t.v()
 	case itemNot, itemMinus:
+		t.enter()
+		defer t.leave()
 		return newUnary(t.next(), t.F())
 	case itemLeftParen:
 		t.next()
