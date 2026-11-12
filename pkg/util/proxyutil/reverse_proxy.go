@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"strings"
@@ -78,6 +79,12 @@ func wrapDirector(d func(*http.Request)) func(req *http.Request) {
 
 		d(req)
 		PrepareProxyRequest(req)
+
+		// httputil.ReverseProxy appends the TCP peer to X-Forwarded-For after the
+		// director runs whenever RemoteAddr has a port; leave that single value.
+		if _, _, err := net.SplitHostPort(req.RemoteAddr); err == nil {
+			req.Header.Del("X-Forwarded-For")
+		}
 	}
 }
 

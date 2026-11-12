@@ -19,10 +19,28 @@ const (
 	IDHeaderName = "X-Grafana-Id"
 )
 
+// forwardingHeaders are request headers that describe the original client or
+// connection. Upstreams that trust Grafana as a proxy read the client address
+// from them, so caller-supplied values must never be passed through. Names are
+// lowercase with "-" separators; matching also treats "_" as "-" because some
+// servers fold both to the same name.
+var forwardingHeaders = map[string]struct{}{
+	"forwarded":                {},
+	"x-forwarded-for":          {},
+	"x-forwarded-host":         {},
+	"x-forwarded-port":         {},
+	"x-forwarded-proto":        {},
+	"x-real-ip":                {},
+	"x-client-ip":              {},
+	"true-client-ip":           {},
+	"x-cluster-client-ip":      {},
+	"x-original-forwarded-for": {},
+}
+
 // PrepareProxyRequest prepares a request for being proxied.
-// Removes X-Forwarded-Host, X-Forwarded-Port, X-Forwarded-Proto, Origin, Referer headers.
+// Removes Origin, Referer and all inbound forwarding headers (Forwarded, X-Forwarded-*, X-Real-IP, ...).
 // Set X-Grafana-Referer based on contents of Referer.
-// Set X-Forwarded-For headers.
+// Set X-Forwarded-For to the TCP peer of the request.
 func PrepareProxyRequest(req *http.Request) {
 	// Set X-Grafana-Referer to correlate access logs to dashboards
 	req.Header.Set("X-Grafana-Referer", req.Header.Get("Referer"))
@@ -31,19 +49,21 @@ func PrepareProxyRequest(req *http.Request) {
 	req.Header.Del("Origin")
 	req.Header.Del("Referer")
 
-	req.Header.Del("X-Forwarded-Host")
-	req.Header.Del("X-Forwarded-Port")
-	req.Header.Del("X-Forwarded-Proto")
+	deleteForwardingHeaders(req.Header)
 
 	if req.RemoteAddr != "" {
 		remoteAddr, _, err := net.SplitHostPort(req.RemoteAddr)
 		if err != nil {
 			remoteAddr = req.RemoteAddr
 		}
-		if req.Header.Get("X-Forwarded-For") != "" {
-			req.Header.Set("X-Forwarded-For", req.Header.Get("X-Forwarded-For")+", "+remoteAddr)
-		} else {
-			req.Header.Set("X-Forwarded-For", remoteAddr)
+		req.Header.Set("X-Forwarded-For", remoteAddr)
+	}
+}
+
+func deleteForwardingHeaders(header http.Header) {
+	for name := range header {
+		if _, ok := forwardingHeaders[strings.ReplaceAll(strings.ToLower(name), "_", "-")]; ok {
+			delete(header, name)
 		}
 	}
 }
