@@ -144,7 +144,6 @@ func TestTracingConfig(t *testing.T) {
 			Name:             "default config uses noop exporter",
 			Cfg:              "",
 			ExpectedExporter: noopExporter,
-			ExpectedInsecure: true,
 			ExpectedAttrs:    []attribute.KeyValue{},
 		},
 		{
@@ -154,7 +153,6 @@ func TestTracingConfig(t *testing.T) {
 			custom_attributes = key1:value1,key2:value2
 			`,
 			ExpectedExporter: noopExporter,
-			ExpectedInsecure: true,
 			ExpectedAttrs:    []attribute.KeyValue{attribute.String("key1", "value1"), attribute.String("key2", "value2")},
 		},
 		{
@@ -168,14 +166,38 @@ func TestTracingConfig(t *testing.T) {
 			ExpectedAttrs:    []attribute.KeyValue{},
 		},
 		{
-			Name: "OTLP address is parsed",
+			Name: "OTLP address is parsed and defaults to TLS",
 			Cfg: `
 			[tracing.opentelemetry.otlp]
 			address = otlp.example.com:4317
 			`,
 			ExpectedExporter: otlpExporter,
 			ExpectedAddress:  "otlp.example.com:4317",
-			ExpectedInsecure: true,
+			ExpectedInsecure: false,
+			ExpectedAttrs:    []attribute.KeyValue{},
+		},
+		{
+			Name: "OTLP empty insecure defaults to TLS",
+			Cfg: `
+			[tracing.opentelemetry.otlp]
+			address = otlp.example.com:4317
+			insecure =
+			`,
+			ExpectedExporter: otlpExporter,
+			ExpectedAddress:  "otlp.example.com:4317",
+			ExpectedInsecure: false,
+			ExpectedAttrs:    []attribute.KeyValue{},
+		},
+		{
+			Name: "OTLP unparseable insecure defaults to TLS",
+			Cfg: `
+			[tracing.opentelemetry.otlp]
+			address = otlp.example.com:4317
+			insecure = maybe
+			`,
+			ExpectedExporter: otlpExporter,
+			ExpectedAddress:  "otlp.example.com:4317",
+			ExpectedInsecure: false,
 			ExpectedAttrs:    []attribute.KeyValue{},
 		},
 		{
@@ -183,11 +205,11 @@ func TestTracingConfig(t *testing.T) {
 			Cfg: `
 			[tracing.opentelemetry.otlp]
 			address = otlp.example.com:4317
-			insecure = false
+			insecure = true
 			`,
 			ExpectedExporter: otlpExporter,
 			ExpectedAddress:  "otlp.example.com:4317",
-			ExpectedInsecure: false,
+			ExpectedInsecure: true,
 			ExpectedAttrs:    []attribute.KeyValue{},
 		},
 		{
@@ -241,7 +263,6 @@ func TestTracingConfig(t *testing.T) {
 			`,
 			ExpectedExporter:          otlpExporter,
 			ExpectedAddress:           "otlp.example.com:4317",
-			ExpectedInsecure:          true,
 			ExpectedAttrs:             []attribute.KeyValue{},
 			ExpectedSampler:           "remote",
 			ExpectedSamplerParam:      0.5,

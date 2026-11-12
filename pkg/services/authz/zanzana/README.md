@@ -123,6 +123,7 @@ router_logging = true
 
 [tracing.opentelemetry.otlp]
 address = localhost:4317
+insecure = true
 ```
 
 Then start grafana.
@@ -233,6 +234,7 @@ password = password
 
 [tracing.opentelemetry.otlp]
 address = localhost:4317
+insecure = true
 ```
 
 ### Reconciler configuration
