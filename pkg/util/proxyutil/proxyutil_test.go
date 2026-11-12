@@ -68,15 +68,20 @@ func TestPrepareProxyRequest(t *testing.T) {
 		require.Equal(t, "127.0.0.1", req.Header.Get("X-Forwarded-For"))
 	})
 
-	t.Run("Prepare proxy request should append client ip at the end of X-Forwarded-For", func(t *testing.T) {
+	t.Run("Prepare proxy request should replace caller supplied forwarding headers with client ip", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "127.0.0.1:1234"
 		req.Header.Set("X-Forwarded-For", "192.168.0.1")
+		req.Header.Set("X-Real-Ip", "192.168.0.2")
+		req.Header.Set("Forwarded", "for=192.168.0.3")
+		req.Header["X_forwarded_for"] = []string{"192.168.0.4"}
 		require.NoError(t, err)
 
 		PrepareProxyRequest(req)
-		require.Contains(t, req.Header, "X-Forwarded-For")
-		require.Equal(t, "192.168.0.1, 127.0.0.1", req.Header.Get("X-Forwarded-For"))
+		require.Equal(t, []string{"127.0.0.1"}, req.Header.Values("X-Forwarded-For"))
+		require.NotContains(t, req.Header, "X-Real-Ip")
+		require.NotContains(t, req.Header, "Forwarded")
+		require.NotContains(t, req.Header, "X_forwarded_for")
 	})
 }
 
