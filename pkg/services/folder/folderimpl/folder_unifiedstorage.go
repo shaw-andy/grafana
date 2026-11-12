@@ -23,6 +23,7 @@ import (
 	dashboardsearch "github.com/grafana/grafana/pkg/services/dashboards/service/search"
 	"github.com/grafana/grafana/pkg/services/folder"
 	"github.com/grafana/grafana/pkg/services/search/model"
+	"github.com/grafana/grafana/pkg/services/search/textquery"
 	"github.com/grafana/grafana/pkg/services/store/entity"
 	"github.com/grafana/grafana/pkg/storage/unified/resource"
 	"github.com/grafana/grafana/pkg/storage/unified/resourcepb"
@@ -203,8 +204,11 @@ func (s *Service) SearchFolders(ctx context.Context, query folder.SearchFoldersQ
 	}
 
 	if query.Title != "" {
+		if err := textquery.CheckSubstring(query.Title); err != nil {
+			return nil, err
+		}
 		// allow wildcard search
-		request.Query = "*" + strings.ToLower(query.Title) + "*"
+		request.Query = "*" + textquery.StripWildcards(strings.ToLower(query.Title)) + "*"
 		// or perform exact match if requested
 		if query.TitleExactMatch {
 			request.Query = query.Title

@@ -28,6 +28,7 @@ import (
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/registry/apis/iam/common"
 	"github.com/grafana/grafana/pkg/services/apiserver/builder"
+	"github.com/grafana/grafana/pkg/services/search/textquery"
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/storage/unified/resource"
 	"github.com/grafana/grafana/pkg/storage/unified/resourcepb"
@@ -280,8 +281,13 @@ func (s *SearchHandler) DoSearch(w http.ResponseWriter, r *http.Request) {
 		limit = common.DefaultListLimit
 	}
 
+	if err := textquery.CheckSubstring(queryParams.Get("query")); err != nil {
+		errhttp.Write(ctx, err, w)
+		return
+	}
+
 	// Escape characters that are used by bleve wildcard search to be literal strings.
-	rawQuery := escapeBleveQuery(queryParams.Get("query"))
+	rawQuery := escapeBleveQuery(textquery.StripWildcards(queryParams.Get("query")))
 
 	searchQuery := fmt.Sprintf(`*%s*`, rawQuery)
 

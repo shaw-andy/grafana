@@ -29,6 +29,7 @@ import (
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/registry/apis/iam/common"
 	"github.com/grafana/grafana/pkg/services/apiserver/builder"
+	"github.com/grafana/grafana/pkg/services/search/textquery"
 	teamsearch "github.com/grafana/grafana/pkg/services/team/search"
 	"github.com/grafana/grafana/pkg/storage/unified/resource"
 	"github.com/grafana/grafana/pkg/storage/unified/resourcepb"
@@ -295,6 +296,12 @@ func (s *SearchHandler) DoTeamSearch(w http.ResponseWriter, r *http.Request) {
 		limit = common.DefaultListLimit
 	}
 
+	query := queryParams.Get("query")
+	if err := textquery.Check(query); err != nil {
+		errhttp.Write(ctx, err, w)
+		return
+	}
+
 	searchRequest := &resourcepb.ResourceSearchRequest{
 		Options: &resourcepb.ListOptions{
 			Key: &resourcepb.ResourceKey{
@@ -303,7 +310,7 @@ func (s *SearchHandler) DoTeamSearch(w http.ResponseWriter, r *http.Request) {
 				Namespace: requester.GetNamespace(),
 			},
 		},
-		Query:        queryParams.Get("query"),
+		Query:        query,
 		Limit:        int64(limit),
 		Offset:       int64(offset),
 		Page:         int64(page),

@@ -14,6 +14,7 @@ import (
 	model "github.com/grafana/grafana/apps/alerting/rules/pkg/apis/alerting/v0alpha1"
 	searchv0 "github.com/grafana/grafana/pkg/apis/search/v0alpha1"
 	"github.com/grafana/grafana/pkg/expr"
+	"github.com/grafana/grafana/pkg/services/search/textquery"
 	"github.com/grafana/grafana/pkg/storage/unified/resource"
 )
 
@@ -247,8 +248,11 @@ func validateTextLeaf(t *searchv0.TextPredicate, k perKind, p *field.Path) field
 	if strings.TrimSpace(t.Value) == "" {
 		errs = append(errs, field.Required(p.Child("value"), "text value is required"))
 	}
-	if strings.ContainsAny(t.Value, "*%") {
+	if strings.ContainsAny(t.Value, "*%") || textquery.HasWildcard(t.Value) {
 		errs = append(errs, field.Invalid(p.Child("value"), t.Value, "wildcard values are not allowed"))
+	}
+	if len(t.Value) > textquery.MaxBytes {
+		errs = append(errs, field.TooLong(p.Child("value"), "", textquery.MaxBytes))
 	}
 	if t.Boost != nil {
 		errs = append(errs, field.Forbidden(p.Child("boost"), "boost is not supported"))

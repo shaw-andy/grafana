@@ -52,6 +52,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/quota"
 	"github.com/grafana/grafana/pkg/services/search/model"
 	"github.com/grafana/grafana/pkg/services/search/sort"
+	"github.com/grafana/grafana/pkg/services/search/textquery"
 	"github.com/grafana/grafana/pkg/services/store/entity"
 	"github.com/grafana/grafana/pkg/services/user"
 	"github.com/grafana/grafana/pkg/setting"
@@ -2056,8 +2057,11 @@ func (dr *DashboardServiceImpl) buildDashboardSearchRequest(query *dashboards.Fi
 	}
 
 	if query.Title != "" {
+		if err := textquery.CheckSubstring(query.Title); err != nil {
+			return nil, err
+		}
 		// allow wildcard search
-		request.Query = "*" + strings.ToLower(query.Title) + "*"
+		request.Query = "*" + textquery.StripWildcards(strings.ToLower(query.Title)) + "*"
 	}
 
 	if len(query.Tags) > 0 {

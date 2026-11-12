@@ -20,6 +20,7 @@ import (
 
 	searchv0 "github.com/grafana/grafana/pkg/apis/search/v0alpha1"
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/services/search/textquery"
 	"github.com/grafana/grafana/pkg/storage/unified/resource"
 	"github.com/grafana/grafana/pkg/storage/unified/resourcepb"
 	"github.com/grafana/grafana/pkg/util/errhttp"
@@ -149,6 +150,10 @@ func (h *Handler) handle(
 		if len(ferrs) > 0 {
 			errhttp.Write(ctx, apierrors.NewInvalid(
 				schema.GroupKind{Group: searchv0.GROUP, Kind: queryKind}, "", ferrs), w)
+			return
+		}
+		if err := textquery.Check(req.Query); err != nil {
+			errhttp.Write(ctx, err, w)
 			return
 		}
 

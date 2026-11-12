@@ -14,6 +14,7 @@ import (
 	"github.com/grafana/grafana/pkg/expr"
 	ngmodels "github.com/grafana/grafana/pkg/services/ngalert/models"
 	"github.com/grafana/grafana/pkg/services/ngalert/provisioning"
+	"github.com/grafana/grafana/pkg/services/search/textquery"
 	"github.com/grafana/grafana/pkg/storage/unified/resourcepb"
 )
 
@@ -191,6 +192,9 @@ func applyText(req *resourcepb.ResourceSearchRequest, leaf *model.CreateSearchRu
 	}
 	if len(leaf.Fields) > 0 {
 		return fmt.Errorf("per-field text search is not supported")
+	}
+	if err := textquery.Check(leaf.Value); err != nil {
+		return err
 	}
 	req.Query = leaf.Value
 	return nil
