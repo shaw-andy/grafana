@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"path"
@@ -22,6 +21,7 @@ import (
 	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/loganalytics"
 	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/macros"
 	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/types"
+	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/utils"
 )
 
 // AzureResourceGraphResponse is the json response object from the Azure Resource Graph Analytics API.
@@ -211,10 +211,10 @@ func (e *AzureResourceGraphDatasource) unmarshalResponse(res *http.Response) (Az
 		}
 	}()
 
+	body, err := utils.ReadResponseBody(res.Body)
 	if res.StatusCode/100 != 2 {
-		body, readErr := io.ReadAll(res.Body)
-		if readErr != nil {
-			return AzureResourceGraphResponse{}, fmt.Errorf("non-2xx response %s and failed to read body: %w", res.Status, readErr)
+		if err != nil {
+			return AzureResourceGraphResponse{}, fmt.Errorf("non-2xx response %s and failed to read body: %w", res.Status, err)
 		}
 		err := fmt.Errorf("%s. Azure Resource Graph error: %s", res.Status, string(body))
 		if backend.ErrorSourceFromHTTPStatus(res.StatusCode) == backend.ErrorSourceDownstream {
@@ -222,11 +222,14 @@ func (e *AzureResourceGraphDatasource) unmarshalResponse(res *http.Response) (Az
 		}
 		return AzureResourceGraphResponse{}, backend.PluginError(err)
 	}
+	if err != nil {
+		return AzureResourceGraphResponse{}, err
+	}
 
 	var data AzureResourceGraphResponse
 	// UseNumber preserves int64 precision; Log Analytics-style response
 	// tables downstream of this may type-assert cells to json.Number.
-	d := json.NewDecoder(res.Body)
+	d := json.NewDecoder(bytes.NewReader(body))
 	d.UseNumber()
 	if err := d.Decode(&data); err != nil {
 		return AzureResourceGraphResponse{}, err

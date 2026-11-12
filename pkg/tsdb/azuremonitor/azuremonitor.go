@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -302,7 +301,11 @@ func checkAzureLogAnalyticsHealth(ctx context.Context, dsInfo types.DatasourceIn
 	var target struct {
 		Value []types.LogAnalyticsWorkspaceResponse
 	}
-	err = json.NewDecoder(res.Body).Decode(&target)
+	workspacesBody, err := utils.ReadResponseBody(res.Body)
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal(workspacesBody, &target)
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +377,7 @@ func metricCheckHealth(ctx context.Context, dsInfo types.DatasourceInfo, logger 
 		}
 	}()
 	if metricsRes.StatusCode != 200 {
-		body, err := io.ReadAll(metricsRes.Body)
+		body, err := utils.ReadResponseBody(metricsRes.Body)
 		if err != nil {
 			return err.Error(), defaultSubscription, backend.HealthStatusError
 		}
@@ -410,7 +413,7 @@ func logAnalyticsCheckHealth(ctx context.Context, dsInfo types.DatasourceInfo, d
 		}
 	}()
 	if logsRes.StatusCode != 200 {
-		body, err := io.ReadAll(logsRes.Body)
+		body, err := utils.ReadResponseBody(logsRes.Body)
 		if err != nil {
 			return err.Error(), backend.HealthStatusError
 		}
@@ -435,7 +438,7 @@ func graphLogHealthCheck(ctx context.Context, dsInfo types.DatasourceInfo, defau
 		}
 	}()
 	if resourceGraphRes.StatusCode != 200 {
-		body, err := io.ReadAll(resourceGraphRes.Body)
+		body, err := utils.ReadResponseBody(resourceGraphRes.Body)
 		if err != nil {
 			return err.Error(), backend.HealthStatusError
 		}

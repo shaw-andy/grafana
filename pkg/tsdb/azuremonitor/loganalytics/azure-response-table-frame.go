@@ -44,6 +44,9 @@ func apiErrorToNotice(err *AzureLogAnalyticsAPIError) data.Notice {
 	}
 }
 
+// ResponseRowLimit is the maximum number of rows converted from an Azure response table.
+const ResponseRowLimit = 30000
+
 // ResponseTableToFrame converts an AzureResponseTable to a data.Frame.
 func ResponseTableToFrame(table *types.AzureResponseTable, refID string, executedQuery string, queryType dataquery.AzureQueryType, resultFormat dataquery.ResultFormat, logLimitDisabled bool) (*data.Frame, error) {
 	if len(table.Rows) == 0 {
@@ -84,11 +87,12 @@ func converterFrameForTable(t *types.AzureResponseTable, queryType dataquery.Azu
 		converters = append(converters, converter)
 	}
 
-	rowLimit := 30000
 	limitExceeded := false
-	if len(t.Rows) > rowLimit && resultFormat == dataquery.ResultFormatLogs && !logLimitDisabled {
-		// We limit the number of rows to 30k to prevent crashing the browser tab as the logs viz is not virtualised.
-		t.Rows = t.Rows[:rowLimit]
+	// The frame is held in memory and sent to the browser whatever the result format, so every
+	// format is capped. The feature toggle only lifts the cap for the logs format.
+	limitDisabled := resultFormat == dataquery.ResultFormatLogs && logLimitDisabled
+	if len(t.Rows) > ResponseRowLimit && !limitDisabled {
+		t.Rows = t.Rows[:ResponseRowLimit]
 		limitExceeded = true
 	}
 

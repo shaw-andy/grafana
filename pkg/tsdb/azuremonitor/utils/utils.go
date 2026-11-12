@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -14,6 +15,23 @@ import (
 )
 
 const SubscriptionsApiVersion = "2020-01-01"
+
+// MaxResponseBodyBytes caps how much of a decoded Azure response body is held in memory.
+// Callers can shape Azure responses with their own queries, so the body must be bounded
+// before it is unmarshalled.
+const MaxResponseBodyBytes = 32 * 1024 * 1024
+
+// ReadResponseBody reads a decoded Azure response body, failing once it exceeds MaxResponseBodyBytes.
+func ReadResponseBody(body io.Reader) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(body, MaxResponseBodyBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > MaxResponseBodyBytes {
+		return nil, backend.DownstreamError(fmt.Errorf("azure response body exceeds the %d byte limit; narrow the query to return less data", MaxResponseBodyBytes))
+	}
+	return b, nil
+}
 
 func GetFirstSubscriptionOrDefault(ctx context.Context, dsInfo types.DatasourceInfo, logger log.Logger) (string, error) {
 	if dsInfo.Settings.SubscriptionId != "" {
@@ -54,8 +72,11 @@ func ParseSubscriptions(res *http.Response, logger log.Logger) ([]string, error)
 			SubscriptionId string `json:"subscriptionId"`
 		}
 	}
-	err := json.NewDecoder(res.Body).Decode(&target)
+	body, err := ReadResponseBody(res.Body)
 	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(body, &target); err != nil {
 		return nil, err
 	}
 	defer func() {

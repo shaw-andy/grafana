@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"path"
@@ -268,7 +267,7 @@ func fetchSubscriptionMetricNamespaces(ctx context.Context, dsInfo types.Datasou
 		return nil, backend.DownstreamError(err)
 	}
 	defer func() { _ = res.Body.Close() }()
-	b, err := io.ReadAll(res.Body)
+	b, err := utils.ReadResponseBody(res.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -348,7 +347,7 @@ func runResourceGraphQuery(ctx context.Context, dsInfo types.DatasourceInfo, sub
 		_ = res.Body.Close()
 	}()
 
-	b, err := io.ReadAll(res.Body)
+	b, err := utils.ReadResponseBody(res.Body)
 	if err != nil {
 		return types.AzureResponseTable{}, err
 	}
@@ -382,7 +381,7 @@ func listSubscriptionParameterValues(ctx context.Context, dsInfo types.Datasourc
 		return nil, backend.DownstreamError(err)
 	}
 	defer func() { _ = res.Body.Close() }()
-	b, err := io.ReadAll(res.Body)
+	b, err := utils.ReadResponseBody(res.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -503,7 +502,7 @@ func fetchMetricNamesForResource(ctx context.Context, dsInfo types.DatasourceInf
 		return nil, backend.DownstreamError(err)
 	}
 	defer func() { _ = res.Body.Close() }()
-	b, err := io.ReadAll(res.Body)
+	b, err := utils.ReadResponseBody(res.Body)
 	if err != nil {
 		return nil, err
 	}
