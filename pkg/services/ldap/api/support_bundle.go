@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/grafana/grafana/pkg/services/ldap"
 	"github.com/grafana/grafana/pkg/services/supportbundles"
 )
 
@@ -15,7 +17,7 @@ func (s *Service) supportBundleCollector(context.Context) (*supportbundles.Suppo
 	bWriter := bytes.NewBuffer(nil)
 	bWriter.WriteString("# LDAP information\n\n")
 
-	ldapConfig := s.ldapService.Config()
+	ldapConfig := redactedServersConfig(s.ldapService.Config())
 	if ldapConfig != nil {
 		bWriter.WriteString("## LDAP Status\n")
 
@@ -40,10 +42,6 @@ func (s *Service) supportBundleCollector(context.Context) (*supportbundles.Suppo
 		bWriter.WriteString("- Checked for **Mismatched search attributes**\n\n")
 		issue := false
 		for _, server := range ldapConfig.Servers {
-			server.BindPassword = "********" // censor password on config dump
-			server.ClientKey = "********"    // censor client key on config dump
-			server.ClientKeyValue = "********"
-
 			if !strings.Contains(server.SearchFilter, server.Attr.Username) {
 				fmt.Fprintf(bWriter,
 					"Search filter does not match username attribute  \n"+
@@ -86,4 +84,49 @@ func (s *Service) supportBundleCollector(context.Context) (*supportbundles.Suppo
 		Filename:  "ldap.md",
 		FileBytes: bWriter.Bytes(),
 	}, nil
+}
+
+// redactedServersConfig returns a deep copy of cfg with secrets censored.
+// The original ServerConfig objects are shared with the live LDAP client,
+// so they must never be modified here.
+func redactedServersConfig(cfg *ldap.ServersConfig) *ldap.ServersConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	redacted := &ldap.ServersConfig{
+		Servers: make([]*ldap.ServerConfig, 0, len(cfg.Servers)),
+	}
+	for _, server := range cfg.Servers {
+		if server == nil {
+			continue
+		}
+
+		serverCopy := *server
+		serverCopy.TLSCiphers = slices.Clone(server.TLSCiphers)
+		serverCopy.TLSCipherIDs = slices.Clone(server.TLSCipherIDs)
+		serverCopy.RootCACertValue = slices.Clone(server.RootCACertValue)
+		serverCopy.SearchBaseDNs = slices.Clone(server.SearchBaseDNs)
+		serverCopy.GroupSearchBaseDNs = slices.Clone(server.GroupSearchBaseDNs)
+		serverCopy.Groups = make([]*ldap.GroupToOrgRole, 0, len(server.Groups))
+		for _, group := range server.Groups {
+			if group == nil {
+				continue
+			}
+			groupCopy := *group
+			if group.IsGrafanaAdmin != nil {
+				isGrafanaAdmin := *group.IsGrafanaAdmin
+				groupCopy.IsGrafanaAdmin = &isGrafanaAdmin
+			}
+			serverCopy.Groups = append(serverCopy.Groups, &groupCopy)
+		}
+
+		serverCopy.BindPassword = "********"
+		serverCopy.ClientKey = "********"
+		serverCopy.ClientKeyValue = "********"
+
+		redacted.Servers = append(redacted.Servers, &serverCopy)
+	}
+
+	return redacted
 }
