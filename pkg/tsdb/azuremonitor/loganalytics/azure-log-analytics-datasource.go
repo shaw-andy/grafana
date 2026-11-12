@@ -811,21 +811,80 @@ func getTracesQueryUrl(azurePortalUrl string) (string, error) {
 	return portalUrl, nil
 }
 
+const (
+	correlationAPIVersion = "2019-10-17-preview"
+	// Matches the frontend ARM listing cap so a nextLink that never clears cannot pin a query worker.
+	correlationPageLimit = 50
+	// Bounds the resources a single traces query fans out to, however many a correlation page lists.
+	correlationResourceLimit = 50
+)
+
+func withCorrelationAPIVersion(u *url.URL) *url.URL {
+	withVersion := *u
+	values := withVersion.Query()
+	if values.Get("api-version") == "" {
+		values.Set("api-version", correlationAPIVersion)
+	}
+	withVersion.RawQuery = values.Encode()
+	return &withVersion
+}
+
+func effectivePort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	}
+	return ""
+}
+
+// resolveCorrelationNextLink only accepts links on the configured Azure Monitor endpoint, because the
+// data source HTTP client attaches the data source credentials to every request it sends.
+func resolveCorrelationNextLink(serviceURL *url.URL, nextLink string) (*url.URL, error) {
+	ref, err := url.Parse(nextLink)
+	if err != nil {
+		return nil, fmt.Errorf("invalid nextLink in correlation response: %w", err)
+	}
+	next := serviceURL.ResolveReference(ref)
+	if ref.User != nil ||
+		next.Opaque != "" ||
+		next.Host == "" ||
+		!strings.EqualFold(next.Scheme, serviceURL.Scheme) ||
+		!strings.EqualFold(next.Hostname(), serviceURL.Hostname()) ||
+		effectivePort(next) != effectivePort(serviceURL) {
+		return nil, fmt.Errorf("correlation response nextLink does not point to the configured Azure Monitor endpoint")
+	}
+	return withCorrelationAPIVersion(next), nil
+}
+
 func getCorrelationWorkspaces(ctx context.Context, baseResource string, resourcesMap map[string]bool, dsInfo types.DatasourceInfo, operationId string) (map[string]bool, error) {
 	azMonService := dsInfo.Services["Azure Monitor"]
+	serviceURL, err := url.Parse(azMonService.URL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Azure Monitor URL: %w", err)
+	}
 	correlationUrl := azMonService.URL + fmt.Sprintf("%s/providers/microsoft.insights/transactions/%s", baseResource, operationId)
+	parsedCorrelationUrl, err := url.Parse(correlationUrl)
+	if err != nil {
+		return nil, fmt.Errorf("%v: %w", "failed to create request", err)
+	}
+	firstPageURL := withCorrelationAPIVersion(parsedCorrelationUrl)
+	lowerBaseResource := strings.ToLower(baseResource)
+	resourcesTruncated := false
 
-	callCorrelationAPI := func(url string) (AzureCorrelationAPIResponse, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer([]byte{}))
+	callCorrelationAPI := func(pageURL *url.URL, isFirstPage bool) (AzureCorrelationAPIResponse, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL.String(), nil)
 		if err != nil {
 			return AzureCorrelationAPIResponse{}, fmt.Errorf("%v: %w", "failed to create request", err)
 		}
-		req.URL.Path = url
+		if isFirstPage {
+			req.URL.Path = correlationUrl
+		}
 		req.Header.Set("Content-Type", "application/json")
-		values := req.URL.Query()
-		values.Add("api-version", "2019-10-17-preview")
-		req.URL.RawQuery = values.Encode()
-		req.Method = "GET"
 
 		_, span := tracing.DefaultTracer().Start(ctx, "azure traces correlation request", trace.WithAttributes(
 			attribute.String("target", req.URL.String()),
@@ -838,16 +897,16 @@ func getCorrelationWorkspaces(ctx context.Context, baseResource string, resource
 		if err != nil {
 			return AzureCorrelationAPIResponse{}, backend.DownstreamError(err)
 		}
-		body, err := io.ReadAll(res.Body)
-		if err != nil {
-			return AzureCorrelationAPIResponse{}, backend.DownstreamError(err)
-		}
-
 		defer func() {
 			if err := res.Body.Close(); err != nil {
 				azMonService.Logger.Warn("Failed to close response body", "err", err)
 			}
 		}()
+
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			return AzureCorrelationAPIResponse{}, backend.DownstreamError(err)
+		}
 
 		if res.StatusCode/100 != 2 {
 			if res.StatusCode == 404 {
@@ -865,28 +924,49 @@ func getCorrelationWorkspaces(ctx context.Context, baseResource string, resource
 
 		for _, resource := range data.Properties.Resources {
 			lowerCaseResource := strings.ToLower(resource)
-			if _, ok := resourcesMap[lowerCaseResource]; !ok {
-				resourcesMap[lowerCaseResource] = true
+			if lowerCaseResource == lowerBaseResource || resourcesMap[lowerCaseResource] {
+				continue
 			}
+			if len(resourcesMap) >= correlationResourceLimit {
+				resourcesTruncated = true
+				break
+			}
+			resourcesMap[lowerCaseResource] = true
 		}
 		return data, nil
 	}
 
-	var nextLink *string
-	var correlationResponse AzureCorrelationAPIResponse
-
-	correlationResponse, err := callCorrelationAPI(correlationUrl)
-	if err != nil {
-		return nil, err
-	}
-	nextLink = correlationResponse.Properties.NextLink
-
-	for nextLink != nil {
-		correlationResponse, err := callCorrelationAPI(correlationUrl)
+	visited := map[string]bool{firstPageURL.String(): true}
+	pageURL := firstPageURL
+	for page := 1; ; page++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		correlationResponse, err := callCorrelationAPI(pageURL, page == 1)
 		if err != nil {
 			return nil, err
 		}
-		nextLink = correlationResponse.Properties.NextLink
+		if resourcesTruncated {
+			backend.Logger.Warn("Azure traces correlation stopped after reaching the resource limit; some resources may be omitted", "limit", correlationResourceLimit)
+			break
+		}
+		nextLink := correlationResponse.Properties.NextLink
+		if nextLink == nil || *nextLink == "" {
+			break
+		}
+		if page >= correlationPageLimit {
+			backend.Logger.Warn("Azure traces correlation stopped after reaching the page limit; some resources may be omitted", "limit", correlationPageLimit)
+			break
+		}
+		nextURL, err := resolveCorrelationNextLink(serviceURL, *nextLink)
+		if err != nil {
+			return nil, backend.DownstreamError(err)
+		}
+		if visited[nextURL.String()] {
+			break
+		}
+		visited[nextURL.String()] = true
+		pageURL = nextURL
 	}
 
 	// Remove the base element as that's where the query is run anyway
