@@ -1,16 +1,20 @@
 package frontendlogging
 
 import (
+	"container/list"
 	"context"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"sync"
 
 	sourcemap "github.com/go-sourcemap/sourcemap"
+	"golang.org/x/sync/singleflight"
+
 	"github.com/grafana/grafana/pkg/api/webassets"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/plugins"
@@ -18,6 +22,17 @@ import (
 )
 
 var logger = log.New("frontendlogging")
+
+const (
+	// maxResolvedFramesPerRequest caps how many stack frames one request may
+	// try to map, across every exception it carries.
+	maxResolvedFramesPerRequest = 32
+	// maxSourceMapLoadsPerRequest caps how many source maps that are not yet
+	// cached one request may read and parse.
+	maxSourceMapLoadsPerRequest = 8
+	maxCachedSourceMaps         = 64
+	maxCachedSourceMapBytes     = 128 << 20
+)
 
 type sourceMapLocation struct {
 	dir      string
@@ -28,6 +43,9 @@ type sourceMapLocation struct {
 type sourceMap struct {
 	consumer *sourcemap.Consumer
 	pluginID string
+	key      string
+	size     int
+	elem     *list.Element
 }
 
 type ReadSourceMapFn func(dir string, path string) ([]byte, error)
@@ -45,9 +63,14 @@ func ReadSourceMapFromFS(dir string, path string) ([]byte, error) {
 	return io.ReadAll(file)
 }
 
+// SourceMapStore caches parsed source maps by the file they were read from,
+// so any number of client URLs that resolve to one file share one entry.
 type SourceMapStore struct {
 	sync.Mutex
 	cache         map[string]*sourceMap
+	lru           *list.List
+	cacheBytes    int
+	loads         singleflight.Group
 	cfg           *setting.Cfg
 	readSourceMap ReadSourceMapFn
 	routeResolver plugins.StaticRouteResolver
@@ -56,6 +79,7 @@ type SourceMapStore struct {
 func NewSourceMapStore(cfg *setting.Cfg, routeResolver plugins.StaticRouteResolver, readSourceMap ReadSourceMapFn) *SourceMapStore {
 	return &SourceMapStore{
 		cache:         make(map[string]*sourceMap),
+		lru:           list.New(),
 		cfg:           cfg,
 		routeResolver: routeResolver,
 		readSourceMap: readSourceMap,
@@ -102,47 +126,128 @@ func (store *SourceMapStore) guessSourceMapLocation(ctx context.Context, sourceU
 	return nil, nil
 }
 
-func (store *SourceMapStore) getSourceMap(ctx context.Context, sourceURL string) (*sourceMap, error) {
+// locate returns the source map location for sourceURL and the cache key of
+// the file it names, or nil when the URL is not a core or plugin asset.
+func (store *SourceMapStore) locate(ctx context.Context, sourceURL string) (*sourceMapLocation, string, error) {
+	location, err := store.guessSourceMapLocation(ctx, sourceURL)
+	if err != nil || location == nil {
+		return nil, "", err
+	}
+	location.path = strings.ReplaceAll(location.path, "../", "") // just in case
+	// http.Dir resolves the path the same way, so the key names the file that is read.
+	key := location.pluginID + "\x00" + location.dir + "\x00" + pathpkg.Clean("/"+filepath.ToSlash(location.path))
+	return location, key, nil
+}
+
+func (store *SourceMapStore) cached(key string) *sourceMap {
 	store.Lock()
 	defer store.Unlock()
+	smap, ok := store.cache[key]
+	if !ok {
+		return nil
+	}
+	store.lru.MoveToFront(smap.elem)
+	return smap
+}
 
-	if smap, ok := store.cache[sourceURL]; ok {
+// load reads and parses the source map without holding the store lock.
+// It returns nil when the file does not exist; misses are not cached.
+func (store *SourceMapStore) load(location *sourceMapLocation, key string) (*sourceMap, error) {
+	v, err, _ := store.loads.Do(key, func() (any, error) {
+		content, err := store.readSourceMap(location.dir, location.path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return (*sourceMap)(nil), nil
+			}
+			return nil, err
+		}
+		// Parse with no URL so that relative sources are not resolved against a
+		// client-supplied URL, which would differ between requests for one file.
+		consumer, err := sourcemap.Parse("", content)
+		if err != nil {
+			return nil, err
+		}
+		smap := &sourceMap{
+			consumer: consumer,
+			pluginID: location.pluginID,
+			key:      key,
+			size:     len(content),
+		}
+		store.add(smap)
+		return smap, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*sourceMap), nil
+}
+
+func (store *SourceMapStore) add(smap *sourceMap) {
+	if smap.size > maxCachedSourceMapBytes {
+		return
+	}
+	store.Lock()
+	defer store.Unlock()
+	if _, ok := store.cache[smap.key]; ok {
+		return
+	}
+	smap.elem = store.lru.PushFront(smap)
+	store.cache[smap.key] = smap
+	store.cacheBytes += smap.size
+	for len(store.cache) > maxCachedSourceMaps || store.cacheBytes > maxCachedSourceMapBytes {
+		oldest := store.lru.Remove(store.lru.Back()).(*sourceMap)
+		delete(store.cache, oldest.key)
+		store.cacheBytes -= oldest.size
+	}
+}
+
+// SourceMapResolver maps stack frames for a single request. It limits how many
+// frames the request may map and how many source maps it may load.
+type SourceMapResolver struct {
+	store      *SourceMapStore
+	framesLeft int
+	loadsLeft  int
+	seen       map[string]*sourceMap
+}
+
+func (store *SourceMapStore) NewResolver() *SourceMapResolver {
+	return &SourceMapResolver{
+		store:      store,
+		framesLeft: maxResolvedFramesPerRequest,
+		loadsLeft:  maxSourceMapLoadsPerRequest,
+		seen:       make(map[string]*sourceMap),
+	}
+}
+
+func (r *SourceMapResolver) getSourceMap(ctx context.Context, sourceURL string) (*sourceMap, error) {
+	location, key, err := r.store.locate(ctx, sourceURL)
+	if err != nil || location == nil {
+		return nil, err
+	}
+	if smap, ok := r.seen[key]; ok {
 		return smap, nil
 	}
-	sourceMapLocation, err := store.guessSourceMapLocation(ctx, sourceURL)
-	if err != nil {
-		return nil, err
-	}
-	if sourceMapLocation == nil {
-		// Cache nil value for sourceURL, since we want to flag that we couldn't guess the map location and not try again
-		store.cache[sourceURL] = nil
-		return nil, nil
-	}
-	path := strings.ReplaceAll(sourceMapLocation.path, "../", "") // just in case
-	content, err := store.readSourceMap(sourceMapLocation.dir, path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// Cache nil value for sourceURL, since we want to flag that it wasn't found in the filesystem and not try again
-			store.cache[sourceURL] = nil
+	smap := r.store.cached(key)
+	if smap == nil {
+		if r.loadsLeft <= 0 {
 			return nil, nil
 		}
-		return nil, err
+		r.loadsLeft--
+		smap, err = r.store.load(location, key)
+		if err != nil {
+			return nil, err
+		}
 	}
-
-	consumer, err := sourcemap.Parse(sourceURL+".map", content)
-	if err != nil {
-		return nil, err
-	}
-	smap := &sourceMap{
-		consumer: consumer,
-		pluginID: sourceMapLocation.pluginID,
-	}
-	store.cache[sourceURL] = smap
+	r.seen[key] = smap
 	return smap, nil
 }
 
-func (store *SourceMapStore) resolveSourceLocation(ctx context.Context, frame Frame) (*Frame, error) {
-	smap, err := store.getSourceMap(ctx, frame.Filename)
+func (r *SourceMapResolver) resolveSourceLocation(ctx context.Context, frame Frame) (*Frame, error) {
+	if r.framesLeft <= 0 {
+		return nil, nil
+	}
+	r.framesLeft--
+	smap, err := r.getSourceMap(ctx, frame.Filename)
 	if err != nil {
 		return nil, err
 	}
