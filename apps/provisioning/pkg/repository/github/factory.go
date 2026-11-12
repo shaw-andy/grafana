@@ -9,6 +9,7 @@ import (
 	"github.com/google/go-github/v82/github"
 	"golang.org/x/oauth2"
 
+	"github.com/grafana/grafana/apps/provisioning/pkg/repository"
 	common "github.com/grafana/grafana/pkg/apimachinery/apis/common/v0alpha1"
 )
 
@@ -27,6 +28,15 @@ func ProvideFactory() *Factory {
 // ClientOptions holds the optional configuration for a GitHub client.
 type ClientOptions struct {
 	customServerURL string
+	httpTransport   http.RoundTripper
+}
+
+// WithHTTPTransport sets the transport used to reach the GitHub API. When unset,
+// repository.DefaultHTTPTransport is used, which only reaches public addresses.
+func WithHTTPTransport(transport http.RoundTripper) ClientOption {
+	return func(o *ClientOptions) {
+		o.httpTransport = transport
+	}
 }
 
 // ClientOption customizes how a GitHub client is created.
@@ -69,7 +79,10 @@ func (r *Factory) New(owner, repo string, ghToken common.RawSecureValue, opts ..
 		opt(&options)
 	}
 
-	httpClient := &http.Client{}
+	httpClient := &http.Client{Transport: options.httpTransport}
+	if httpClient.Transport == nil {
+		httpClient.Transport = repository.DefaultHTTPTransport()
+	}
 	if r.Client != nil {
 		client := *r.Client
 		httpClient = &client

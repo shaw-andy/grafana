@@ -2928,7 +2928,7 @@ Whether to allow `http://` repository URLs together with a configured token. Bec
 
 #### `allowed_git_urls`
 
-While public addresses are always allowed, to prevent server-side request forgery (SSRF), repository URLs that resolve to loopback, private (RFC 1918), link-local, or unspecified addresses are rejected by default.
+While public addresses are always allowed, to prevent server-side request forgery (SSRF), repository URLs that resolve to loopback, private (RFC 1918), link-local, unspecified, shared (`100.64.0.0/10`), multicast, benchmarking, documentation, or other reserved addresses are rejected by default. Grafana applies this check both when a repository is saved and each time it connects to the repository host.
 
 If you want to allow an internal or self-hosted Git server, such as an on-premises GitHub Enterprise host, add an entry here. Each entry can be a hostname, `host:port`, a full URL (only the host is used), a literal IP address, or a CIDR range.
 

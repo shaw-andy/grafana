@@ -45,6 +45,9 @@ type RepositoryConfig struct {
 	SMIMECertificate string
 	Path             string
 	SkipGitSuffix    bool
+	// HTTPTransport is used for every request to URL. When nil,
+	// repository.DefaultHTTPTransport is used, which only reaches public addresses.
+	HTTPTransport http.RoundTripper
 }
 
 // Make sure all public functions of this struct call the (*gitRepository).logger function, to ensure the Git repo details are included.
@@ -67,7 +70,14 @@ func NewRepository(
 	metrics *repository.OperationMetrics,
 	clientMetrics *ClientMetrics,
 ) (GitRepository, error) {
-	opts := []options.Option{options.WithCapabilityNegotiation()}
+	transport := gitConfig.HTTPTransport
+	if transport == nil {
+		transport = repository.DefaultHTTPTransport()
+	}
+	opts := []options.Option{
+		options.WithCapabilityNegotiation(),
+		options.WithHTTPClient(&http.Client{Transport: transport}),
+	}
 	if gitConfig.SkipGitSuffix {
 		opts = append(opts, options.WithoutGitSuffix())
 	}
