@@ -16,7 +16,7 @@ import (
 )
 
 // TODO: Should this accept a row limit and converters, like sqlutil.FrameFromRows?
-func convertToDataFrame(ctx *mysql.Context, iter mysql.RowIter, schema mysql.Schema, maxOutputCells int64) (*data.Frame, error) {
+func convertToDataFrame(ctx *mysql.Context, iter mysql.RowIter, schema mysql.Schema, maxOutputCells int64, limits *queryLimits) (*data.Frame, error) {
 	f := &data.Frame{}
 
 	// Create fields based on the schema
@@ -46,6 +46,9 @@ func convertToDataFrame(ctx *mysql.Context, iter mysql.RowIter, schema mysql.Sch
 			break
 		}
 		if err != nil {
+			if _, ok := asLimitError(err); ok {
+				return nil, err
+			}
 			return nil, fmt.Errorf("error reading row: %v", err)
 		}
 
@@ -69,6 +72,14 @@ func convertToDataFrame(ctx *mysql.Context, iter mysql.RowIter, schema mysql.Sch
 			nV, _, err := schema[i].Type.Convert(ctx, val)
 			if err != nil {
 				return nil, err
+			}
+
+			// JSON values are serialized here. A document can reference the
+			// same subtree many times, so it is measured before it is written.
+			if doc, ok := nV.(mysql.JSONWrapper); ok && limits != nil {
+				if err := limits.chargeValue(ctx, doc); err != nil {
+					return nil, err
+				}
 			}
 
 			// Run the normalized value through fieldValFromRowVal to normalize

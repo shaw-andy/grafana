@@ -291,11 +291,13 @@ func prepareQuery(
 	// Expressions service
 	exprService := expr.ProvideService(
 		&setting.Cfg{
-			ExpressionsEnabled:            instanceConfig.ExpressionsEnabled,
-			SQLExpressionCellLimit:        instanceConfig.SQLExpressionCellLimit,
-			SQLExpressionOutputCellLimit:  instanceConfig.SQLExpressionOutputCellLimit,
-			SQLExpressionTimeout:          instanceConfig.SQLExpressionTimeout,
-			SQLExpressionQueryLengthLimit: instanceConfig.SQLExpressionQueryLengthLimit,
+			ExpressionsEnabled:              instanceConfig.ExpressionsEnabled,
+			SQLExpressionCellLimit:          instanceConfig.SQLExpressionCellLimit,
+			SQLExpressionOutputCellLimit:    instanceConfig.SQLExpressionOutputCellLimit,
+			SQLExpressionTimeout:            instanceConfig.SQLExpressionTimeout,
+			SQLExpressionQueryLengthLimit:   instanceConfig.SQLExpressionQueryLengthLimit,
+			SQLExpressionValueBytesLimit:    instanceConfig.SQLExpressionValueBytesLimit,
+			SQLExpressionProcessedCellLimit: instanceConfig.SQLExpressionProcessedCellLimit,
 		},
 		nil,
 		nil,

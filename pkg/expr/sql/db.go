@@ -27,8 +27,10 @@ type DB struct {
 type QueryOption func(*QueryOptions)
 
 type QueryOptions struct {
-	Timeout        time.Duration
-	MaxOutputCells int64
+	Timeout           time.Duration
+	MaxOutputCells    int64
+	MaxValueBytes     int64
+	MaxProcessedCells int64
 }
 
 func WithTimeout(d time.Duration) QueryOption {
@@ -42,6 +44,27 @@ func WithMaxOutputCells(n int64) QueryOption {
 		o.MaxOutputCells = n
 	}
 }
+
+// WithMaxValueBytes limits the bytes of string and JSON values the query may
+// build, on top of a multiple of the size of its input frames. The limit is
+// enforced before each value is built. 0 or less means no limit.
+func WithMaxValueBytes(n int64) QueryOption {
+	return func(o *QueryOptions) {
+		o.MaxValueBytes = n
+	}
+}
+
+// WithMaxProcessedCells limits the cells the query's plan operators may emit
+// in total, on top of a multiple of the number of input cells. 0 or less means
+// no limit.
+func WithMaxProcessedCells(n int64) QueryOption {
+	return func(o *QueryOptions) {
+		o.MaxProcessedCells = n
+	}
+}
+
+// limitAllocationsRuleID identifies limitAllocations among the analyzer rules.
+const limitAllocationsRuleID analyzer.RuleId = -1
 
 // QueryFrames runs the sql query query against a database created from frames, and returns the frame.
 // The RefID of each frame becomes a table in the database.
@@ -85,14 +108,26 @@ func (db *DB) QueryFrames(ctx context.Context, tracer tracing.Tracer, name strin
 	// Empty dir does not disable secure_file_priv
 	//ctx.SetSessionVariable(ctx, "secure_file_priv", "")
 
+	limits := newQueryLimits(QueryOptions.MaxValueBytes, QueryOptions.MaxProcessedCells, frames)
+
 	// TODO: Check if it's wise to reuse the existing provider, rather than creating a new one
-	a := analyzer.NewDefault(pro)
+	a := analyzer.NewBuilder(pro).
+		AddPreAnalyzeRule(limitAllocationsRuleID, limitAllocations(limits)).
+		AddPostValidationRule(limitAllocationsRuleID, limitAllocations(limits)).
+		Build()
+	a.ExecBuilder.PriorityBuilder = &countingBuilder{base: a.ExecBuilder, limits: limits}
 
 	engine := sqle.New(a, &sqle.Config{
 		IsReadOnly: true,
 	})
 
 	contextErr := func(err error) error {
+		if le, ok := asLimitError(err); ok {
+			if le.kind == valueBytesLimit {
+				return MakeValueBytesLimitExceededError(name, le.limit)
+			}
+			return MakeProcessedCellLimitExceededError(name, le.limit)
+		}
 		switch {
 		case errors.Is(err, context.DeadlineExceeded):
 			return MakeTimeOutError(err, name, QueryOptions.Timeout)
@@ -106,6 +141,9 @@ func (db *DB) QueryFrames(ctx context.Context, tracer tracing.Tracer, name strin
 	// Execute the query (planning + iterator construction)
 	schema, iter, _, err := engine.Query(mCtx, query)
 	if err != nil {
+		if _, ok := asLimitError(err); ok {
+			return nil, contextErr(err)
+		}
 		if ctx.Err() != nil {
 			return nil, contextErr(ctx.Err())
 		}
@@ -113,8 +151,11 @@ func (db *DB) QueryFrames(ctx context.Context, tracer tracing.Tracer, name strin
 	}
 
 	// Convert the iterator into a Grafana data.Frame
-	f, err := convertToDataFrame(mCtx, iter, schema, QueryOptions.MaxOutputCells)
+	f, err := convertToDataFrame(mCtx, iter, schema, QueryOptions.MaxOutputCells, limits)
 	if err != nil {
+		if _, ok := asLimitError(err); ok {
+			return nil, contextErr(err)
+		}
 		if ctx.Err() != nil {
 			return nil, contextErr(ctx.Err())
 		}

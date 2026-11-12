@@ -37,6 +37,10 @@ type SQLCommand struct {
 	outputLimit int64
 	timeout     time.Duration
 	logger      log.Logger
+
+	// Unlike the other limits, these cannot be disabled: 0 or less selects the default.
+	valueBytesLimit     int64
+	processedCellsLimit int64
 }
 
 // NewSQLCommand creates a new SQLCommand.
@@ -95,7 +99,13 @@ func UnmarshalSQLCommand(ctx context.Context, rn *rawNode, cfg *setting.Cfg) (*S
 	formatRaw := rn.Query["format"]
 	format, _ := formatRaw.(string)
 
-	return NewSQLCommand(ctx, sqlLogger, rn.RefID, format, expression, cfg.SQLExpressionCellLimit, cfg.SQLExpressionOutputCellLimit, cfg.SQLExpressionTimeout)
+	cmd, err := NewSQLCommand(ctx, sqlLogger, rn.RefID, format, expression, cfg.SQLExpressionCellLimit, cfg.SQLExpressionOutputCellLimit, cfg.SQLExpressionTimeout)
+	if err != nil {
+		return nil, err
+	}
+	cmd.valueBytesLimit = cfg.SQLExpressionValueBytesLimit
+	cmd.processedCellsLimit = cfg.SQLExpressionProcessedCellLimit
+	return cmd, nil
 }
 
 // NeedsVars returns the variable names (refIds) that are dependencies
@@ -203,7 +213,12 @@ func (gr *SQLCommand) Execute(ctx context.Context, now time.Time, vars mathexp.V
 	gr.logger.Debug("Executing query", "query", gr.query, "frames", len(allFrames))
 
 	db := sql.DB{}
-	frame, err := db.QueryFrames(ctx, tracer, gr.refID, gr.query, allFrames, sql.WithMaxOutputCells(gr.outputLimit), sql.WithTimeout(gr.timeout))
+	frame, err := db.QueryFrames(ctx, tracer, gr.refID, gr.query, allFrames,
+		sql.WithMaxOutputCells(gr.outputLimit),
+		sql.WithTimeout(gr.timeout),
+		sql.WithMaxValueBytes(limitOrDefault(gr.valueBytesLimit, setting.DefaultSQLExpressionValueBytesLimit)),
+		sql.WithMaxProcessedCells(limitOrDefault(gr.processedCellsLimit, setting.DefaultSQLExpressionProcessedCellLimit)),
+	)
 	if err != nil {
 		rsp.Error = err
 		return rsp, nil
@@ -241,6 +256,13 @@ func (gr *SQLCommand) Execute(ctx context.Context, now time.Time, vars mathexp.V
 
 func (gr *SQLCommand) Type() string {
 	return TypeSQL.String()
+}
+
+func limitOrDefault(limit, def int64) int64 {
+	if limit <= 0 {
+		return def
+	}
+	return limit
 }
 
 func totalCells(frames []*data.Frame) (total int64) {

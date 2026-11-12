@@ -21,12 +21,14 @@ type QueryDataClient interface {
 }
 
 type InstanceConfigurationSettings struct {
-	FeatureToggles                featuremgmt.FeatureToggles
-	SQLExpressionCellLimit        int64
-	SQLExpressionOutputCellLimit  int64
-	SQLExpressionQueryLengthLimit int64
-	SQLExpressionTimeout          time.Duration
-	ExpressionsEnabled            bool
+	FeatureToggles                  featuremgmt.FeatureToggles
+	SQLExpressionCellLimit          int64
+	SQLExpressionOutputCellLimit    int64
+	SQLExpressionQueryLengthLimit   int64
+	SQLExpressionTimeout            time.Duration
+	SQLExpressionValueBytesLimit    int64
+	SQLExpressionProcessedCellLimit int64
+	ExpressionsEnabled              bool
 }
 
 type Instance interface {
