@@ -160,7 +160,11 @@ func (s *Service) testStreamHandler(rw http.ResponseWriter, req *http.Request) {
 		if flush > rand.Intn(100) {
 			rw.(http.Flusher).Flush()
 		}
-		time.Sleep(speed)
+		// The request carries no delay deadline: the stream is meant to run for
+		// count lines, so only each line's wait is capped.
+		if err := waitFor(req.Context(), speed); err != nil {
+			return
+		}
 	}
 }
 

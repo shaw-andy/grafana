@@ -66,11 +66,11 @@ type Service struct {
 }
 
 func (s *Service) QueryData(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
-	return s.queryMux.QueryData(ctx, req)
+	return s.queryMux.QueryData(withDelayDeadline(ctx), req)
 }
 
 func (s *Service) QueryChunkedData(ctx context.Context, req *backend.QueryChunkedDataRequest, w backend.ChunkedDataWriter) error {
-	return s.queryMux.QueryChunkedData(ctx, req, w)
+	return s.queryMux.QueryChunkedData(withDelayDeadline(ctx), req, w)
 }
 
 func (s *Service) CallResource(ctx context.Context, req *backend.CallResourceRequest, sender backend.CallResourceResponseSender) error {
