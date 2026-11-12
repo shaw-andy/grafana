@@ -382,6 +382,13 @@ type GetDashboardRefByIDQuery struct {
 	ID int64
 }
 
+// MaxDashboardRefsByIDs is the most internal ids one GetDashboardUIDsByIDs call may resolve.
+const MaxDashboardRefsByIDs = 100
+
+type GetDashboardRefsByIDsQuery struct {
+	IDs []int64
+}
+
 type SaveDashboardDTO struct {
 	OrgID     int64
 	UpdatedAt time.Time

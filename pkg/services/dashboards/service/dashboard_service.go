@@ -1349,6 +1349,66 @@ func (dr *DashboardServiceImpl) GetDashboardUIDByID(ctx context.Context, query *
 	return &dashboards.DashboardRef{UID: result[0].UID, Slug: result[0].Slug, FolderUID: result[0].FolderUID}, nil
 }
 
+func (dr *DashboardServiceImpl) GetDashboardUIDsByIDs(ctx context.Context, query *dashboards.GetDashboardRefsByIDsQuery) ([]*dashboards.DashboardRef, error) {
+	requester, err := identity.GetRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(query.IDs) > dashboards.MaxDashboardRefsByIDs {
+		return nil, dashboards.ErrDashboardTooManyIDs
+	}
+
+	position := make(map[int64]int, len(query.IDs))
+	ids := make([]int64, 0, len(query.IDs))
+	for _, id := range query.IDs {
+		if id <= 0 {
+			continue
+		}
+		if _, seen := position[id]; seen {
+			continue
+		}
+		position[id] = len(ids)
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return []*dashboards.DashboardRef{}, nil
+	}
+
+	response, err := dr.searchAllDashboardsThroughK8sRaw(ctx, &dashboards.FindPersistedDashboardsQuery{
+		OrgId:        requester.GetOrgID(),
+		Type:         model.TypeDashboard,
+		DashboardIds: ids,
+		Limit:        int64(len(ids)),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	refs := make([]*dashboards.DashboardRef, 0, len(response.Hits))
+	for _, hit := range response.Hits {
+		refs = append(refs, &dashboards.DashboardRef{
+			UID:       hit.Name,
+			Slug:      slugify.Slugify(hit.Title),
+			FolderUID: folder.ToLegacyFolderUID(hit.Folder),
+			ID:        hit.Field.GetNestedInt64(resource.SEARCH_FIELD_LEGACY_ID),
+		})
+	}
+
+	// Return refs in the order the ids were requested; hits without a known id keep search order at the end.
+	rank := func(ref *dashboards.DashboardRef) int {
+		if p, ok := position[ref.ID]; ok {
+			return p
+		}
+		return len(ids)
+	}
+	slices.SortStableFunc(refs, func(a, b *dashboards.DashboardRef) int {
+		return rank(a) - rank(b)
+	})
+
+	return refs, nil
+}
+
 // expensive query in new flow !! use sparingly - only if you truly need dashboard.Data
 func (dr *DashboardServiceImpl) GetDashboards(ctx context.Context, query *dashboards.GetDashboardsQuery) ([]*dashboards.Dashboard, error) {
 	if query.OrgID == 0 {

@@ -29,6 +29,9 @@ type DashboardService interface {
 	GetDashboards(ctx context.Context, query *GetDashboardsQuery) ([]*Dashboard, error) // use sparely only if you truly need dashboard.Data
 	GetDashboardTags(ctx context.Context, query *GetDashboardTagsQuery) ([]*DashboardTagCloudItem, error)
 	GetDashboardUIDByID(ctx context.Context, query *GetDashboardRefByIDQuery) (*DashboardRef, error)
+	// GetDashboardUIDsByIDs resolves up to MaxDashboardRefsByIDs internal ids with a single search.
+	// Ids that do not match a dashboard are omitted from the result.
+	GetDashboardUIDsByIDs(ctx context.Context, query *GetDashboardRefsByIDsQuery) ([]*DashboardRef, error)
 	ImportDashboard(ctx context.Context, dto *SaveDashboardDTO) (*Dashboard, error)
 	SaveDashboard(ctx context.Context, dto *SaveDashboardDTO, allowUiUpdate bool) (*Dashboard, error)
 	SearchDashboards(ctx context.Context, query *FindPersistedDashboardsQuery) (model.HitList, error)

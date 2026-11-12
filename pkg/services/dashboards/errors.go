@@ -13,6 +13,11 @@ var (
 		StatusCode: 404,
 		Status:     "not-found",
 	}
+	ErrDashboardTooManyIDs = dashboardaccess.DashboardErr{
+		Reason:     "Too many dashboard ids requested",
+		StatusCode: 400,
+		Status:     "too-many-ids",
+	}
 	ErrDashboardWithSameUIDExists = dashboardaccess.DashboardErr{
 		Reason:     "A dashboard with the same uid already exists",
 		StatusCode: 400,

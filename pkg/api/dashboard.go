@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1018,27 +1019,41 @@ func (hs *HTTPServer) GetDashboardTags(c *contextmodel.ReqContext) {
 	c.JSON(http.StatusOK, queryResult)
 }
 
+const dashboardUIDLookupTimeout = 10 * time.Second
+
 // GetDashboardUIDs converts internal ids to UIDs
 func (hs *HTTPServer) GetDashboardUIDs(c *contextmodel.ReqContext) {
 	ctx, span := tracer.Start(c.Req.Context(), "api.GetDashboardUIDs")
 	defer span.End()
+	ctx, cancel := context.WithTimeout(ctx, dashboardUIDLookupTimeout)
+	defer cancel()
 	c.Req = c.Req.WithContext(ctx)
 
-	ids := strings.Split(web.Params(c.Req)[":ids"], ",")
-	uids := make([]string, 0, len(ids))
+	param := web.Params(c.Req)[":ids"]
+	if strings.Count(param, ",") >= dashboards.MaxDashboardRefsByIDs {
+		dashboardErrResponse(dashboards.ErrDashboardTooManyIDs, "").WriteTo(c)
+		return
+	}
 
-	q := &dashboards.GetDashboardRefByIDQuery{}
-	for _, idstr := range ids {
+	segments := strings.Split(param, ",")
+	ids := make([]int64, 0, len(segments))
+	for _, idstr := range segments {
 		id, err := strconv.ParseInt(idstr, 10, 64)
 		if err != nil {
 			continue
 		}
-		q.ID = id
-		qResult, err := hs.DashboardService.GetDashboardUIDByID(c.Req.Context(), q)
-		if err != nil {
-			continue
-		}
-		uids = append(uids, qResult.UID)
+		ids = append(ids, id)
+	}
+
+	refs, err := hs.DashboardService.GetDashboardUIDsByIDs(ctx, &dashboards.GetDashboardRefsByIDsQuery{IDs: ids})
+	if err != nil {
+		dashboardErrResponse(err, "Failed to look up dashboards").WriteTo(c)
+		return
+	}
+
+	uids := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		uids = append(uids, ref.UID)
 	}
 	c.JSON(http.StatusOK, uids)
 }
