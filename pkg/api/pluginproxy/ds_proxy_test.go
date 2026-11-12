@@ -1023,6 +1023,7 @@ func TestDataSourceProxy_requestHandling(t *testing.T) {
 			},
 		})
 
+		ds.Type = "custom-datasource"
 		ctx.Req = httptest.NewRequest("GET", "/api/datasources/proxy/1/path/%2Ftest%2Ftest%2F?query=%2Ftest%2Ftest%2F", nil)
 		var routes []*plugins.Route
 		proxy, err := setupDSProxyTest(t, ctx, ds, routes, "/path/%2Ftest%2Ftest%2F")
@@ -1046,6 +1047,7 @@ func TestDataSourceProxy_requestHandling(t *testing.T) {
 			},
 		})
 
+		ds.Type = "custom-datasource"
 		ctx.Req = httptest.NewRequest("GET", "/api/datasources/proxy/1/path/%2Ftest%2Ftest%2F?query=%2Ftest%2Ftest%2F", nil)
 
 		var routes []*plugins.Route

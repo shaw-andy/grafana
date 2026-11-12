@@ -333,14 +333,25 @@ func (proxy *DataSourceProxy) validateRequest() error {
 		return errors.New("target URL is not a valid target")
 	}
 
-	if proxy.dataSource.PluginType() == datasources.DS_ES {
+	pluginType := proxy.dataSource.PluginType()
+	allowlist, restricted := upstreamAllowlists[pluginType]
+	routePath := proxy.proxyPath
+	if restricted {
+		canonical, err := canonicalUpstreamPath(proxy.proxyPath)
+		if err != nil {
+			return fmt.Errorf("%w on proxied %s datasource", err, pluginType)
+		}
+		routePath = canonical
+	}
+
+	if pluginType == datasources.DS_ES {
 		if proxy.ctx.Req.Method == "DELETE" {
 			return errors.New("deletes not allowed on proxied Elasticsearch datasource")
 		}
 		if proxy.ctx.Req.Method == "PUT" {
 			return errors.New("puts not allowed on proxied Elasticsearch datasource")
 		}
-		if proxy.ctx.Req.Method == "POST" && proxy.proxyPath != "_msearch" {
+		if proxy.ctx.Req.Method == "POST" && routePath != "_msearch" {
 			return errors.New("posts not allowed on proxied Elasticsearch datasource except on /_msearch")
 		}
 	}
@@ -353,7 +364,7 @@ func (proxy *DataSourceProxy) validateRequest() error {
 		}
 
 		// route match
-		r1, err := plugins.CleanRelativePath(proxy.proxyPath)
+		r1, err := plugins.CleanRelativePath(routePath)
 		if err != nil {
 			return err
 		}
@@ -364,7 +375,7 @@ func (proxy *DataSourceProxy) validateRequest() error {
 		// issues/116273: When we have an empty input route (or input that becomes relative to "."), we do not want it
 		//   to be ".". This is because the `CleanRelativePath` function will never return "./" prefixes, and as such,
 		//   the common prefix we need is an empty string.
-		if r1 == "." && proxy.proxyPath != "." {
+		if r1 == "." && routePath != "." {
 			r1 = ""
 		}
 		if r2 == "." && route.Path != "." {
@@ -383,15 +394,19 @@ func (proxy *DataSourceProxy) validateRequest() error {
 	}
 
 	// Trailing validation below this point for routes that were not matched
-	switch proxy.dataSource.PluginType() {
+	switch pluginType {
 	case datasources.DS_PROMETHEUS,
 		datasources.DS_AMAZON_PROMETHEUS,
 		datasources.DS_AZURE_PROMETHEUS,
 		datasources.DS_LOKI:
 		switch proxy.ctx.Req.Method {
 		case "DELETE", "PUT", "POST":
-			return fmt.Errorf("non allow-listed %ss not allowed on proxied %s datasource", proxy.ctx.Req.Method, proxy.dataSource.PluginType())
+			return fmt.Errorf("non allow-listed %ss not allowed on proxied %s datasource", proxy.ctx.Req.Method, pluginType)
 		}
+	}
+
+	if restricted && !allowlist.allows(proxy.ctx.Req.Method, routePath) {
+		return fmt.Errorf("non allow-listed %s request not allowed on proxied %s datasource", proxy.ctx.Req.Method, pluginType)
 	}
 
 	return nil
