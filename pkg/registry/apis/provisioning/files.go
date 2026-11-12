@@ -221,6 +221,11 @@ func (c *filesConnector) parseRequestOptions(r *http.Request, name string, repo 
 		if err := resources.IsPathSupported(opts.Path); err != nil {
 			return opts, err
 		}
+		if opts.OriginalPath != "" {
+			if err := resources.IsPathSupported(opts.OriginalPath); err != nil {
+				return opts, fmt.Errorf("invalid originalPath: %w", err)
+			}
+		}
 	}
 
 	return opts, nil
