@@ -133,6 +133,10 @@ func (s *Service) testStreamHandler(rw http.ResponseWriter, req *http.Request) {
 			writeError(http.StatusBadRequest, "invalid speed")
 			return
 		}
+		if speed > maxQueryDelay {
+			writeError(http.StatusBadRequest, fmt.Sprintf("speed must be at most %s", maxQueryDelay))
+			return
+		}
 	}
 
 	line := func(i int) string {
@@ -160,7 +164,9 @@ func (s *Service) testStreamHandler(rw http.ResponseWriter, req *http.Request) {
 		if flush > rand.Intn(100) {
 			rw.(http.Flusher).Flush()
 		}
-		time.Sleep(speed)
+		if err := sleepContext(req.Context(), speed); err != nil {
+			return
+		}
 	}
 }
 

@@ -520,9 +520,9 @@ func (s *Service) handleRandomWalkSlowScenario(ctx context.Context, req *backend
 			continue
 		}
 
-		stringInput := model.StringInput
-		parsedInterval, _ := time.ParseDuration(stringInput)
-		time.Sleep(parsedInterval)
+		if err := sleepContext(ctx, parseQueryDelay(model.StringInput)); err != nil {
+			return nil, err
+		}
 
 		respD := resp.Responses[q.RefID]
 		respD.Frames = append(respD.Frames, RandomWalk(q, model, 0))
@@ -550,8 +550,10 @@ func (s *Service) handleFlakyQueryScenario(ctx context.Context, req *backend.Que
 			continue
 		}
 
-		baseDelay, _ := time.ParseDuration(model.QueryDelay)
-		time.Sleep(flakyQueryDelay(baseDelay, model.QueryDelayVariability))
+		baseDelay := parseQueryDelay(model.QueryDelay)
+		if err := sleepContext(ctx, flakyQueryDelay(baseDelay, model.QueryDelayVariability)); err != nil {
+			return nil, err
+		}
 
 		if shouldError {
 			status := backend.Status(model.ErrorStatusCode)
