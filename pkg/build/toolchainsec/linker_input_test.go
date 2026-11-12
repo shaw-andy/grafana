@@ -133,6 +133,15 @@ func TestLinkerInputsRejectedBeforeUse(t *testing.T) {
 		t.Parallel()
 		dir := newModule(t, "cgoeq")
 		libdir := filepath.Join(dir, "libdir")
+		writeFile(t, filepath.Join(libdir, "libfoo=bar.so"), linkerScript)
+		writeCgo(t, dir, "-L"+libdir+" -lfoo=bar")
+		assertLinkerInputRejected(t, dir, "")
+	})
+
+	t.Run("cgo exact library name with equals", func(t *testing.T) {
+		t.Parallel()
+		dir := newModule(t, "cgocoloneq")
+		libdir := filepath.Join(dir, "libdir")
 		writeFile(t, filepath.Join(libdir, "evil=x.o"), linkerScript)
 		writeCgo(t, dir, "-L"+libdir+" -l:evil=x.o")
 		assertLinkerInputRejected(t, dir, "")
