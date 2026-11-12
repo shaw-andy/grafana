@@ -12,6 +12,7 @@ import (
 	"github.com/grafana/grafana/pkg/api/dtos"
 	"github.com/grafana/grafana/pkg/api/response"
 	"github.com/grafana/grafana/pkg/infra/network"
+	"github.com/grafana/grafana/pkg/middleware/csrf"
 	"github.com/grafana/grafana/pkg/services/auth"
 	"github.com/grafana/grafana/pkg/services/authn"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
@@ -58,6 +59,10 @@ func (hs *HTTPServer) GetUserAuthTokens(c *contextmodel.ReqContext) response.Res
 // 403: forbiddenError
 // 500: internalServerError
 func (hs *HTTPServer) RevokeUserAuthToken(c *contextmodel.ReqContext) response.Response {
+	if !csrf.IsVerified(c.Req) {
+		return response.Error(http.StatusForbidden, "origin not allowed", nil)
+	}
+
 	cmd := auth.RevokeAuthTokenCmd{}
 	if err := web.Bind(c.Req, &cmd); err != nil {
 		return response.Error(http.StatusBadRequest, "bad request data", err)
@@ -76,13 +81,17 @@ func (hs *HTTPServer) RevokeUserAuthToken(c *contextmodel.ReqContext) response.R
 }
 
 func (hs *HTTPServer) RotateUserAuthTokenRedirect(c *contextmodel.ReqContext) response.Response {
-	if err := hs.rotateToken(c); err != nil {
-		hs.log.FromContext(c.Req.Context()).Debug("Failed to rotate token", "error", err)
-		if errors.Is(err, auth.ErrInvalidSessionToken) {
-			hs.log.FromContext(c.Req.Context()).Debug("Deleting session cookie")
-			authn.DeleteSessionCookie(c.Resp, hs.Cfg)
+	// The auth middleware navigates here when the session needs rotation. A session
+	// that still authenticates does not, and any site can link a browser here.
+	if c.UserToken == nil {
+		if err := hs.rotateToken(c); err != nil {
+			hs.log.FromContext(c.Req.Context()).Debug("Failed to rotate token", "error", err)
+			if errors.Is(err, auth.ErrInvalidSessionToken) {
+				hs.log.FromContext(c.Req.Context()).Debug("Deleting session cookie")
+				authn.DeleteSessionCookie(c.Resp, hs.Cfg)
+			}
+			return response.Redirect(hs.Cfg.AppSubURL + "/login")
 		}
-		return response.Redirect(hs.Cfg.AppSubURL + "/login")
 	}
 
 	if !c.UseSessionStorageRedirect {
@@ -108,6 +117,10 @@ func (hs *HTTPServer) RotateUserAuthTokenRedirect(c *contextmodel.ReqContext) re
 // 404: notFoundError
 // 500: internalServerError
 func (hs *HTTPServer) RotateUserAuthToken(c *contextmodel.ReqContext) response.Response {
+	if !csrf.IsVerified(c.Req) {
+		return response.Error(http.StatusForbidden, "origin not allowed", nil)
+	}
+
 	if err := hs.rotateToken(c); err != nil {
 		hs.log.FromContext(c.Req.Context()).Debug("Failed to rotate token", "error", err)
 		if errors.Is(err, auth.ErrInvalidSessionToken) {

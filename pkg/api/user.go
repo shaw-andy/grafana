@@ -13,6 +13,7 @@ import (
 	claims "github.com/grafana/authlib/types"
 	"github.com/grafana/grafana/pkg/api/dtos"
 	"github.com/grafana/grafana/pkg/api/response"
+	"github.com/grafana/grafana/pkg/middleware/csrf"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
 	"github.com/grafana/grafana/pkg/services/login"
 	"github.com/grafana/grafana/pkg/services/org"
@@ -220,6 +221,10 @@ func (hs *HTTPServer) UpdateUser(c *contextmodel.ReqContext) response.Response {
 
 // POST /api/users/:id/using/:orgId
 func (hs *HTTPServer) UpdateUserActiveOrg(c *contextmodel.ReqContext) response.Response {
+	if !csrf.IsVerified(c.Req) {
+		return response.Error(http.StatusForbidden, "origin not allowed", nil)
+	}
+
 	userID, err := strconv.ParseInt(web.Params(c.Req)[":id"], 10, 64)
 	if err != nil {
 		return response.Error(http.StatusBadRequest, "id is invalid", err)
@@ -497,6 +502,10 @@ func (hs *HTTPServer) validateUsingOrg(ctx context.Context, userID int64, orgID 
 // 403: forbiddenError
 // 500: internalServerError
 func (hs *HTTPServer) UserSetUsingOrg(c *contextmodel.ReqContext) response.Response {
+	if !csrf.IsVerified(c.Req) {
+		return response.Error(http.StatusForbidden, "origin not allowed", nil)
+	}
+
 	orgID, err := strconv.ParseInt(web.Params(c.Req)[":id"], 10, 64)
 	if err != nil {
 		return response.Error(http.StatusBadRequest, "id is invalid", err)
@@ -520,6 +529,11 @@ func (hs *HTTPServer) UserSetUsingOrg(c *contextmodel.ReqContext) response.Respo
 
 // GET /profile/switch-org/:id
 func (hs *HTTPServer) ChangeActiveOrgAndRedirectToHome(c *contextmodel.ReqContext) {
+	if !csrf.IsVerified(c.Req) {
+		c.JsonApiErr(http.StatusForbidden, "origin not allowed", nil)
+		return
+	}
+
 	orgID, err := strconv.ParseInt(web.Params(c.Req)[":id"], 10, 64)
 	if err != nil {
 		c.JsonApiErr(http.StatusBadRequest, "id is invalid", err)

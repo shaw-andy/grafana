@@ -21,6 +21,7 @@ import (
 	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/infra/fs"
 	"github.com/grafana/grafana/pkg/infra/tracing"
+	"github.com/grafana/grafana/pkg/middleware/csrf"
 	"github.com/grafana/grafana/pkg/models/usertoken"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/accesscontrol/acimpl"
@@ -211,6 +212,7 @@ func setupScenarioContext(t *testing.T, url string) *scenarioContext {
 
 	sc.m = web.New()
 	sc.m.UseMiddleware(web.Renderer(viewsPath, "[[", "]]"))
+	sc.m.UseMiddleware(csrf.ProvideCSRFFilter(cfg).Middleware())
 	sc.m.Use(ctxHdlr.Middleware)
 
 	return sc
@@ -244,6 +246,7 @@ func setupScenarioContextSamlLogout(t *testing.T, url string) *scenarioContext {
 
 	sc.m = web.New()
 	sc.m.UseMiddleware(web.Renderer(viewsPath, "[[", "]]"))
+	sc.m.UseMiddleware(csrf.ProvideCSRFFilter(cfg).Middleware())
 	sc.m.Use(ctxHdlr.Middleware)
 
 	return sc
