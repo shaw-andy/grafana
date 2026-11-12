@@ -227,6 +227,8 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 	c, span := hs.injectSpan(c, "api.getFSDataSources")
 	defer span.End()
 
+	isPublicDashboardView := c.IsPublicDashboardView()
+
 	orgDataSources := make([]*datasources.DataSource, 0)
 	if c.GetOrgID() != 0 {
 		query := datasources.GetDataSourcesQuery{OrgID: c.GetOrgID(), DataSourceLimit: hs.Cfg.DataSourceLimit}
@@ -235,7 +237,7 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 			return nil, err
 		}
 
-		if c.IsPublicDashboardView() {
+		if isPublicDashboardView {
 			// If RBAC is enabled, it will filter out all datasources for a public user, so we need to skip it
 			// But we can filter to only include datasources actually used by the dashboard
 			filtered, err := hs.publicDashFilterUsedDataSources(c, dataSources)
@@ -296,7 +298,11 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 
 		dsDTO.JSONData = ds.JsonDataMap()
 
-		if ds.Access == datasources.DS_ACCESS_DIRECT {
+		if ds.Access == datasources.DS_ACCESS_DIRECT && isPublicDashboardView {
+			// Public dashboard viewers are not authenticated and their queries run on the server,
+			// so they must never receive the datasource address or its credentials.
+			dsDTO.URL = ""
+		} else if ds.Access == datasources.DS_ACCESS_DIRECT {
 			if ds.BasicAuth {
 				password, err := hs.DataSourcesService.DecryptedBasicAuthPassword(c.Req.Context(), ds)
 				if err != nil {
@@ -349,7 +355,7 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 			dsDTO.Database = ds.Database
 		}
 
-		if ds.Type == datasources.DS_PROMETHEUS || ds.Type == datasources.DS_AMAZON_PROMETHEUS || ds.Type == datasources.DS_AZURE_PROMETHEUS {
+		if !isPublicDashboardView && (ds.Type == datasources.DS_PROMETHEUS || ds.Type == datasources.DS_AMAZON_PROMETHEUS || ds.Type == datasources.DS_AZURE_PROMETHEUS) {
 			// add unproxied server URL for link to Prometheus web UI
 			ds.JsonData.Set("directUrl", ds.URL)
 		}
