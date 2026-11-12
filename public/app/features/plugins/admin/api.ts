@@ -1,4 +1,4 @@
-import { type PluginError, renderMarkdown } from '@grafana/data';
+import { type PluginError, renderMarkdown, textUtil } from '@grafana/data';
 import { getBackendSrv, isFetchError } from '@grafana/runtime';
 import { installPluginMeta, logPluginMetaError, uninstallPluginMeta } from '@grafana/runtime/internal';
 import { accessControlQueryParam } from 'app/core/utils/accessControl';
@@ -48,11 +48,11 @@ export async function getPluginDetails(id: string): Promise<CatalogPluginDetails
     grafanaDependency: dependencies?.grafanaDependency ?? dependencies?.grafanaVersion ?? '',
     pluginDependencies: dependencies?.plugins || [],
     links: local?.info.links || remote?.json?.info.links || [],
-    readme: localReadme || remote?.readme,
+    readme: localReadme || sanitizeCatalogHTML(remote?.readme),
     versions,
     statusContext: remote?.statusContext ?? '',
     iam: remote?.json?.iam,
-    changelog: remote?.changelog || localChangelog,
+    changelog: sanitizeCatalogHTML(remote?.changelog) || localChangelog,
     licenseUrl: remote?.licenseUrl,
     documentationUrl: remote?.documentationUrl,
     sponsorshipUrl: remote?.sponsorshipUrl,
@@ -180,6 +180,12 @@ async function getLocalPluginReadme(id: string): Promise<string> {
     }
     return '';
   }
+}
+
+// The catalog returns readme and changelog as publisher-controlled HTML, so it gets the same
+// sanitizer that renderMarkdown applies to the local files.
+function sanitizeCatalogHTML(html: string | undefined): string | undefined {
+  return html ? textUtil.sanitizeTextPanelContent(html) : html;
 }
 
 async function getLocalPluginChangelog(id: string): Promise<string> {
