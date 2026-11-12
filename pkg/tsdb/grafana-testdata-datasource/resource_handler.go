@@ -1,6 +1,7 @@
 package testdatasource
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,12 @@ import (
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 	"github.com/grafana/grafana/pkg/tsdb/grafana-testdata-datasource/kinds"
+)
+
+const (
+	maxStreamCount    = 1000
+	minStreamSpeed    = time.Millisecond
+	maxStreamDuration = 5 * time.Minute
 )
 
 func (s *Service) registerRoutes() *http.ServeMux {
@@ -126,11 +133,26 @@ func (s *Service) testStreamHandler(rw http.ResponseWriter, req *http.Request) {
 		}
 	}
 
+	// count and start may sit anywhere in the int range, so the span is
+	// computed in uint64 to avoid overflow.
+	var total uint64
+	if count >= start {
+		total = uint64(count) - uint64(start) + 1
+		if total == 0 || total > maxStreamCount {
+			writeError(http.StatusBadRequest, fmt.Sprintf("expecting at most %d values between start and count", maxStreamCount))
+			return
+		}
+	}
+
 	speed := time.Millisecond * 10
 	if query.Has("speed") {
 		speed, err = time.ParseDuration(query.Get("speed"))
 		if err != nil {
 			writeError(http.StatusBadRequest, "invalid speed")
+			return
+		}
+		if speed < minStreamSpeed {
+			writeError(http.StatusBadRequest, fmt.Sprintf("expecting speed of at least %s", minStreamSpeed))
 			return
 		}
 	}
@@ -151,8 +173,14 @@ func (s *Service) testStreamHandler(rw http.ResponseWriter, req *http.Request) {
 	}
 	rw.WriteHeader(http.StatusOK)
 
-	for i := start; i <= count; i++ {
-		if _, err := io.WriteString(rw, line(i)+"\n"); err != nil {
+	ctx, cancel := context.WithTimeout(req.Context(), maxStreamDuration)
+	defer cancel()
+
+	for n := uint64(0); n < total; n++ {
+		if ctx.Err() != nil {
+			return
+		}
+		if _, err := io.WriteString(rw, line(start+int(n))+"\n"); err != nil {
 			ctxLogger.Error("Failed to write response", "error", err)
 			return
 		}
@@ -160,7 +188,24 @@ func (s *Service) testStreamHandler(rw http.ResponseWriter, req *http.Request) {
 		if flush > rand.Intn(100) {
 			rw.(http.Flusher).Flush()
 		}
-		time.Sleep(speed)
+		if err := sleepCtx(ctx, speed); err != nil {
+			return
+		}
+	}
+}
+
+// sleepCtx waits for d or until ctx is done, returning ctx.Err() in the latter case.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
 	}
 }
 

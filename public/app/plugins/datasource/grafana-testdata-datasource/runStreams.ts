@@ -210,7 +210,7 @@ function runWatchStream(
       .chunked({
         url: `api/datasources/uid/${uid}/resources/stream`,
         params: {
-          count: req.maxDataPoints || 1000, // connection will close when done
+          count: Math.min(req.maxDataPoints || 1000, 1000), // backend caps this at 1000; connection closes when done
           format: 'json',
           speed: `${query.speed ?? 250}ms`,
           flush: 85, // 85% (eg, sometimes send a few at a time)
