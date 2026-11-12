@@ -45,7 +45,10 @@ func (c *Password) AuthenticatePassword(ctx context.Context, r *authn.Request, u
 		return nil, errPasswordAuthFailed.Errorf("too many consecutive incorrect login attempts for user - login for user temporarily blocked")
 	}
 
-	ok, err = c.loginAttempts.ValidateIPAddress(ctx, web.RemoteAddr(r.HTTPRequest))
+	// The address is resolved once so the attempt is recorded against the same
+	// address that was checked, even if a client changes the request meanwhile.
+	clientIP := web.RemoteAddr(r.HTTPRequest)
+	ok, err = c.loginAttempts.ValidateIPAddress(ctx, clientIP)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +77,7 @@ func (c *Password) AuthenticatePassword(ctx context.Context, r *authn.Request, u
 		return identity, nil
 	}
 
-	err = c.loginAttempts.Add(ctx, username, web.RemoteAddr(r.HTTPRequest))
+	err = c.loginAttempts.Add(ctx, username, clientIP)
 	if err != nil {
 		return nil, err
 	}

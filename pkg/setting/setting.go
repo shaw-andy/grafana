@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -253,6 +254,8 @@ type Cfg struct {
 	BruteForceLoginProtectionMaxAttempts int64
 	DisableUsernameLoginProtection       bool
 	DisableIPAddressLoginProtection      bool
+	TrustedProxies                       []*net.IPNet
+	TrustedProxyClientIPHeader           string
 	CookieSecure                         bool
 	CookieSameSiteDisabled               bool
 	CookieSameSiteMode                   http.SameSite
@@ -2058,6 +2061,13 @@ func readSecuritySettings(iniFile *ini.File, cfg *Cfg) error {
 	cfg.DisableUsernameLoginProtection = security.Key("disable_username_login_protection").MustBool(false)
 	cfg.DisableIPAddressLoginProtection = security.Key("disable_ip_address_login_protection").MustBool(true)
 
+	trustedProxies, err := parseTrustedProxies(security.Key("trusted_proxies").MustString(""))
+	if err != nil {
+		return err
+	}
+	cfg.TrustedProxies = trustedProxies
+	cfg.TrustedProxyClientIPHeader = strings.TrimSpace(security.Key("trusted_proxy_client_ip_header").MustString("X-Forwarded-For"))
+
 	// Ensure at least one login attempt can be performed.
 	if cfg.BruteForceLoginProtectionMaxAttempts <= 0 {
 		cfg.BruteForceLoginProtectionMaxAttempts = 1
@@ -2111,6 +2121,36 @@ func readSecuritySettings(iniFile *ini.File, cfg *Cfg) error {
 	cfg.AdminEmail = valueAsString(security, "admin_email", fmt.Sprintf("%s@localhost", cfg.AdminUser))
 
 	return nil
+}
+
+// parseTrustedProxies parses a comma or space separated list of IP addresses and CIDR ranges.
+func parseTrustedProxies(s string) ([]*net.IPNet, error) {
+	entries, err := util.SplitStringWithError(s)
+	if err != nil {
+		return nil, fmt.Errorf("invalid trusted_proxies: %w", err)
+	}
+	networks := make([]*net.IPNet, 0, len(entries))
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if !strings.Contains(entry, "/") {
+			ip := net.ParseIP(entry)
+			if ip == nil {
+				return nil, fmt.Errorf("invalid trusted_proxies entry %q: not an IP address or CIDR range", entry)
+			}
+			bits := 8 * net.IPv6len
+			if ip4 := ip.To4(); ip4 != nil {
+				ip, bits = ip4, 8*net.IPv4len
+			}
+			networks = append(networks, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
+			continue
+		}
+		_, network, err := net.ParseCIDR(entry)
+		if err != nil {
+			return nil, fmt.Errorf("invalid trusted_proxies entry %q: %w", entry, err)
+		}
+		networks = append(networks, network)
+	}
+	return networks, nil
 }
 
 func copyCookieSecuritySettingsToGlobals(cfg *Cfg) {
