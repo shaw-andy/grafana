@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gobwas/glob"
 	"github.com/open-feature/go-sdk/openfeature"
@@ -1012,6 +1013,8 @@ func RedactedValue(key, value string) string {
 		}
 	}
 
+	value = redactedCredentialFields(value)
+
 	for _, exception := range []string{
 		"RUDDERSTACK",
 		"APPLICATION_INSIGHTS",
@@ -1026,6 +1029,43 @@ func RedactedValue(key, value string) string {
 		return u
 	}
 
+	return value
+}
+
+var (
+	credentialFieldPattern = regexp.MustCompile(`(?is)((?:` +
+		percentEncodedWords("password", "passwd", "pwd", "secret", "token") +
+		`)(?:[a-z0-9_.\-]|%[0-9a-f]{2})*\s*=).+$`)
+	dsnUserinfoPattern = regexp.MustCompile(`(?s)^([^:]*):.*@`)
+)
+
+// percentEncodedWords matches each word with any of its letters percent-encoded,
+// because URL query keys are decoded before drivers look them up.
+func percentEncodedWords(words ...string) string {
+	alternatives := make([]string, 0, len(words))
+	for _, word := range words {
+		var b strings.Builder
+		for _, r := range word {
+			fmt.Fprintf(&b, "(?:%c|%%%X|%%%X)", r, unicode.ToLower(r), unicode.ToUpper(r))
+		}
+		alternatives = append(alternatives, b.String())
+	}
+	return strings.Join(alternatives, "|")
+}
+
+// redactedCredentialFields hides credentials embedded in connection strings that
+// URL redaction does not recognize: credential fields such as "password=" in
+// key=value lists or URL query parameters, and the "user:password@" prefix of
+// scheme-less DSNs such as MySQL's "user:password@tcp(host:port)/db".
+// Everything after the first credential field is redacted because the end of its
+// value depends on the consumer's format: Redis splits on commas, while libpq/pgx
+// keyword strings split on whitespace and allow quoting and escaping, so either
+// delimiter can be part of a credential.
+func redactedCredentialFields(value string) string {
+	value = credentialFieldPattern.ReplaceAllString(value, "${1}"+RedactedPassword)
+	if !strings.Contains(value, "://") {
+		value = dsnUserinfoPattern.ReplaceAllString(value, "${1}:"+RedactedPassword+"@")
+	}
 	return value
 }
 
