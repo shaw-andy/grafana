@@ -59,6 +59,13 @@ const (
 	ApplicationName  = "Grafana"
 )
 
+const (
+	DefaultReadTimeout       = 30 * time.Second
+	DefaultReadHeaderTimeout = 10 * time.Second
+	DefaultIdleTimeout       = 30 * time.Second
+	DefaultWriteTimeout      = 30 * time.Second
+)
+
 // zoneInfo names environment variable for setting the path to look for the timezone database in go
 const zoneInfo = "ZONEINFO"
 
@@ -159,6 +166,9 @@ type Cfg struct {
 	Domain            string
 	CDNRootURL        *url.URL
 	ReadTimeout       time.Duration
+	ReadHeaderTimeout time.Duration
+	IdleTimeout       time.Duration
+	WriteTimeout      time.Duration
 	EnableGzip        bool
 	EnforceDomain     bool
 	MinTLSVersion     string
@@ -1882,6 +1892,13 @@ func valueAsString(section *ini.Section, keyName string, defaultValue string) st
 	return section.Key(keyName).MustString(defaultValue)
 }
 
+func positiveDuration(d, fallback time.Duration) time.Duration {
+	if d <= 0 {
+		return fallback
+	}
+	return d
+}
+
 func (cfg *Cfg) readSAMLConfig() {
 	samlSec := cfg.Raw.Section("auth.saml")
 	cfg.SAMLAuthEnabled = samlSec.Key("enabled").MustBool(false)
@@ -2401,7 +2418,10 @@ func (cfg *Cfg) readServerSettings(iniFile *ini.File) error {
 		cfg.CDNRootURL = parsedCDNURL
 	}
 
-	cfg.ReadTimeout = server.Key("read_timeout").MustDuration(0)
+	cfg.ReadTimeout = server.Key("read_timeout").MustDuration(DefaultReadTimeout)
+	cfg.ReadHeaderTimeout = positiveDuration(server.Key("read_header_timeout").MustDuration(DefaultReadHeaderTimeout), DefaultReadHeaderTimeout)
+	cfg.IdleTimeout = positiveDuration(server.Key("idle_timeout").MustDuration(DefaultIdleTimeout), DefaultIdleTimeout)
+	cfg.WriteTimeout = positiveDuration(server.Key("write_timeout").MustDuration(DefaultWriteTimeout), DefaultWriteTimeout)
 
 	headersSection := cfg.Raw.Section("server.custom_response_headers")
 	keys := headersSection.Keys()

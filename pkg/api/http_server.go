@@ -467,9 +467,14 @@ func (hs *HTTPServer) Run(ctx context.Context) error {
 	// Remove any square brackets enclosing IPv6 addresses, a format we support for backwards compatibility
 	host := strings.TrimSuffix(strings.TrimPrefix(hs.Cfg.HTTPAddr, "["), "]")
 	hs.httpSrv = &http.Server{
-		Addr:        net.JoinHostPort(host, hs.Cfg.HTTPPort),
-		Handler:     hs.web,
-		ReadTimeout: hs.Cfg.ReadTimeout,
+		Addr:              net.JoinHostPort(host, hs.Cfg.HTTPPort),
+		Handler:           hs.web,
+		ReadTimeout:       hs.Cfg.ReadTimeout,
+		ReadHeaderTimeout: positiveOr(hs.Cfg.ReadHeaderTimeout, setting.DefaultReadHeaderTimeout),
+		IdleTimeout:       positiveOr(hs.Cfg.IdleTimeout, setting.DefaultIdleTimeout),
+		// Signed-in requests have this deadline lifted by liftWriteDeadlineForSignedIn,
+		// so it only bounds responses to clients that have not authenticated.
+		WriteTimeout: positiveOr(hs.Cfg.WriteTimeout, setting.DefaultWriteTimeout),
 	}
 
 	customErrorLogger := &customErrorLogger{
@@ -730,6 +735,7 @@ func (hs *HTTPServer) addMiddlewaresAndStaticRoutes() {
 	m.Use(hs.frontendLogEndpoints())
 
 	m.UseMiddleware(hs.ContextHandler.Middleware)
+	m.UseMiddleware(hs.liftWriteDeadlineForSignedIn)
 	m.Use(middleware.OrgRedirect(hs.Cfg, hs.userService))
 
 	// needs to be after context handler
@@ -748,6 +754,27 @@ func (hs *HTTPServer) addMiddlewaresAndStaticRoutes() {
 	for _, mw := range hs.middlewares {
 		m.Use(mw)
 	}
+}
+
+// liftWriteDeadlineForSignedIn removes the server WriteTimeout for signed-in requests,
+// which include long-lived responses such as watch streams, proxied websockets and
+// slow queries. Clients that have not authenticated stay bounded by it.
+func (hs *HTTPServer) liftWriteDeadlineForSignedIn(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if reqCtx := contexthandler.FromContext(r.Context()); reqCtx != nil && reqCtx.IsSignedIn {
+			if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+				hs.log.Debug("Failed to lift write deadline for signed-in request", "error", err)
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func positiveOr(d, fallback time.Duration) time.Duration {
+	if d <= 0 {
+		return fallback
+	}
+	return d
 }
 
 func (hs *HTTPServer) metricsEndpoint(ctx *web.Context) {

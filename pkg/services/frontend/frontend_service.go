@@ -152,6 +152,7 @@ func (s *frontendService) newFrontendServer(ctx context.Context) *http.Server {
 	server := &http.Server{
 		// 5s timeout for header reads to avoid Slowloris attacks (https://thetooth.io/blog/slowloris-attack/)
 		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       setting.DefaultIdleTimeout,
 		Addr:              ":" + s.cfg.HTTPPort,
 		Handler:           handler,
 		BaseContext:       func(_ net.Listener) context.Context { return ctx },
