@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/mail"
 	"reflect"
 	"slices"
 	"strconv"
@@ -67,13 +68,40 @@ func isEmailAllowed(email string, allowedDomains []string) bool {
 		return true
 	}
 
-	valid := false
-	for _, domain := range allowedDomains {
-		emailSuffix := fmt.Sprintf("@%s", domain)
-		valid = valid || strings.HasSuffix(strings.ToLower(email), strings.ToLower(emailSuffix))
+	emailDomain, ok := mailboxDomain(email)
+	if !ok {
+		return false
 	}
 
-	return valid
+	for _, domain := range allowedDomains {
+		if strings.EqualFold(emailDomain, domain) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// mailboxDomain returns the domain of email only when the whole value is a
+// single bare addr-spec. The value is stored as the user's email, so display
+// names, comments, quoted local parts, address lists, and surrounding
+// whitespace are rejected rather than normalized.
+func mailboxDomain(email string) (string, bool) {
+	if strings.Count(email, "@") != 1 {
+		return "", false
+	}
+
+	addr, err := mail.ParseAddress(email)
+	if err != nil || addr.Name != "" || addr.Address != email {
+		return "", false
+	}
+
+	at := strings.LastIndex(email, "@")
+	if at <= 0 || at == len(email)-1 {
+		return "", false
+	}
+
+	return email[at+1:], true
 }
 
 func (s *SocialBase) httpGet(ctx context.Context, client *http.Client, url string) (*httpGetResponse, error) {
