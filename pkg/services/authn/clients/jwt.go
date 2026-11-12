@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"go.opentelemetry.io/otel/trace"
@@ -21,6 +22,10 @@ import (
 )
 
 const authQueryParamName = "auth_token"
+
+// jwtWebsocketProtocolPrefix must match the prefix used by the live client in
+// public/app/features/live/centrifuge/service.ts.
+const jwtWebsocketProtocolPrefix = "grafana-jwt."
 
 var _ authn.ContextAwareClient = new(JWT)
 
@@ -159,11 +164,32 @@ func (s *JWT) IsEnabled(context.Context) bool {
 // remove sensitive query param
 // avoid JWT URL login passing auth_token in URL
 func (s *JWT) stripSensitiveParam(httpRequest *http.Request) {
-	if s.cfg.JWTAuth.URLLogin {
-		params := httpRequest.URL.Query()
-		if params.Has(authQueryParamName) {
-			params.Del(authQueryParamName)
-			httpRequest.URL.RawQuery = params.Encode()
+	if !s.cfg.JWTAuth.URLLogin {
+		return
+	}
+
+	params := httpRequest.URL.Query()
+	if params.Has(authQueryParamName) {
+		params.Del(authQueryParamName)
+		httpRequest.URL.RawQuery = params.Encode()
+	}
+
+	// RequestURI keeps the original request line (including any sub path) and is
+	// read later by redirects and logging, so it has to be cleaned separately.
+	httpRequest.RequestURI = removeQueryParam(httpRequest.RequestURI, authQueryParamName)
+
+	if isWebsocketUpgrade(httpRequest) {
+		protocols := websocketProtocols(httpRequest)
+		kept := protocols[:0]
+		for _, protocol := range protocols {
+			if !strings.HasPrefix(protocol, jwtWebsocketProtocolPrefix) {
+				kept = append(kept, protocol)
+			}
+		}
+		if len(kept) > 0 {
+			httpRequest.Header.Set(websocketProtocolHeader, strings.Join(kept, ", "))
+		} else {
+			httpRequest.Header.Del(websocketProtocolHeader)
 		}
 	}
 }
@@ -172,10 +198,56 @@ func (s *JWT) stripSensitiveParam(httpRequest *http.Request) {
 func (s *JWT) retrieveToken(httpRequest *http.Request) string {
 	jwtToken := httpRequest.Header.Get(s.cfg.JWTAuth.HeaderName)
 	if jwtToken == "" && s.cfg.JWTAuth.URLLogin {
-		jwtToken = httpRequest.URL.Query().Get("auth_token")
+		jwtToken = httpRequest.URL.Query().Get(authQueryParamName)
+	}
+	if jwtToken == "" && s.cfg.JWTAuth.URLLogin && isWebsocketUpgrade(httpRequest) {
+		// Browsers cannot set headers on a websocket upgrade, so the frontend sends
+		// the URL login token as a subprotocol instead of in the websocket URL.
+		for _, protocol := range websocketProtocols(httpRequest) {
+			if token, ok := strings.CutPrefix(protocol, jwtWebsocketProtocolPrefix); ok {
+				jwtToken = token
+				break
+			}
+		}
 	}
 	// Strip the 'Bearer' prefix if it exists.
 	return strings.TrimPrefix(jwtToken, "Bearer ")
+}
+
+const websocketProtocolHeader = "Sec-WebSocket-Protocol"
+
+func isWebsocketUpgrade(httpRequest *http.Request) bool {
+	return strings.EqualFold(httpRequest.Header.Get("Upgrade"), "websocket")
+}
+
+func websocketProtocols(httpRequest *http.Request) []string {
+	var protocols []string
+	for _, value := range httpRequest.Header.Values(websocketProtocolHeader) {
+		for _, protocol := range strings.Split(value, ",") {
+			if protocol = strings.TrimSpace(protocol); protocol != "" {
+				protocols = append(protocols, protocol)
+			}
+		}
+	}
+	return protocols
+}
+
+func removeQueryParam(requestURI string, name string) string {
+	path, rawQuery, found := strings.Cut(requestURI, "?")
+	if !found {
+		return requestURI
+	}
+
+	params, err := url.ParseQuery(rawQuery)
+	if err == nil && !params.Has(name) {
+		return requestURI
+	}
+	params.Del(name)
+
+	if encoded := params.Encode(); encoded != "" {
+		return path + "?" + encoded
+	}
+	return path
 }
 
 func (s *JWT) Test(ctx context.Context, r *authn.Request) bool {

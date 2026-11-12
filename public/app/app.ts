@@ -98,6 +98,7 @@ import { JOURNEY_REGISTRY } from './core/services/journey/journeyRegistry';
 import { KeybindingSrv } from './core/services/keybindingSrv';
 import { isFrontendService } from './core/utils/isFrontendService';
 import { startMeasure, stopMeasure } from './core/utils/metrics';
+import { loadUrlToken } from './core/utils/urlToken';
 import { initAlerting } from './features/alerting/unified/initAlerting';
 import { getTimeSrv } from './features/dashboard/services/TimeSrv';
 import { EmbeddedDashboardLazy } from './features/dashboard-scene/embedding/EmbeddedDashboardLazy';
@@ -158,6 +159,9 @@ export class GrafanaApp {
 
   async init(options?: AppInitOptions) {
     try {
+      // Removes the JWT URL login token from the address before telemetry or navigation can record it.
+      loadUrlToken();
+
       await preInitTasks();
 
       // Let iframe container know grafana has started loading
