@@ -19,12 +19,14 @@ import (
 	claims "github.com/grafana/authlib/types"
 
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
+	"github.com/grafana/grafana/pkg/infra/localcache"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/infra/remotecache"
 	"github.com/grafana/grafana/pkg/services/apiserver/endpoints/request"
 	"github.com/grafana/grafana/pkg/services/auth"
 	"github.com/grafana/grafana/pkg/services/authn"
 	"github.com/grafana/grafana/pkg/setting"
+	"github.com/grafana/grafana/pkg/util"
 )
 
 const (
@@ -43,6 +45,7 @@ func ProvideService(
 	s := &Service{
 		cfg: cfg, logger: log.New("id-service"),
 		signer: signer, cache: cache,
+		tokens:   localcache.New(tokenTTL, tokenTTL),
 		metrics:  newMetrics(reg),
 		nsMapper: request.GetNamespaceMapper(cfg),
 		tracer:   tracer,
@@ -54,14 +57,23 @@ func ProvideService(
 }
 
 type Service struct {
-	cfg      *setting.Cfg
-	logger   log.Logger
-	signer   auth.IDSigner
+	cfg    *setting.Cfg
+	logger log.Logger
+	signer auth.IDSigner
+	// cache is shared between instances and only holds a random generation marker per cache key.
+	// Signed tokens are bearer credentials, so they are kept in process memory (tokens) and never
+	// written to the shared cache. Deleting the marker invalidates the token on every instance.
 	cache    remotecache.CacheStorage
+	tokens   *localcache.CacheService
 	si       singleflight.Group
 	metrics  *metrics
 	tracer   trace.Tracer
 	nsMapper request.NamespaceMapper
+}
+
+type cachedToken struct {
+	token      string
+	generation string
 }
 
 func (s *Service) SignIdentity(ctx context.Context, id identity.Requester) (string, *authnlib.Claims[authnlib.IDTokenClaims], error) {
@@ -79,16 +91,21 @@ func (s *Service) SignIdentity(ctx context.Context, id identity.Requester) (stri
 		idClaims *auth.IDClaims
 	}
 	result, err, _ := s.si.Do(cacheKey, func() (any, error) {
-		cachedToken, err := s.cache.Get(ctx, cacheKey)
-		if err == nil {
-			s.metrics.tokenSigningFromCacheCounter.Inc()
-			s.logger.FromContext(ctx).Debug("Cached token found", "id", id.GetID())
+		var generation string
+		if marker, err := s.cache.Get(ctx, cacheKey); err == nil {
+			generation = string(marker)
+			if v, ok := s.tokens.Get(cacheKey); ok {
+				if cached, ok := v.(cachedToken); ok && cached.generation == generation {
+					s.metrics.tokenSigningFromCacheCounter.Inc()
+					s.logger.FromContext(ctx).Debug("Cached token found", "id", id.GetID())
 
-			tokenClaims, err := s.extractTokenClaims(string(cachedToken))
-			if err != nil {
-				return resultType{}, err
+					tokenClaims, err := s.extractTokenClaims(cached.token)
+					if err != nil {
+						return resultType{}, err
+					}
+					return resultType{token: cached.token, idClaims: tokenClaims}, nil
+				}
 			}
-			return resultType{token: string(cachedToken), idClaims: tokenClaims}, nil
 		}
 
 		s.metrics.tokenSigningCounter.Inc()
@@ -134,10 +151,17 @@ func (s *Service) SignIdentity(ctx context.Context, id identity.Requester) (stri
 			return resultType{}, err
 		}
 
-		expires := time.Until(extracted.Expiry.Time())
-		if err := s.cache.Set(ctx, cacheKey, []byte(token), expires-cacheLeeway); err != nil {
-			s.logger.FromContext(ctx).Error("Failed to add id token to cache", "error", err)
+		ttl := time.Until(extracted.Expiry.Time()) - cacheLeeway
+		if generation == "" {
+			generation, err = util.GetRandomString(32)
+			if err != nil {
+				return resultType{token: token, idClaims: idClaims}, nil
+			}
+			if err := s.cache.Set(ctx, cacheKey, []byte(generation), ttl); err != nil {
+				s.logger.FromContext(ctx).Error("Failed to add id token generation to cache", "error", err)
+			}
 		}
+		s.tokens.Set(cacheKey, cachedToken{token: token, generation: generation}, ttl)
 
 		return resultType{token: token, idClaims: idClaims}, nil
 	})
@@ -153,7 +177,9 @@ func (s *Service) RemoveIDToken(ctx context.Context, id identity.Requester) erro
 	ctx, span := s.tracer.Start(ctx, "user.sync.RemoveIDToken")
 	defer span.End()
 
-	return s.cache.Delete(ctx, s.getCacheKey(id))
+	cacheKey := s.getCacheKey(id)
+	s.tokens.Delete(cacheKey)
+	return s.cache.Delete(ctx, cacheKey)
 }
 
 // resolveGroupsClaim returns the groups to embed in the ID token's claims.
