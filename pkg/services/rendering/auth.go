@@ -3,7 +3,9 @@ package rendering
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/gob"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -57,7 +59,14 @@ func setRenderKey(cache *remotecache.RemoteCache, ctx context.Context, opts Auth
 		return err
 	}
 
-	return cache.Set(ctx, fmt.Sprintf(renderKeyPrefix, renderKey), buf.Bytes(), expiry)
+	return cache.Set(ctx, renderCacheKey(renderKey), buf.Bytes(), expiry)
+}
+
+// renderCacheKey stores render keys under their hash because the render key is a bearer
+// credential and cache keys are persisted (e.g. in cache_data) and sent to the cache backend in cleartext.
+func renderCacheKey(renderKey string) string {
+	sum := sha256.Sum256([]byte(renderKey))
+	return fmt.Sprintf(renderKeyPrefix, hex.EncodeToString(sum[:]))
 }
 
 func generateAndSetRenderKey(cache *remotecache.RemoteCache, ctx context.Context, opts AuthOpts, expiry time.Duration) (string, error) {
@@ -75,7 +84,7 @@ func generateAndSetRenderKey(cache *remotecache.RemoteCache, ctx context.Context
 }
 
 func deleteRenderKey(cache *remotecache.RemoteCache, log log.Logger, ctx context.Context, renderKey string) {
-	err := cache.Delete(ctx, fmt.Sprintf(renderKeyPrefix, renderKey))
+	err := cache.Delete(ctx, renderCacheKey(renderKey))
 	if err != nil {
 		log.Error("Failed to delete render key", "error", err)
 	}
@@ -96,7 +105,7 @@ func (r *perRequestRenderKeyProvider) afterRequest(ctx context.Context, _ AuthOp
 }
 
 func (r *perRequestRenderKeyProvider) validate(ctx context.Context, key string) (*RenderUser, bool) {
-	val, err := r.cache.Get(ctx, fmt.Sprintf(renderKeyPrefix, key))
+	val, err := r.cache.Get(ctx, renderCacheKey(key))
 	if err != nil {
 		r.log.Error("Could not get render user from remote cache", "err", err)
 		return nil, false
