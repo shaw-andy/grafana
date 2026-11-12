@@ -169,6 +169,12 @@ func (d *discovery) applyRoutes(routes map[string]struct{}) error {
 			d.log.Warn("skipping invalid peer route url scheme", "url", r, "scheme", u.Scheme)
 			continue
 		}
+		// Solicited routes authenticate only with the URL's userinfo. Credentials
+		// are added here rather than advertised so they never reach the registry.
+		u.User = nil
+		if d.baseOpts.Cluster.Username != "" {
+			u.User = url.UserPassword(d.baseOpts.Cluster.Username, d.baseOpts.Cluster.Password)
+		}
 		urls = append(urls, u)
 	}
 
