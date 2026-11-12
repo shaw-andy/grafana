@@ -23,6 +23,7 @@ import (
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/infra/remotecache"
 	"github.com/grafana/grafana/pkg/login/social"
+	"github.com/grafana/grafana/pkg/services/auth/jwks"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/services/ssosettings"
@@ -92,6 +93,15 @@ type azureAccessClaims struct {
 
 type keySetJWKS struct {
 	jose.JSONWebKeySet
+}
+
+func (ks *keySetJWKS) UnmarshalJSON(data []byte) error {
+	set, err := jwks.Unmarshal(data)
+	if err != nil {
+		return err
+	}
+	ks.JSONWebKeySet = set
+	return nil
 }
 
 func NewAzureADProvider(ctx context.Context, info *social.OAuthInfo, cfgProvider configprovider.ConfigProvider, orgRoleMapper *OrgRoleMapper, ssoSettings ssosettings.Service, features featuremgmt.FeatureToggles, cache remotecache.CacheStorage) (*SocialAzureAD, error) {

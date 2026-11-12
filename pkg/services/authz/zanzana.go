@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/infra/tracing"
 	"github.com/grafana/grafana/pkg/services/apiserver"
+	"github.com/grafana/grafana/pkg/services/auth/jwks"
 	authzextv1 "github.com/grafana/grafana/pkg/services/authz/proto/v1"
 	"github.com/grafana/grafana/pkg/services/authz/zanzana"
 	zClient "github.com/grafana/grafana/pkg/services/authz/zanzana/client"
@@ -488,7 +490,7 @@ func (z *Zanzana) start(ctx context.Context) error {
 				authnlib.VerifierConfig{AllowedAudiences: []string{AuthzServiceAudience}},
 				authnlib.NewKeyRetriever(authnlib.KeyRetrieverConfig{
 					SigningKeysURL: z.cfg.ZanzanaServer.SigningKeysURL,
-				}),
+				}, authnlib.WithHTTPClientKeyRetrieverOpt(jwks.WrapClient(http.DefaultClient))),
 			),
 		)
 		authenticatorInterceptor = interceptors.AuthenticatorFunc(

@@ -3,6 +3,7 @@ package authn
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 
 	authnlib "github.com/grafana/authlib/authn"
@@ -10,6 +11,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
+	"github.com/grafana/grafana/pkg/services/auth/jwks"
 	"github.com/grafana/grafana/pkg/services/login"
 	"github.com/grafana/grafana/pkg/setting"
 )
@@ -32,7 +34,8 @@ func NewGrafanaTokenAuthenticator(cfg *setting.Cfg) (*GrafanaTokenAuthenticator,
 		return nil, fmt.Errorf("missing cfg.ExtJWTAuth.Audiences (NewGrafanaTokenAuthenticator)")
 	}
 
-	keys := authnlib.NewKeyRetriever(authnlib.KeyRetrieverConfig{SigningKeysURL: cfg.ExtJWTAuth.JWKSUrl})
+	keys := authnlib.NewKeyRetriever(authnlib.KeyRetrieverConfig{SigningKeysURL: cfg.ExtJWTAuth.JWKSUrl},
+		authnlib.WithHTTPClientKeyRetrieverOpt(jwks.WrapClient(http.DefaultClient)))
 	return &GrafanaTokenAuthenticator{
 		verifier: authnlib.NewAccessTokenVerifier(authnlib.VerifierConfig{
 			AllowedAudiences: cfg.ExtJWTAuth.Audiences,

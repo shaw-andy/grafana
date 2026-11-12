@@ -23,6 +23,7 @@ import (
 
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/infra/remotecache"
+	"github.com/grafana/grafana/pkg/services/auth/jwks"
 	"github.com/grafana/grafana/pkg/setting"
 )
 
@@ -39,6 +40,15 @@ type keySet interface {
 
 type keySetJWKS struct {
 	jose.JSONWebKeySet
+}
+
+func (ks *keySetJWKS) UnmarshalJSON(data []byte) error {
+	set, err := jwks.Unmarshal(data)
+	if err != nil {
+		return err
+	}
+	ks.JSONWebKeySet = set
+	return nil
 }
 
 type keySetHTTP struct {
@@ -253,11 +263,11 @@ func parsePEMPublicKey(data []byte, keyID string) (*keySetJWKS, error) {
 
 // parseJWKS parses a JWKS JSON document into a key set.
 func parseJWKS(data []byte) (*keySetJWKS, error) {
-	var jwks jose.JSONWebKeySet
-	if err := json.Unmarshal(data, &jwks); err != nil {
+	set, err := jwks.Unmarshal(data)
+	if err != nil {
 		return nil, err
 	}
-	return &keySetJWKS{jwks}, nil
+	return &keySetJWKS{set}, nil
 }
 
 func (ks *keySetJWKS) Key(ctx context.Context, keyID string) ([]jose.JSONWebKey, error) {

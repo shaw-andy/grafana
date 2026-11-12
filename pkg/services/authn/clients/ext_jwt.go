@@ -16,6 +16,7 @@ import (
 	"github.com/grafana/grafana/pkg/apimachinery/errutil"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/services/apiserver/endpoints/request"
+	"github.com/grafana/grafana/pkg/services/auth/jwks"
 	"github.com/grafana/grafana/pkg/services/authn"
 	"github.com/grafana/grafana/pkg/services/login"
 	"github.com/grafana/grafana/pkg/services/org"
@@ -49,7 +50,7 @@ var (
 func ProvideExtendedJWT(cfg *setting.Cfg, tracer trace.Tracer) *ExtendedJWT {
 	keys := authlib.NewKeyRetriever(authlib.KeyRetrieverConfig{
 		SigningKeysURL: cfg.ExtJWTAuth.JWKSUrl,
-	})
+	}, authlib.WithHTTPClientKeyRetrieverOpt(jwks.WrapClient(http.DefaultClient)))
 
 	accessTokenVerifier := authlib.NewAccessTokenVerifier(authlib.VerifierConfig{
 		AllowedAudiences: cfg.ExtJWTAuth.Audiences,
