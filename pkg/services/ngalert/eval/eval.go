@@ -80,19 +80,46 @@ func (r *conditionEvaluator) EvaluateRaw(ctx context.Context, now time.Time) (re
 	logger.FromContext(ctx).Debug("Executing pipeline", "commands", strings.Join(r.pipeline.GetCommandTypes(), ","), "datasources", strings.Join(r.pipeline.GetDatasourceTypes(), ","))
 	result, err := r.expressionService.ExecutePipeline(execCtx, now, r.pipeline)
 
-	// Check if the result of the condition evaluation is too large
-	if err == nil && result != nil && r.evalResultLimit > 0 {
+	if err == nil && result != nil {
+		limit := r.evalResultLimit
+		if limit <= 0 {
+			limit = setting.DefaultEvaluationResultLimit
+		}
 		conditionResultLength := 0
 		if conditionResponse, ok := result.Responses[r.condition.Condition]; ok {
-			conditionResultLength = len(conditionResponse.Frames)
+			conditionResultLength = conditionResultSize(conditionResponse.Frames)
 		}
-		if conditionResultLength > r.evalResultLimit {
-			logger.FromContext(ctx).Error("Query evaluation returned too many results", "limit", r.evalResultLimit, "actual", conditionResultLength)
-			return nil, fmt.Errorf("query evaluation returned too many results: %d (limit: %d)", conditionResultLength, r.evalResultLimit)
+		if conditionResultLength > limit {
+			logger.FromContext(ctx).Error("Query evaluation returned too many results", "limit", limit, "actual", conditionResultLength)
+			return nil, fmt.Errorf("%w: %d (limit: %d)", ErrTooManyResults, conditionResultLength, limit)
 		}
 	}
 
 	return result, err
+}
+
+// ErrTooManyResults is returned when the condition of a rule produces more results than the evaluation result limit.
+var ErrTooManyResults = errors.New("query evaluation returned too many results")
+
+// conditionResultSize counts the results in the condition frames. A frame is not
+// necessarily a single result: a wide frame carries one series per numeric field
+// and a long or table frame one per row, and both are expanded downstream into
+// one alert instance or recorded series each.
+func conditionResultSize(frames data.Frames) int {
+	total := 0
+	for _, frame := range frames {
+		if frame == nil {
+			continue
+		}
+		values := 0
+		for _, field := range frame.Fields {
+			if field != nil && field.Type().Numeric() {
+				values += field.Len()
+			}
+		}
+		total += max(values, frame.Rows(), 1)
+	}
+	return total
 }
 
 // Evaluate evaluates the condition and converts the response to Results
@@ -204,6 +231,9 @@ func IsNonRetryableError(err error) bool {
 		return true
 	}
 	if errors.Is(err, expr.ErrQueryLimit) {
+		return true
+	}
+	if errors.Is(err, ErrTooManyResults) {
 		return true
 	}
 	if errors.Is(err, writer.ErrNonRetryableWrite) {
