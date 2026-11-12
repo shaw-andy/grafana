@@ -3,6 +3,8 @@ import logfmt from 'logfmt';
 import { type ScopedVars, type DataLinkTransformationConfig, SupportedTransformationType } from '@grafana/data';
 import { safeStringifyValue } from 'app/core/utils/explore';
 
+import { findTransformationRegexMatches } from './transformationRegex';
+
 export const getTransformationVars = (
   transformation: DataLinkTransformationConfig,
   fieldValue: string,
@@ -11,15 +13,14 @@ export const getTransformationVars = (
   let transformationScopedVars: ScopedVars = {};
   let transformVal: { [key: string]: string | boolean | null | undefined } = {};
   if (transformation.type === SupportedTransformationType.Regex && transformation.expression) {
-    const regexp = new RegExp(transformation.expression, 'gi');
     const stringFieldVal = typeof fieldValue === 'string' ? fieldValue : safeStringifyValue(fieldValue);
 
-    const matches = stringFieldVal.matchAll(regexp);
+    const matches = findTransformationRegexMatches(transformation.expression, stringFieldVal) ?? [];
     for (const match of matches) {
       if (match.groups) {
         transformVal = match.groups;
       } else {
-        transformVal[transformation.mapValue || fieldName] = match[1] || match[0];
+        transformVal[transformation.mapValue || fieldName] = match.firstGroup || match.value;
       }
     }
   } else if (transformation.type === SupportedTransformationType.Logfmt && fieldValue !== undefined) {
