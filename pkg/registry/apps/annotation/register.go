@@ -6,7 +6,9 @@ import (
 	"crypto/x509"
 	"fmt"
 	"math/rand/v2"
+	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/bwmarrin/snowflake"
@@ -198,6 +200,17 @@ func newGRPCStore(cfg Config) (Store, error) {
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
+	// Without verified TLS the server is unauthenticated, so the connection is
+	// only allowed to stay on this host. The dialer enforces this on the exact
+	// address it connects to, after gRPC name resolution.
+	if !cfg.GRPCUseTLS || cfg.GRPCTLSSkipVerify {
+		if err := validateLoopbackTarget(cfg.GRPCAddress); err != nil {
+			return nil, fmt.Errorf("annotation gRPC address %q requires grpc_use_tls = true with certificate verification: %w",
+				cfg.GRPCAddress, err)
+		}
+		dialOpts = append(dialOpts, grpc.WithContextDialer(dialLoopbackOnly))
+	}
+
 	grpcConn, err := grpc.NewClient(
 		cfg.GRPCAddress,
 		dialOpts...,
@@ -209,8 +222,74 @@ func newGRPCStore(cfg Config) (Store, error) {
 	return NewStoreGRPC(grpcConn), nil
 }
 
+// validateLoopbackTarget accepts only targets whose host is "localhost" or a
+// loopback IP literal, so a misconfiguration fails at startup instead of on
+// the first RPC.
+func validateLoopbackTarget(target string) error {
+	endpoint := target
+	for _, scheme := range []string{"dns:///", "passthrough:///"} {
+		if strings.HasPrefix(target, scheme) {
+			endpoint = strings.TrimPrefix(target, scheme)
+			break
+		}
+	}
+	if strings.Contains(endpoint, "/") {
+		return fmt.Errorf("target is not a host:port loopback address")
+	}
+	host, _, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return fmt.Errorf("invalid target: %w", err)
+	}
+	if strings.EqualFold(host, "localhost") {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return fmt.Errorf("host %q is not a loopback address", host)
+}
+
+// dialLoopbackOnly connects only to loopback IPs. The address checked is the
+// address dialed, so a name that resolves elsewhere cannot be reached.
+func dialLoopbackOnly(ctx context.Context, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid annotation gRPC address %q: %w", addr, err)
+	}
+
+	var ips []net.IP
+	if ip := net.ParseIP(host); ip != nil {
+		ips = []net.IP{ip}
+	} else {
+		resolved, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range resolved {
+			ips = append(ips, r.IP)
+		}
+	}
+
+	var dialer net.Dialer
+	var lastErr error
+	for _, ip := range ips {
+		if !ip.IsLoopback() {
+			continue
+		}
+		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("refusing annotation gRPC connection without verified TLS to non-loopback address %q", addr)
+}
+
 func loadTLSConfig(cfg Config) (*tls.Config, error) {
-	tlsConfig := &tls.Config{}
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	if cfg.GRPCTLSCAFile != "" {
 		caCert, err := os.ReadFile(cfg.GRPCTLSCAFile)
 		if err != nil {

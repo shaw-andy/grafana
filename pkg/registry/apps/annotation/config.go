@@ -78,9 +78,9 @@ func (c *Config) AddFlags(flags *pflag.FlagSet) {
 
 	// gRPC flags
 	flags.StringVar(&c.GRPCAddress, "annotation.grpc-address", "", "gRPC server address for the annotation store")
-	flags.BoolVar(&c.GRPCUseTLS, "annotation.grpc-use-tls", false, "Enable TLS for the annotation gRPC connection")
+	flags.BoolVar(&c.GRPCUseTLS, "annotation.grpc-use-tls", true, "Enable TLS for the annotation gRPC connection (disabling it is only allowed for loopback addresses)")
 	flags.StringVar(&c.GRPCTLSCAFile, "annotation.grpc-tls-ca-file", "", "CA certificate file for the annotation gRPC connection")
-	flags.BoolVar(&c.GRPCTLSSkipVerify, "annotation.grpc-tls-skip-verify", false, "Skip TLS verification for the annotation gRPC connection (insecure)")
+	flags.BoolVar(&c.GRPCTLSSkipVerify, "annotation.grpc-tls-skip-verify", false, "Skip TLS verification for the annotation gRPC connection (insecure, only allowed for loopback addresses)")
 
 	// Postgres flags
 	flags.StringVar(&c.PostgresConnectionString, "annotation.postgres-connection-string", "", "PostgreSQL connection string for annotation store")

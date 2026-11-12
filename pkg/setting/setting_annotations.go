@@ -14,9 +14,9 @@ type AnnotationAppPlatformSettings struct {
 	RetentionTTL time.Duration // Retention TTL for annotations
 
 	GRPCAddress       string // gRPC server address (e.g., "localhost:9090")
-	GRPCUseTLS        bool   // Enable TLS for gRPC connection (default: false)
+	GRPCUseTLS        bool   // Enable TLS for gRPC connection (default: true; plaintext is only allowed to loopback addresses)
 	GRPCTLSCAFile     string // Path to CA certificate file (optional)
-	GRPCTLSSkipVerify bool   // Skip TLS verification (insecure, for testing)
+	GRPCTLSSkipVerify bool   // Skip TLS verification (insecure, for testing; only allowed to loopback addresses)
 
 	// Postgres store configuration
 	PostgresConnectionString string        // PostgreSQL connection string
@@ -82,7 +82,7 @@ func loadAnnotationAppPlatformSettings(cfg *Cfg) (AnnotationAppPlatformSettings,
 		TLSClientConfig:    loadTLSClientConfig(cfg),
 
 		GRPCAddress:       appPlatformSection.Key("grpc_address").MustString("localhost:9090"),
-		GRPCUseTLS:        appPlatformSection.Key("grpc_use_tls").MustBool(false),
+		GRPCUseTLS:        appPlatformSection.Key("grpc_use_tls").MustBool(true),
 		GRPCTLSCAFile:     appPlatformSection.Key("grpc_tls_ca_file").MustString(""),
 		GRPCTLSSkipVerify: appPlatformSection.Key("grpc_tls_skip_verify").MustBool(false),
 
