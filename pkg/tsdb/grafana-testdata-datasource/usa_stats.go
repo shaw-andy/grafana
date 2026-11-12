@@ -11,8 +11,9 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/data"
 )
 
-// maxUSAResults caps the total number of data points (maxDataPoints × states × fields)
-// to prevent unbounded memory allocation from client-controlled maxDataPoints.
+// maxUSAResults caps states × fields across all USA queries in a request, and
+// maxDataPoints × states × fields within each query, so client-controlled lists
+// and maxDataPoints cannot drive unbounded allocation.
 const maxUSAResults = int64(10_000)
 
 var modeValueAsRow = "values-as-rows"
@@ -42,6 +43,7 @@ type usaQuery struct {
 
 func (s *Service) handleUSAScenario(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
 	resp := backend.NewQueryDataResponse()
+	budget := queryBudgetFrom(ctx)
 
 	for _, q := range req.Queries {
 		wrapper := &usaQueryWrapper{}
@@ -67,18 +69,19 @@ func (s *Service) handleUSAScenario(ctx context.Context, req *backend.QueryDataR
 			usa.States = allStateCodes
 		}
 
+		// Every mode builds at least one frame or field per state and field
+		// pair, so the pairs are what the limit has to bound.
+		totalFactor := int64(len(usa.States)) * int64(len(usa.Fields))
+		if !budget.takeUSACells(totalFactor) {
+			resp.Responses[q.RefID] = backend.ErrDataResponseWithSource(backend.StatusBadRequest, backend.ErrorSourceDownstream,
+				fmt.Sprintf("too many states and fields: %d states x %d fields exceeds the limit of %d per request", len(usa.States), len(usa.Fields), maxUSAResults))
+			continue
+		}
+
 		usa.period = period
-		usa.maxDataPoints = q.MaxDataPoints * 2
+		usa.maxDataPoints = min(q.MaxDataPoints*2, maxUSAResults/totalFactor)
 		usa.timeRange = q.TimeRange
 		usa.interval = q.Interval
-
-		totalFactor := int64(len(usa.States)) * int64(len(usa.Fields))
-		if totalFactor > 0 {
-			maxAllowed := max(maxUSAResults/totalFactor, 1)
-			if usa.maxDataPoints > maxAllowed {
-				usa.maxDataPoints = maxAllowed
-			}
-		}
 
 		resp.Responses[q.RefID] = doStateQuery(usa)
 	}
