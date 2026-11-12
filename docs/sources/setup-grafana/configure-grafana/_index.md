@@ -2737,6 +2737,16 @@ Configures the height of the rendered image. The default height is `500`.
 
 Configures the scale of the rendered image. The default scale is `1`.
 
+#### `max_timeout`
+
+Upper bound for the timeout of a single render request, including the `timeout` parameter of the `/render` endpoint. Larger requested timeouts are lowered to this value. The default is `60s`.
+
+Rendered images are also limited to a width and height of `8192` pixels and a scale of `4`.
+
+#### `max_response_size_bytes`
+
+Maximum size, in bytes, of a PNG, PDF, or CSV response accepted from the image renderer. Larger responses are discarded and the render fails. The default is `8388608` (8 MiB).
+
 ### `[panels]`
 
 #### `enable_alpha`

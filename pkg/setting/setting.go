@@ -245,6 +245,8 @@ type Cfg struct {
 	RendererDefaultImageWidth      int
 	RendererDefaultImageHeight     int
 	RendererDefaultImageScale      float64
+	RendererMaxTimeout             time.Duration
+	RendererMaxResponseSize        int64
 	RendererCACert                 string
 
 	// Security
@@ -2293,6 +2295,8 @@ func (cfg *Cfg) readRenderingSettings(iniFile *ini.File) {
 	cfg.RendererDefaultImageWidth = renderSec.Key("default_image_width").MustInt(1000)
 	cfg.RendererDefaultImageHeight = renderSec.Key("default_image_height").MustInt(500)
 	cfg.RendererDefaultImageScale = renderSec.Key("default_image_scale").MustFloat64(1)
+	cfg.RendererMaxTimeout = renderSec.Key("max_timeout").MustDuration(60 * time.Second)
+	cfg.RendererMaxResponseSize = renderSec.Key("max_response_size_bytes").MustInt64(8 << 20)
 	cfg.RendererCACert = valueAsString(renderSec, "ca_cert_file_path", "")
 	cfg.ImagesDir = filepath.Join(cfg.DataPath, "png")
 	cfg.CSVsDir = filepath.Join(cfg.DataPath, "csv")

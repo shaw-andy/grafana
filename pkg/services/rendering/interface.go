@@ -15,6 +15,27 @@ var ErrConcurrentLimitReached = errors.New("rendering concurrent limit reached")
 var ErrRenderUnavailable = errors.New("rendering plugin not available")
 var ErrServerTimeout = errutil.NewBase(errutil.StatusUnknown, "rendering.serverTimeout", errutil.WithPublicMessage("error trying to connect to image-renderer service"))
 var ErrTooManyRequests = errutil.NewBase(errutil.StatusTooManyRequests, "rendering.tooManyRequests", errutil.WithPublicMessage("trying to send too many requests to image-renderer service"))
+var ErrResponseTooLarge = errors.New("rendering response exceeded the maximum allowed size")
+
+const (
+	DefaultMaxTimeout      = 60 * time.Second
+	DefaultMaxResponseSize = 8 << 20
+
+	MaxImageWidth        = 8192
+	MaxImageHeight       = 8192
+	MaxDeviceScaleFactor = 4.0
+)
+
+// ConcurrencyBudget selects the in-progress counter that ConcurrentLimit is checked against.
+type ConcurrencyBudget int
+
+const (
+	// SharedConcurrencyBudget is used by user-triggered renders such as the /render endpoint.
+	SharedConcurrencyBudget ConcurrencyBudget = iota
+	// AlertingConcurrencyBudget is reserved for alert notification screenshots so that
+	// user-triggered renders cannot exhaust the slots they need.
+	AlertingConcurrencyBudget
+)
 
 type RenderType string
 
@@ -46,10 +67,11 @@ func getRequestTimeout(opt TimeoutOpts) time.Duration {
 type CommonOpts struct {
 	TimeoutOpts
 	AuthOpts
-	Path            string
-	Timezone        string
-	ConcurrentLimit int
-	Headers         map[string][]string
+	Path              string
+	Timezone          string
+	ConcurrentLimit   int
+	ConcurrencyBudget ConcurrencyBudget
+	Headers           map[string][]string
 }
 
 type CSVOpts struct {
