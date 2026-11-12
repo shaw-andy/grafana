@@ -27,6 +27,10 @@ func ValidateQueryPublicDashboardRequest(req models.PublicDashboardQueryDTO, pd 
 		return models.ErrInvalidMaxDataPoints.Errorf("ValidateQueryPublicDashboardRequest: maxDataPoints should be greater than 0")
 	}
 
+	if req.MaxDataPoints > models.MaxQueryDataPoints {
+		return models.ErrInvalidMaxDataPoints.Errorf("ValidateQueryPublicDashboardRequest: maxDataPoints should not be greater than %d", models.MaxQueryDataPoints)
+	}
+
 	if pd.TimeSelectionEnabled {
 		timeRange := gtime.NewTimeRange(req.TimeRange.From, req.TimeRange.To)
 

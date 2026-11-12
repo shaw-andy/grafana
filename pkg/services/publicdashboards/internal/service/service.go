@@ -491,8 +491,7 @@ func (pd *PublicDashboardServiceImpl) Delete(ctx context.Context, orgId int64, u
 // of these limits
 // for the maxDataPoints we took a hard limit from prometheus which is 11000
 func (pd *PublicDashboardServiceImpl) getSafeIntervalAndMaxDataPoints(reqDTO models.PublicDashboardQueryDTO, ts models.TimeSettings) (int64, int64) {
-	// arbitrary max value for all data sources, it is actually a hard limit defined in prometheus
-	safeResolution := int64(11000)
+	safeResolution := models.MaxQueryDataPoints
 
 	// interval calculated on the frontend
 	interval := time.Duration(reqDTO.IntervalMs) * time.Millisecond
@@ -506,7 +505,12 @@ func (pd *PublicDashboardServiceImpl) getSafeIntervalAndMaxDataPoints(reqDTO mod
 	safeInterval := pd.intervalCalculator.CalculateSafeInterval(tr, safeResolution)
 
 	if interval > safeInterval.Value {
-		return reqDTO.IntervalMs, reqDTO.MaxDataPoints
+		// some data sources (e.g. graphite) size their work from maxDataPoints and ignore the interval
+		maxDataPoints := reqDTO.MaxDataPoints
+		if maxDataPoints <= 0 || maxDataPoints > safeResolution {
+			maxDataPoints = safeResolution
+		}
+		return reqDTO.IntervalMs, maxDataPoints
 	}
 
 	return safeInterval.Value.Milliseconds(), safeResolution
