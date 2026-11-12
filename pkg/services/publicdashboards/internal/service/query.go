@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -442,40 +443,352 @@ func sanitizeMetadataFromQueryData(res *backend.QueryDataResponse) {
 	}
 }
 
-// sanitizeData removes the query expressions from the dashboard data
-func sanitizeData(data *simplejson.Json) {
-	for _, panelObj := range data.Get("panels").MustArray() {
-		panel := simplejson.NewFromAny(panelObj)
+// Public viewers get query results from the query endpoint, which reads the stored
+// dashboard, so the view only needs enough of each query to request and match those
+// results. Data source plugins store query text under arbitrary keys, so anything not
+// listed here is dropped rather than trying to enumerate query-bearing fields.
+// Each allowed field also has an expected type, so text placed in a flag or id is dropped too.
+var publicQueryFields = fieldTypes{"refId": stringField, "hide": boolField}
 
-		// if the panel is a row and it is collapsed, get the queries from the panels inside the row
-		if panel.Get("type").MustString() == "row" && panel.Get("collapsed").MustBool() {
-			// recursive call to get queries from panels inside a row
-			sanitizeData(panel)
+// The dashboard data source runs in the browser and reuses another panel's results,
+// so its queries also need the fields that select that panel.
+var publicDashboardDatasourceQueryFields = fieldTypes{
+	"panelId":             numberField,
+	"withTransforms":      boolField,
+	"topic":               stringField,
+	"adHocFiltersEnabled": boolField,
+}
+
+var publicAnnotationFields = fieldTypes{
+	"builtIn":   boolOrNumberField,
+	"enable":    boolField,
+	"hide":      boolField,
+	"iconColor": stringField,
+	"name":      stringField,
+	"type":      stringField,
+}
+
+var publicAnnotationFieldsV2 = fieldTypes{
+	"builtIn":   boolField,
+	"enable":    boolField,
+	"hide":      boolField,
+	"iconColor": stringField,
+	"name":      stringField,
+}
+
+var publicKindFields = fieldTypes{"kind": stringField}
+
+var publicDataQueryKindFields = fieldTypes{"kind": stringField, "group": stringField, "version": stringField}
+
+var publicPanelQuerySpecFields = fieldTypes{"refId": stringField, "hidden": boolField}
+
+const dashboardDatasourceUID = "-- Dashboard --"
+
+type fieldType int
+
+const (
+	stringField fieldType = iota
+	boolField
+	numberField
+	boolOrNumberField
+)
+
+type fieldTypes map[string]fieldType
+
+// sanitizeData removes query text from a v1 dashboard before it is shown to public viewers.
+func sanitizeData(data *simplejson.Json) {
+	sanitizePanels(data.Get("panels").MustArray())
+
+	// pre-v16 schema nests panels under rows
+	for _, rowObj := range data.Get("rows").MustArray() {
+		sanitizePanels(simplejson.NewFromAny(rowObj).Get("panels").MustArray())
+	}
+
+	sanitizeAnnotations(data.Get("annotations"))
+	sanitizeTemplateVariables(data.Get("templating"))
+}
+
+func sanitizePanels(panels []any) {
+	for _, panelObj := range panels {
+		panel, ok := panelObj.(map[string]any)
+		if !ok {
 			continue
 		}
 
-		for _, targetObj := range panel.Get("targets").MustArray() {
-			target := simplejson.NewFromAny(targetObj)
-			target.Del("expr")
-			target.Del("query")
-			target.Del("rawSql")
+		if nested, ok := panel["panels"].([]any); ok {
+			sanitizePanels(nested)
+		}
+
+		if libraryPanel, ok := panel["libraryPanel"].(map[string]any); ok {
+			if model, ok := libraryPanel["model"]; ok {
+				sanitizePanels([]any{model})
+			}
+		}
+
+		if _, ok := panel["targets"]; ok {
+			targets, _ := panel["targets"].([]any)
+			sanitized := make([]any, 0, len(targets))
+			for _, targetObj := range targets {
+				target, ok := targetObj.(map[string]any)
+				if !ok {
+					continue
+				}
+				dsRef := target["datasource"]
+				if dsRef == nil {
+					dsRef = panel["datasource"]
+				}
+				sanitized = append(sanitized, sanitizeQuery(target, dsRef))
+			}
+			panel["targets"] = sanitized
 		}
 	}
 }
 
-// sanitizeDataV2 removes query expression fields from a v2 dashboard's elements.
-// V2 dashboards use the path: elements[key].spec.data.spec.queries[].spec.query.spec
+func sanitizeAnnotations(annotations *simplejson.Json) {
+	list, ok := annotations.CheckGet("list")
+	if !ok {
+		return
+	}
+
+	items := list.MustArray()
+	sanitized := make([]any, 0, len(items))
+	for _, annoObj := range items {
+		anno, ok := annoObj.(map[string]any)
+		if !ok {
+			continue
+		}
+		clean := pickFields(anno, publicAnnotationFields)
+		if ds, ok := sanitizeDatasourceRef(anno["datasource"]); ok {
+			clean["datasource"] = ds
+		}
+		if filter, ok := sanitizeAnnotationFilter(anno["filter"]); ok {
+			clean["filter"] = filter
+		}
+		sanitized = append(sanitized, clean)
+	}
+	annotations.Set("list", sanitized)
+}
+
+func sanitizeTemplateVariables(templating *simplejson.Json) {
+	for _, variableObj := range templating.Get("list").MustArray() {
+		variable, ok := variableObj.(map[string]any)
+		if !ok {
+			continue
+		}
+		// Other variable types keep their values in "query", which viewers already see as options.
+		if variable["type"] == "query" {
+			delete(variable, "query")
+			delete(variable, "definition")
+		}
+	}
+}
+
+// sanitizeDataV2 removes query text from a v2 dashboard before it is shown to public viewers.
 func sanitizeDataV2(data *simplejson.Json) {
 	for _, elemObj := range data.Get("elements").MustMap() {
 		elem := simplejson.NewFromAny(elemObj)
-		queries := elem.Get("spec").Get("data").Get("spec").Get("queries").MustArray()
-		for _, queryObj := range queries {
-			query := simplejson.NewFromAny(queryObj)
-			dataQuerySpec := query.Get("spec").Get("query").Get("spec")
-			dataQuerySpec.Del("expr")
-			dataQuerySpec.Del("query")
-			dataQuerySpec.Del("rawSql")
+		dataSpec := elem.Get("spec").Get("data").Get("spec")
+		if _, ok := dataSpec.CheckGet("queries"); !ok {
+			continue
 		}
+
+		items := dataSpec.Get("queries").MustArray()
+		sanitized := make([]any, 0, len(items))
+		for _, queryObj := range items {
+			panelQuery, ok := queryObj.(map[string]any)
+			if !ok {
+				continue
+			}
+			sanitized = append(sanitized, sanitizePanelQueryV2(panelQuery))
+		}
+		dataSpec.Set("queries", sanitized)
+	}
+
+	if annotations, ok := data.CheckGet("annotations"); ok {
+		items := annotations.MustArray()
+		sanitized := make([]any, 0, len(items))
+		for _, annoObj := range items {
+			anno, ok := annoObj.(map[string]any)
+			if !ok {
+				continue
+			}
+			sanitized = append(sanitized, sanitizeAnnotationV2(anno))
+		}
+		data.Set("annotations", sanitized)
+	}
+
+	for _, variableObj := range data.Get("variables").MustArray() {
+		variable, ok := variableObj.(map[string]any)
+		if !ok || variable["kind"] != "QueryVariable" {
+			continue
+		}
+		spec, ok := variable["spec"].(map[string]any)
+		if !ok {
+			continue
+		}
+		delete(spec, "definition")
+		if query, ok := spec["query"].(map[string]any); ok {
+			spec["query"] = sanitizeDataQueryKindV2(query, false)
+		}
+	}
+}
+
+func sanitizePanelQueryV2(panelQuery map[string]any) map[string]any {
+	clean := pickFields(panelQuery, publicKindFields)
+	spec, ok := panelQuery["spec"].(map[string]any)
+	if !ok {
+		return clean
+	}
+
+	cleanSpec := pickFields(spec, publicPanelQuerySpecFields)
+	if ds, ok := sanitizeDatasourceRef(spec["datasource"]); ok {
+		cleanSpec["datasource"] = ds
+	}
+	if query, ok := spec["query"].(map[string]any); ok {
+		cleanSpec["query"] = sanitizeDataQueryKindV2(query, true)
+	}
+	clean["spec"] = cleanSpec
+	return clean
+}
+
+func sanitizeAnnotationV2(anno map[string]any) map[string]any {
+	clean := pickFields(anno, publicKindFields)
+	spec, ok := anno["spec"].(map[string]any)
+	if !ok {
+		return clean
+	}
+
+	cleanSpec := pickFields(spec, publicAnnotationFieldsV2)
+	if filter, ok := sanitizeAnnotationFilter(spec["filter"]); ok {
+		cleanSpec["filter"] = filter
+	}
+	if query, ok := spec["query"].(map[string]any); ok {
+		cleanSpec["query"] = sanitizeDataQueryKindV2(query, false)
+	}
+	clean["spec"] = cleanSpec
+	return clean
+}
+
+// sanitizeDataQueryKindV2 keeps the data source reference of a v2 DataQueryKind.
+// The spec holds the plugin's query and is reduced to the public query fields when
+// keepQueryFields is set, or emptied otherwise.
+func sanitizeDataQueryKindV2(query map[string]any, keepQueryFields bool) map[string]any {
+	clean := pickFields(query, publicDataQueryKindFields)
+	if ds, ok := sanitizeDatasourceRef(query["datasource"]); ok {
+		clean["datasource"] = ds
+	}
+
+	cleanSpec := map[string]any{}
+	if spec, ok := query["spec"].(map[string]any); ok && keepQueryFields {
+		dsRef := spec["datasource"]
+		if dsRef == nil {
+			dsRef = query["datasource"]
+		}
+		cleanSpec = sanitizeQuery(spec, dsRef)
+	}
+	clean["spec"] = cleanSpec
+	return clean
+}
+
+// sanitizeQuery returns a copy of a query holding only the fields public viewers need.
+// dsRef is the data source reference that decides which fields the query keeps.
+func sanitizeQuery(query map[string]any, dsRef any) map[string]any {
+	clean := pickFields(query, publicQueryFields)
+	if ds, ok := sanitizeDatasourceRef(query["datasource"]); ok {
+		clean["datasource"] = ds
+	}
+	if isDashboardDatasourceRef(dsRef) {
+		for k, v := range pickFields(query, publicDashboardDatasourceQueryFields) {
+			clean[k] = v
+		}
+	}
+	return clean
+}
+
+// sanitizeDatasourceRef keeps the identifying fields of a data source reference, which is
+// either a legacy name string or an object with type and uid (or name in v2).
+func sanitizeDatasourceRef(ref any) (any, bool) {
+	switch r := ref.(type) {
+	case string:
+		return r, true
+	case map[string]any:
+		clean := map[string]any{}
+		for _, k := range []string{"type", "uid", "name"} {
+			if v, ok := r[k].(string); ok {
+				clean[k] = v
+			}
+		}
+		return clean, true
+	default:
+		return nil, false
+	}
+}
+
+func isDashboardDatasourceRef(ref any) bool {
+	switch r := ref.(type) {
+	case string:
+		return r == dashboardDatasourceUID
+	case map[string]any:
+		return r["uid"] == dashboardDatasourceUID || r["name"] == dashboardDatasourceUID
+	default:
+		return false
+	}
+}
+
+// sanitizeAnnotationFilter keeps the panel filter of an annotation: whether it excludes
+// the listed panels and their ids.
+func sanitizeAnnotationFilter(filter any) (map[string]any, bool) {
+	f, ok := filter.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	clean := pickFields(f, fieldTypes{"exclude": boolField})
+	if ids, ok := f["ids"].([]any); ok {
+		cleanIDs := make([]any, 0, len(ids))
+		for _, id := range ids {
+			if isNumber(id) {
+				cleanIDs = append(cleanIDs, id)
+			}
+		}
+		clean["ids"] = cleanIDs
+	}
+	return clean, true
+}
+
+// pickFields copies the listed keys whose values have the expected type.
+func pickFields(src map[string]any, fields fieldTypes) map[string]any {
+	dst := make(map[string]any, len(fields))
+	for k, ft := range fields {
+		v, ok := src[k]
+		if !ok {
+			continue
+		}
+		_, isBool := v.(bool)
+		_, isString := v.(string)
+		var keep bool
+		switch ft {
+		case stringField:
+			keep = isString
+		case boolField:
+			keep = isBool
+		case numberField:
+			keep = isNumber(v)
+		case boolOrNumberField:
+			keep = isBool || isNumber(v)
+		}
+		if keep {
+			dst[k] = v
+		}
+	}
+	return dst
+}
+
+func isNumber(v any) bool {
+	switch v.(type) {
+	case json.Number, float64, float32, int, int32, int64:
+		return true
+	default:
+		return false
 	}
 }
 
