@@ -127,16 +127,18 @@ hide_version = true
 
 ### Enable auth for metrics
 
-By default, metrics from Grafana itself can be accessed without authentication. This can lead to information leakage.
+The metrics endpoints only serve metrics to requests that present the basic authentication credentials configured in the `[metrics]` section. If either setting is empty, Grafana refuses every request to the metrics endpoints.
 
 Example:
 
 ```toml
 [metrics]
-# If both are set, basic auth will be required for the metrics endpoints
-basic_auth_username =
-basic_auth_password =
+# Both must be set for the metrics endpoints to serve metrics
+basic_auth_username = <USERNAME>
+basic_auth_password = <PASSWORD>
 ```
+
+Replace _`<USERNAME>`_ and _`<PASSWORD>`_ with the credentials your Prometheus scrape job uses.
 
 ### Enforce domain verification
 

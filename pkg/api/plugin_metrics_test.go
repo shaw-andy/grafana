@@ -16,7 +16,7 @@ import (
 )
 
 func TestPluginMetricsEndpoint(t *testing.T) {
-	t.Run("Endpoint is enabled, basic auth disabled", func(t *testing.T) {
+	t.Run("Endpoint is enabled, basic auth not configured", func(t *testing.T) {
 		hs := &HTTPServer{
 			Cfg: &setting.Cfg{
 				MetricsEndpointEnabled:           true,
@@ -33,7 +33,7 @@ func TestPluginMetricsEndpoint(t *testing.T) {
 		s := webtest.NewServer(t, routing.NewRouteRegister())
 		s.Mux.Use(hs.pluginMetricsEndpoint)
 
-		t.Run("Endpoint matches and plugin is registered", func(t *testing.T) {
+		t.Run("When plugin is registered, should return 401", func(t *testing.T) {
 			req := s.NewGetRequest("/metrics/plugins/test-plugin")
 			resp, err := s.Send(req)
 			require.NoError(t, err)
@@ -41,23 +41,9 @@ func TestPluginMetricsEndpoint(t *testing.T) {
 
 			body, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			require.Equal(t, "http_errors=2", string(body))
+			require.NotContains(t, string(body), "http_errors")
 			require.NoError(t, resp.Body.Close())
-			require.Equal(t, http.StatusOK, resp.StatusCode)
-			require.Equal(t, "text/plain", resp.Header.Get("Content-Type"))
-		})
-
-		t.Run("Endpoint matches and plugin is not registered", func(t *testing.T) {
-			req := s.NewGetRequest("/metrics/plugins/plugin-not-registered")
-			resp, err := s.Send(req)
-			require.NoError(t, err)
-			require.NotNil(t, resp)
-
-			body, err := io.ReadAll(resp.Body)
-			require.NoError(t, err)
-			require.Empty(t, string(body))
-			require.NoError(t, resp.Body.Close())
-			require.Equal(t, http.StatusNotFound, resp.StatusCode)
+			require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 		})
 
 		t.Run("Endpoint does not match", func(t *testing.T) {
@@ -112,6 +98,20 @@ func TestPluginMetricsEndpoint(t *testing.T) {
 			require.NoError(t, resp.Body.Close())
 			require.Equal(t, http.StatusOK, resp.StatusCode)
 			require.Equal(t, "text/plain", resp.Header.Get("Content-Type"))
+		})
+
+		t.Run("When plugin is not registered, correct basic auth credentials should return 404", func(t *testing.T) {
+			req := s.NewGetRequest("/metrics/plugins/plugin-not-registered")
+			req.SetBasicAuth("user", "pwd")
+			resp, err := s.Send(req)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Empty(t, string(body))
+			require.NoError(t, resp.Body.Close())
+			require.Equal(t, http.StatusNotFound, resp.StatusCode)
 		})
 	})
 

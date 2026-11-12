@@ -73,9 +73,12 @@ func TestFrontendService_ServerCreation(t *testing.T) {
 func TestFrontendService_Routes(t *testing.T) {
 	publicDir := setupTestWebAssets(t)
 	cfg := &setting.Cfg{
-		Raw:            ini.Empty(),
-		HTTPPort:       "3000",
-		StaticRootPath: publicDir,
+		Raw:                              ini.Empty(),
+		HTTPPort:                         "3000",
+		StaticRootPath:                   publicDir,
+		MetricsEndpointEnabled:           true,
+		MetricsEndpointBasicAuthUsername: "metrics-user",
+		MetricsEndpointBasicAuthPassword: "metrics-password",
 	}
 	service := createTestService(t, cfg)
 
@@ -128,11 +131,23 @@ func TestFrontendService_Routes(t *testing.T) {
 		testCounter.Inc()
 
 		req := httptest.NewRequest("GET", "/metrics", nil)
+		req.SetBasicAuth(cfg.MetricsEndpointBasicAuthUsername, cfg.MetricsEndpointBasicAuthPassword)
 		recorder := httptest.NewRecorder()
 
 		mux.ServeHTTP(recorder, req)
 
+		assert.Equal(t, http.StatusOK, recorder.Code)
 		assert.Contains(t, recorder.Body.String(), "\nshrimp_count 1\n")
+	})
+
+	t.Run("should refuse prometheus metrics without basic auth", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/metrics", nil)
+		recorder := httptest.NewRecorder()
+
+		mux.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+		assert.NotContains(t, recorder.Body.String(), "shrimp_count")
 	})
 
 	t.Run("should return health status correctly", func(t *testing.T) {
@@ -149,9 +164,12 @@ func TestFrontendService_Routes(t *testing.T) {
 func TestFrontendService_Middleware(t *testing.T) {
 	publicDir := setupTestWebAssets(t)
 	cfg := &setting.Cfg{
-		Raw:            ini.Empty(),
-		HTTPPort:       "3000",
-		StaticRootPath: publicDir,
+		Raw:                              ini.Empty(),
+		HTTPPort:                         "3000",
+		StaticRootPath:                   publicDir,
+		MetricsEndpointEnabled:           true,
+		MetricsEndpointBasicAuthUsername: "metrics-user",
+		MetricsEndpointBasicAuthPassword: "metrics-password",
 	}
 
 	t.Run("should register route prom metrics", func(t *testing.T) {
@@ -168,6 +186,7 @@ func TestFrontendService_Middleware(t *testing.T) {
 		mux.ServeHTTP(recorder, req)
 
 		req = httptest.NewRequest("GET", "/metrics", nil)
+		req.SetBasicAuth(cfg.MetricsEndpointBasicAuthUsername, cfg.MetricsEndpointBasicAuthPassword)
 		mux.ServeHTTP(recorder, req)
 
 		metricsBody := recorder.Body.String()

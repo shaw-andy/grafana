@@ -407,6 +407,13 @@ func createGrafDir(t *testing.T, tmpDir string, opts GrafanaOpts) (string, strin
 	_, err = serverSect.NewKey("static_root_path", publicDir)
 	require.NoError(t, err)
 
+	metricsSect, err := cfg.NewSection("metrics")
+	require.NoError(t, err)
+	_, err = metricsSect.NewKey("basic_auth_username", "metrics-user")
+	require.NoError(t, err)
+	_, err = metricsSect.NewKey("basic_auth_password", "metrics-password")
+	require.NoError(t, err)
+
 	openFeatureSect, err := cfg.NewSection("feature_toggles.openfeature")
 	require.NoError(t, err)
 	_, err = openFeatureSect.NewKey("enable_api", strconv.FormatBool(opts.OpenFeatureAPIEnabled))

@@ -2338,7 +2338,7 @@ Sets the total stats collector interval. The default is 1800 seconds (30 minutes
 
 #### `basic_auth_username and basic_auth_password`
 
-If both are set, then basic authentication is required to access the metrics endpoint.
+Basic authentication credentials for the `/metrics` and `/metrics/plugins/<plugin id>` endpoints. Both must be set for the endpoints to serve metrics. If either is empty, Grafana refuses every request to the metrics endpoints with `401 Unauthorized`.
 
 <hr>
 

@@ -72,11 +72,11 @@ These instructions assume you have already added Prometheus as a data source in 
    disable_total_stats = false
    ```
 
-1. (optional) If you want to require authorization to view the metrics endpoints, then uncomment and set the following options:
+1. Set the basic authentication credentials Prometheus uses to scrape the metrics endpoints. Grafana refuses every request to the metrics endpoints while either option is empty.
 
    ```
-   basic_auth_username =
-   basic_auth_password =
+   basic_auth_username = <USERNAME>
+   basic_auth_password = <PASSWORD>
    ```
 
 1. Restart Grafana. Grafana now exposes metrics at http://localhost:3000/metrics.
@@ -89,9 +89,15 @@ These instructions assume you have already added Prometheus as a data source in 
      scrape_interval: 15s
      scrape_timeout: 5s
 
+     basic_auth:
+       username: <USERNAME>
+       password: <PASSWORD>
+
      static_configs:
        - targets: ['localhost:3000']
    ```
+
+   Replace _`<USERNAME>`_ and _`<PASSWORD>`_ with the values you set in the `[metrics]` section.
 
 1. Restart Prometheus. Your new job should appear on the Targets tab.
 1. In Grafana, click **Connections** in the left-side menu.
@@ -146,11 +152,11 @@ These instructions assume you have already added Prometheus as a data source in 
    disable_total_stats = false
    ```
 
-1. (optional) If you want to require authorization to view the metrics endpoints, then uncomment and set the following options:
+1. Set the basic authentication credentials Prometheus uses to scrape the metrics endpoints. Grafana refuses every request to the metrics endpoints while either option is empty.
 
    ```
-   basic_auth_username =
-   basic_auth_password =
+   basic_auth_username = <USERNAME>
+   basic_auth_password = <PASSWORD>
    ```
 
 1. Restart Grafana. Grafana now exposes metrics at `http://localhost:3000/metrics/plugins/<plugin id>`, e.g. http://localhost:3000/metrics/plugins/grafana-github-datasource if you have the [Grafana GitHub datasource](/grafana/plugins/grafana-github-datasource/) installed.
@@ -164,9 +170,15 @@ These instructions assume you have already added Prometheus as a data source in 
      scrape_timeout: 5s
      metrics_path: /metrics/plugins/grafana-test-datasource
 
+     basic_auth:
+       username: <USERNAME>
+       password: <PASSWORD>
+
      static_configs:
        - targets: ['localhost:3000']
    ```
+
+   Replace _`<USERNAME>`_ and _`<PASSWORD>`_ with the values you set in the `[metrics]` section.
 
 1. Restart Prometheus. Your new job should appear on the Targets tab.
 1. In Grafana, hover your mouse over the **Configuration** (gear) icon on the left sidebar and then click **Data Sources**.

@@ -18,6 +18,9 @@ import (
 func TestRunInstrumentationService(t *testing.T) {
 	cfg := setting.NewCfg()
 	cfg.HTTPPort = "3001"
+	cfg.MetricsEndpointEnabled = true
+	cfg.MetricsEndpointBasicAuthUsername = "metrics-user"
+	cfg.MetricsEndpointBasicAuthPassword = "metrics-password"
 	ms := ModuleServer{
 		log:          log.New("test-logger"),
 		cfg:          cfg,
@@ -44,6 +47,14 @@ func TestRunInstrumentationService(t *testing.T) {
 
 	client := http.Client{}
 	res, err := client.Get("http://localhost:3001/metrics")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode)
+	require.NoError(t, res.Body.Close())
+
+	req, err := http.NewRequest(http.MethodGet, "http://localhost:3001/metrics", nil)
+	require.NoError(t, err)
+	req.SetBasicAuth(cfg.MetricsEndpointBasicAuthUsername, cfg.MetricsEndpointBasicAuthPassword)
+	res, err = client.Do(req)
 	require.NoError(t, err)
 	assert.Equal(t, 200, res.StatusCode)
 
