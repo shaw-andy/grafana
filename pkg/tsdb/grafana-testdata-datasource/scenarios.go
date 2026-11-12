@@ -332,6 +332,7 @@ func (s *Service) handleFallbackScenario(ctx context.Context, req *backend.Query
 
 func (s *Service) handleRandomWalkScenario(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
 	resp := backend.NewQueryDataResponse()
+	budget := queryBudgetFrom(ctx)
 
 	for _, q := range req.Queries {
 		model, err := GetJSONModel(q.JSON)
@@ -339,6 +340,10 @@ func (s *Service) handleRandomWalkScenario(ctx context.Context, req *backend.Que
 			continue
 		}
 		seriesCount := model.SeriesCount
+		if !budget.takeSeries(int64(seriesCount), seriesPointCount(q.TimeRange, q.Interval.Milliseconds())) {
+			resp.Responses[q.RefID] = seriesLimitResponse(seriesCount)
+			continue
+		}
 
 		for i := 0; i < seriesCount; i++ {
 			respD := resp.Responses[q.RefID]
@@ -632,11 +637,17 @@ func (s *Service) handleRandomWalkTableScenario(ctx context.Context, req *backen
 
 func (s *Service) handlePredictableCSVWaveScenario(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
 	resp := backend.NewQueryDataResponse()
+	budget := queryBudgetFrom(ctx)
 
 	for _, q := range req.Queries {
 		model, err := GetJSONModel(q.JSON)
 		if err != nil {
 			return nil, err
+		}
+
+		if !budget.takeCSVWaves(q.TimeRange, model.CsvWave) {
+			resp.Responses[q.RefID] = seriesLimitResponse(len(model.CsvWave))
+			continue
 		}
 
 		respD := resp.Responses[q.RefID]
@@ -1029,7 +1040,7 @@ func RandomWalk(query backend.DataQuery, model kinds.TestDataQuery, index int) *
 
 	walker := startValue
 
-	for i := int64(0); i < 10000 && timeWalkerMs < to; i++ {
+	for i := int64(0); i < maxSeriesPoints && timeWalkerMs < to; i++ {
 		nextValue := walker + (rand.Float64() * noise)
 
 		if hasMin && nextValue < min {
@@ -1394,12 +1405,10 @@ func predictableSeries(timeRange backend.TimeRange, timeStep, length int64, getV
 
 	timeCursor := from - (from % timeStep) // Truncate Start
 	wavePeriod := timeStep * length
-	maxPoints := 10000 // Don't return too many points
-
 	timeVec := make([]time.Time, 0)
 	floatVec := make([]*float64, 0)
 
-	for i := 0; i < maxPoints && timeCursor < to; i++ {
+	for i := 0; i < maxSeriesPoints && timeCursor < to; i++ {
 		val, err := getValue(timeCursor % wavePeriod)
 		if err != nil {
 			return nil, err
