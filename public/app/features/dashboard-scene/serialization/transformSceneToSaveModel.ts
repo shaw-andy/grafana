@@ -26,7 +26,7 @@ import {
   VariableRefresh,
 } from '@grafana/schema';
 import { sortedDeepCloneWithoutNulls } from 'app/core/utils/object';
-import { getPanelDataFrames } from 'app/features/dashboard/components/HelpWizard/utils';
+import { getSnapshotDataFrames } from 'app/features/dashboard/components/HelpWizard/utils';
 import { DASHBOARD_SCHEMA_VERSION } from 'app/features/dashboard/state/DashboardMigrator';
 import { GrafanaQueryType } from 'app/plugins/datasource/grafana/types';
 
@@ -338,10 +338,10 @@ function vizPanelDataToPanel(
   if (dataProvider && isSnapshot) {
     panel.datasource = GRAFANA_DATASOURCE_REF;
 
-    let data = getPanelDataFrames(dataProvider.state.data);
+    let data = getSnapshotDataFrames(dataProvider.state.data);
     if (dataProvider instanceof SceneDataTransformer) {
       // For transformations the non-transformed data is snapshoted
-      data = getPanelDataFrames(dataProvider.state.$data!.state.data);
+      data = getSnapshotDataFrames(dataProvider.state.$data!.state.data);
     }
 
     panel.targets = [
