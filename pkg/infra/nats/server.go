@@ -173,6 +173,12 @@ func (s *Server) Health(_ context.Context) error {
 func (s *Server) startEmbeddedServer(_ context.Context) error {
 	opts := *s.opts
 
+	// Checked against the exact options handed to NewServer so the listener that
+	// opens is the one whose exposure and authorization were validated.
+	if err := validateEmbeddedExposure(s.cfg, &opts); err != nil {
+		return err
+	}
+
 	server, err := natsserver.NewServer(&opts)
 	if err != nil {
 		return fmt.Errorf("create embedded nats server: %w", err)
@@ -231,12 +237,11 @@ func isLoopbackRouteURL(routeURL string) bool {
 	if err != nil {
 		return false
 	}
-	ip := net.ParseIP(u.Hostname())
-	return ip != nil && ip.IsLoopback()
+	return isLoopbackIP(u.Hostname())
 }
 
 func (s *Server) serverOptions() *natsserver.Options {
-	return &natsserver.Options{
+	opts := &natsserver.Options{
 		ServerName:            defaultServerNamePrefix + randomSuffix(),
 		Host:                  s.cfg.ListenAddress,
 		Port:                  s.cfg.ClientPort,
@@ -248,6 +253,75 @@ func (s *Server) serverOptions() *natsserver.Options {
 		ConnectErrorReports:   1,
 		ReconnectErrorReports: 1,
 	}
+	// Token is the only auth mode the embedded server can verify itself: it has
+	// no operator/account resolver for .creds files and no auth callout for
+	// exchanged tokens. Clients and cluster routes both have to present it.
+	if s.cfg.Auth.Mode == setting.NATSAuthModeToken && s.cfg.Auth.Token != "" {
+		opts.Authorization = s.cfg.Auth.Token
+		opts.Cluster.Username = clusterRouteUser
+		opts.Cluster.Password = s.cfg.Auth.Token
+		// A rejected in-process client deadlocks with the server over the
+		// unbuffered pipe until the server's write deadline closes it, so keep
+		// that bounded for clients while routes keep the default.
+		opts.WriteDeadline = clientWriteDeadline
+		opts.Cluster.WriteDeadline = natsserver.DEFAULT_FLUSH_DEADLINE
+	}
+	return opts
+}
+
+const (
+	// clusterRouteUser is the fixed route username; route auth only supports
+	// user/password, so the shared token is presented as the password.
+	clusterRouteUser    = "grafana-route"
+	clientWriteDeadline = 2 * time.Second
+)
+
+// embeddedAuthEnforced reports whether the server built from opts rejects
+// clients and cluster routes that do not present credentials.
+func embeddedAuthEnforced(opts *natsserver.Options) bool {
+	return opts.Authorization != "" && opts.Cluster.Username != "" && opts.Cluster.Password != ""
+}
+
+// validateEmbeddedExposure refuses to start an embedded server that would accept
+// unauthenticated connections from other hosts. Without enforced auth the
+// listeners must be bound to a loopback IP and only a loopback route may be
+// advertised. Auth modes the embedded server cannot verify are refused outright
+// rather than silently running unauthenticated.
+func validateEmbeddedExposure(cfg setting.NATSSettings, opts *natsserver.Options) error {
+	switch cfg.Auth.Mode {
+	case setting.NATSAuthModeCredentials, setting.NATSAuthModeTokenExchange:
+		return fmt.Errorf("nats auth_mode %q cannot be enforced by the embedded server; use auth_mode %q or mode %q",
+			cfg.Auth.Mode, setting.NATSAuthModeToken, setting.NATSModeExternal)
+	case setting.NATSAuthModeToken:
+		if !embeddedAuthEnforced(opts) {
+			return fmt.Errorf("nats auth_mode %q requires token", setting.NATSAuthModeToken)
+		}
+	}
+	if embeddedAuthEnforced(opts) {
+		return nil
+	}
+	if !isLoopbackIP(opts.Host) || !isLoopbackIP(opts.Cluster.Host) {
+		return fmt.Errorf("embedded nats listen_address %q is not a loopback IP; set auth_mode %q to listen on a routable address",
+			cfg.ListenAddress, setting.NATSAuthModeToken)
+	}
+	if cfg.AdvertiseAddress != "" {
+		host := cfg.AdvertiseAddress
+		if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+			host = parsedHost
+		}
+		if !isLoopbackIP(host) {
+			return fmt.Errorf("embedded nats advertise_address %q is not a loopback IP; set auth_mode %q to advertise a routable address",
+				cfg.AdvertiseAddress, setting.NATSAuthModeToken)
+		}
+	}
+	return nil
+}
+
+// isLoopbackIP accepts only literal loopback IPs. Hostnames are refused because
+// the address they resolve to when the listener binds is not the one checked here.
+func isLoopbackIP(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (s *Server) shutdown() {
