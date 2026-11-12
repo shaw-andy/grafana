@@ -1,4 +1,5 @@
 import memoize from 'micro-memoize';
+import { RE2JS } from 're2js';
 
 import { parseFlags } from '@grafana/data';
 
@@ -156,8 +157,8 @@ function isLabelMatchInSet(matcher: LabelMatcher, indexedLabels: IndexedLabels):
 
   const matchFunction = OperatorFunctions[type];
   try {
-    // This can throw because the regex operators use the JavaScript regex engine
-    // and "new RegExp()" throws on invalid regular expressions.
+    // This can throw because the regex operators compile the matcher value, which throws on
+    // invalid or too large regular expressions.
     //
     // This is usually a user-error (because matcher values are taken from user input)
     return matchFunction(labelValue, value);
@@ -165,6 +166,9 @@ function isLabelMatchInSet(matcher: LabelMatcher, indexedLabels: IndexedLabels):
     return false;
   }
 }
+
+const MAX_MATCHER_REGEX_LENGTH = 1024;
+const MAX_MATCHER_REGEX_PROGRAM_SIZE = 2 * MAX_MATCHER_REGEX_LENGTH;
 
 // Compiling a regular expression is by far the most expensive thing in here, and route matching
 // asks for the same matcher value over and over, so hold on to the compiled ones.
@@ -174,23 +178,41 @@ function isLabelMatchInSet(matcher: LabelMatcher, indexedLabels: IndexedLabels):
 //
 // Values that don't compile throw and are not cached. Callers above decide what to do with that,
 // and recompiling a broken value is the rare path.
-const compileAnchoredRegex = memoize(
-  (matcherValue: string): RegExp => {
+//
+// Matching uses RE2 rather than the JavaScript regex engine because a backtracking engine can take
+// exponential time on nested quantifiers such as (a+)+, and a synchronous match cannot be
+// interrupted. RE2 matches in linear time, and is also the engine Alertmanager itself uses.
+const getAnchoredRegex = memoize(
+  (matcherValue: string): RE2JS => {
+    if (matcherValue.length > MAX_MATCHER_REGEX_LENGTH) {
+      throw new Error(`Regular expression is longer than ${MAX_MATCHER_REGEX_LENGTH} characters.`);
+    }
+
     // At the time of writing, Alertmanager compiles to another (anchored) Regular Expression,
     // so we should also anchor our UI matches for consistency with this behaviour
     // https://github.com/prometheus/alertmanager/blob/fd37ce9c95898ca68be1ab4d4529517174b73c33/pkg/labels/matcher.go#L69
     const valueWithFlagsParsed = parseFlags(`^(?:${matcherValue})$`);
-    return new RegExp(valueWithFlagsParsed.cleaned, valueWithFlagsParsed.flags);
+
+    let flags = 0;
+    if (valueWithFlagsParsed.flags.includes('i')) {
+      flags |= RE2JS.CASE_INSENSITIVE;
+    }
+    if (valueWithFlagsParsed.flags.includes('m')) {
+      flags |= RE2JS.MULTILINE;
+    }
+    if (valueWithFlagsParsed.flags.includes('s')) {
+      flags |= RE2JS.DOTALL;
+    }
+
+    const regex = RE2JS.compile(RE2JS.translateRegExp(valueWithFlagsParsed.cleaned), flags);
+    // Counted repetition expands when compiled, and matching time grows with the program size.
+    if (regex.programSize() > MAX_MATCHER_REGEX_PROGRAM_SIZE) {
+      throw new Error('Regular expression is too large.');
+    }
+    return regex;
   },
   { maxSize: 500 }
 );
-
-function getAnchoredRegex(matcherValue: string): RegExp {
-  const regex = compileAnchoredRegex(matcherValue);
-  // A regex carrying the "g" flag remembers where the last match stopped, so rewind it first.
-  regex.lastIndex = 0;
-  return regex;
-}
 
 type OperatorPredicate = (labelValue: string, matcherValue: string) => boolean;
 const OperatorFunctions: Record<LabelMatcher['type'], OperatorPredicate> = {

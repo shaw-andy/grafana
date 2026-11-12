@@ -1,5 +1,5 @@
 import { getActiveThreshold } from '../field/thresholds';
-import { stringToJsRegex } from '../text/string';
+import { stringToSafeRegex } from '../text/safeRegex';
 import { type ThresholdsConfig } from '../types/thresholds';
 import {
   MappingType,
@@ -60,12 +60,12 @@ export function getValueMappingResult(valueMappings: ValueMapping[], value: any)
           continue;
         }
 
-        const regex = stringToJsRegex(vm.options.pattern);
-        if (value.match(regex)) {
+        const regex = stringToSafeRegex(vm.options.pattern);
+        if (regex.test(value)) {
           const res = { ...vm.options.result };
 
           if (res.text != null) {
-            res.text = value.replace(regex, vm.options.result.text || '');
+            res.text = regex.replace(value, vm.options.result.text || '');
           }
 
           return res;

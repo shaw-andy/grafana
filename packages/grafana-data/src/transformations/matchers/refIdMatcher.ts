@@ -1,4 +1,5 @@
-import { escapeStringForRegex, stringStartsAsRegEx, stringToJsRegex } from '../../text/string';
+import { type SafeRegex, stringToSafeRegex } from '../../text/safeRegex';
+import { escapeStringForRegex, stringStartsAsRegEx } from '../../text/string';
 import { type DataFrame } from '../../types/dataFrame';
 import { type FrameMatcherInfo } from '../../types/transformations';
 
@@ -12,11 +13,11 @@ const refIdMatcher: FrameMatcherInfo<string> = {
   defaultOptions: 'A',
 
   get: (pattern: string) => {
-    let regex: RegExp | null = null;
+    let regex: SafeRegex | RegExp | null = null;
 
     if (stringStartsAsRegEx(pattern)) {
       try {
-        regex = stringToJsRegex(pattern);
+        regex = stringToSafeRegex(pattern);
       } catch (error) {
         if (error instanceof Error) {
           console.warn(error.message);
