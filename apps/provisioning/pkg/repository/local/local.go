@@ -89,7 +89,9 @@ type localRepository struct {
 	metrics  *repository.OperationRecorder
 
 	// validated path that can be read if not empty
-	path     string
+	path string
+	// why path is empty; every file operation must refuse to run without a validated path
+	pathErr  error
 	maxBytes atomic.Int64
 }
 
@@ -100,18 +102,29 @@ func NewRepository(config *provisioning.Repository, resolver *LocalFolderResolve
 		metrics:  metrics.Recorder(config.Spec.Type),
 	}
 
-	if config.Spec.Local != nil {
-		r.path, _ = resolver.LocalPath(config.Spec.Local.Path)
-		if r.path != "" && !safepath.IsDir(r.path) {
-			r.path += "/"
-		}
+	if config.Spec.Local == nil {
+		r.pathErr = &InvalidLocalFolderError{"", "no local configuration"}
+		return r
+	}
 
-		for i, permitted := range r.resolver.PermittedPrefixes {
-			r.resolver.PermittedPrefixes[i] = safepath.Clean(permitted)
-		}
+	r.path, r.pathErr = resolver.LocalPath(config.Spec.Local.Path)
+	if r.pathErr == nil && r.path == "" {
+		r.pathErr = &InvalidLocalFolderError{config.Spec.Local.Path, "the path resolves to the filesystem root"}
+	}
+	if r.path != "" && !safepath.IsDir(r.path) {
+		r.path += "/"
 	}
 
 	return r
+}
+
+// root returns the validated repository root, or an error if the configured
+// path was rejected.
+func (r *localRepository) root() (string, error) {
+	if r.pathErr != nil {
+		return "", r.pathErr
+	}
+	return r.path, nil
 }
 
 func (r *localRepository) Config() *provisioning.Repository {
@@ -155,6 +168,11 @@ func (r *localRepository) validateRequest(ref string) error {
 // result stays within the root. It blocks path traversal (e.g. "../") that can
 // be introduced by unsanitized resource or folder titles during export.
 func (r *localRepository) resolvePath(p string) (string, error) {
+	root, err := r.root()
+	if err != nil {
+		return "", err
+	}
+
 	// Normalize OS-specific separators and collapse the path first, so a
 	// Windows-style traversal like "..\..\etc" is resolved here instead of
 	// surviving the join and being interpreted by the filesystem. safepath.Clean
@@ -165,8 +183,8 @@ func (r *localRepository) resolvePath(p string) (string, error) {
 		clean += "/"
 	}
 
-	full := safepath.Join(r.path, clean)
-	if !safepath.InDir(safepath.EnsureTrailingSlash(full), safepath.EnsureTrailingSlash(r.path)) {
+	full := safepath.Join(root, clean)
+	if !safepath.InDir(full, root) {
 		return "", apierrors.NewBadRequest(fmt.Sprintf("the path '%s' escapes the repository root", p))
 	}
 	return full, nil
@@ -181,7 +199,10 @@ func (r *localRepository) Read(ctx context.Context, filePath string, ref string)
 		return nil, err
 	}
 
-	actualPath := safepath.Join(r.path, filePath)
+	actualPath, err := r.resolvePath(filePath)
+	if err != nil {
+		return nil, err
+	}
 	info, err := os.Stat(actualPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, repository.ErrFileNotFound
@@ -238,15 +259,20 @@ func (r *localRepository) ReadTree(ctx context.Context, ref string) (tree []repo
 		return nil, err
 	}
 
+	root, err := r.root()
+	if err != nil {
+		return nil, err
+	}
+
 	// Return an empty list when folder does not exist
-	_, err = os.Stat(r.path)
+	_, err = os.Stat(root)
 	if errors.Is(err, fs.ErrNotExist) {
 		return []repository.FileTreeEntry{}, nil
 	}
 
-	rootlen := len(r.path)
+	rootlen := len(root)
 	entries := make([]repository.FileTreeEntry, 0, 100)
-	err = filepath.Walk(r.path, func(path string, info fs.FileInfo, err error) error {
+	err = filepath.Walk(root, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -277,7 +303,11 @@ func (r *localRepository) ReadTree(ctx context.Context, ref string) (tree []repo
 
 func (r *localRepository) calculateFileHash(path string) (string, int64, error) {
 	// Treats https://securego.io/docs/rules/g304.html
-	if !safepath.InDir(path, r.path) {
+	root, err := r.root()
+	if err != nil {
+		return "", 0, err
+	}
+	if !safepath.InDir(path, root) {
 		return "", 0, repository.ErrFileNotFound
 	}
 

@@ -33,9 +33,22 @@ func Dir(filePath string) string {
 	return dir + "/"
 }
 
-// InDir returns true if the filePath is a subdirectory of the given directory.
+// InDir returns true if the filePath is the given directory or is nested under it.
+// Both paths are cleaned first, and a match must end at a path separator, so a
+// sibling such as "dir-other" is never inside "dir". An empty dir is the root of
+// a relative tree and contains every relative path that does not escape it.
 func InDir(filePath, dir string) bool {
-	return strings.HasPrefix(filePath, dir)
+	cleanDir := path.Clean(dir)
+	cleanPath := path.Clean(filePath)
+
+	switch cleanDir {
+	case ".":
+		return !path.IsAbs(cleanPath) && cleanPath != ".." && !strings.HasPrefix(cleanPath, "../")
+	case "/":
+		return path.IsAbs(cleanPath)
+	}
+
+	return cleanPath == cleanDir || strings.HasPrefix(cleanPath, cleanDir+"/")
 }
 
 // EnsureTrailingSlash returns the path with a trailing slash appended if it
