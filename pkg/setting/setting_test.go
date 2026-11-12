@@ -803,6 +803,38 @@ func TestAssetSriChecksEnabled(t *testing.T) {
 	})
 }
 
+func TestIPAddressLoginProtectionSettings(t *testing.T) {
+	t.Run("enabled with loopback trusted when unset", func(t *testing.T) {
+		cfg, err := NewCfgFromBytes([]byte(``))
+		require.NoError(t, err)
+		require.False(t, cfg.DisableIPAddressLoginProtection)
+		require.Len(t, cfg.IPAddressLoginProtectionTrustedProxies, 2)
+		require.Equal(t, "127.0.0.0/8", cfg.IPAddressLoginProtectionTrustedProxies[0].String())
+		require.Equal(t, "::1/128", cfg.IPAddressLoginProtectionTrustedProxies[1].String())
+	})
+
+	t.Run("empty value trusts no proxy", func(t *testing.T) {
+		cfg, err := NewCfgFromBytes([]byte("[security]\nip_address_login_protection_trusted_proxies ="))
+		require.NoError(t, err)
+		require.Empty(t, cfg.IPAddressLoginProtectionTrustedProxies)
+	})
+
+	t.Run("reads addresses and ranges", func(t *testing.T) {
+		cfg, err := NewCfgFromBytes([]byte("[security]\nip_address_login_protection_trusted_proxies = 10.0.0.0/8 192.0.2.1, 2001:db8::1"))
+		require.NoError(t, err)
+		var got []string
+		for _, n := range cfg.IPAddressLoginProtectionTrustedProxies {
+			got = append(got, n.String())
+		}
+		require.Equal(t, []string{"10.0.0.0/8", "192.0.2.1/32", "2001:db8::1/128"}, got)
+	})
+
+	t.Run("rejects invalid entries", func(t *testing.T) {
+		_, err := NewCfgFromBytes([]byte("[security]\nip_address_login_protection_trusted_proxies = proxy.example.com"))
+		require.Error(t, err)
+	})
+}
+
 func TestDynamicSection(t *testing.T) {
 	t.Parallel()
 

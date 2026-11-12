@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -264,6 +265,9 @@ type Cfg struct {
 	StrictTransportSecurityMaxAge        int
 	StrictTransportSecurityPreload       bool
 	StrictTransportSecuritySubDomains    bool
+	// IPAddressLoginProtectionTrustedProxies lists peers whose X-Forwarded-For and X-Real-IP
+	// headers are used to find the client address that IP address login protection counts against.
+	IPAddressLoginProtectionTrustedProxies []*net.IPNet
 	// CSPEnabled toggles Content Security Policy support.
 	CSPEnabled bool
 	// CSPTemplate contains the Content Security Policy template.
@@ -2056,12 +2060,23 @@ func readSecuritySettings(iniFile *ini.File, cfg *Cfg) error {
 	cfg.DisableBruteForceLoginProtection = security.Key("disable_brute_force_login_protection").MustBool(false)
 	cfg.BruteForceLoginProtectionMaxAttempts = security.Key("brute_force_login_protection_max_attempts").MustInt64(5)
 	cfg.DisableUsernameLoginProtection = security.Key("disable_username_login_protection").MustBool(false)
-	cfg.DisableIPAddressLoginProtection = security.Key("disable_ip_address_login_protection").MustBool(true)
+	cfg.DisableIPAddressLoginProtection = security.Key("disable_ip_address_login_protection").MustBool(false)
 
 	// Ensure at least one login attempt can be performed.
 	if cfg.BruteForceLoginProtectionMaxAttempts <= 0 {
 		cfg.BruteForceLoginProtectionMaxAttempts = 1
 	}
+
+	// An empty value is kept so that no proxy is trusted.
+	trustedProxiesStr := "127.0.0.0/8, ::1/128"
+	if security.HasKey("ip_address_login_protection_trusted_proxies") {
+		trustedProxiesStr = security.Key("ip_address_login_protection_trusted_proxies").String()
+	}
+	trustedProxies, err := parseTrustedProxies(trustedProxiesStr)
+	if err != nil {
+		return fmt.Errorf("invalid ip_address_login_protection_trusted_proxies: %w", err)
+	}
+	cfg.IPAddressLoginProtectionTrustedProxies = trustedProxies
 
 	readCookieSecuritySettings(iniFile, cfg)
 	copyCookieSecuritySettingsToGlobals(cfg)
@@ -2111,6 +2126,40 @@ func readSecuritySettings(iniFile *ini.File, cfg *Cfg) error {
 	cfg.AdminEmail = valueAsString(security, "admin_email", fmt.Sprintf("%s@localhost", cfg.AdminUser))
 
 	return nil
+}
+
+// parseTrustedProxies accepts IP addresses and CIDR ranges separated by commas or spaces.
+func parseTrustedProxies(value string) ([]*net.IPNet, error) {
+	entries, err := util.SplitStringWithError(value)
+	if err != nil {
+		return nil, err
+	}
+
+	nets := make([]*net.IPNet, 0, len(entries))
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if strings.Contains(entry, "/") {
+			_, ipNet, err := net.ParseCIDR(entry)
+			if err != nil {
+				return nil, err
+			}
+			nets = append(nets, ipNet)
+			continue
+		}
+		ip := net.ParseIP(entry)
+		if ip == nil {
+			return nil, fmt.Errorf("%q is not an IP address or CIDR range", entry)
+		}
+		if ip4 := ip.To4(); ip4 != nil {
+			nets = append(nets, &net.IPNet{IP: ip4, Mask: net.CIDRMask(32, 32)})
+		} else {
+			nets = append(nets, &net.IPNet{IP: ip, Mask: net.CIDRMask(128, 128)})
+		}
+	}
+	return nets, nil
 }
 
 func copyCookieSecuritySettingsToGlobals(cfg *Cfg) {

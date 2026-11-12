@@ -10,7 +10,6 @@ import (
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/services/authn"
 	"github.com/grafana/grafana/pkg/services/loginattempt"
-	"github.com/grafana/grafana/pkg/web"
 )
 
 var (
@@ -45,7 +44,8 @@ func (c *Password) AuthenticatePassword(ctx context.Context, r *authn.Request, u
 		return nil, errPasswordAuthFailed.Errorf("too many consecutive incorrect login attempts for user - login for user temporarily blocked")
 	}
 
-	ok, err = c.loginAttempts.ValidateIPAddress(ctx, web.RemoteAddr(r.HTTPRequest))
+	clientIP := c.loginAttempts.ClientIPAddress(r.HTTPRequest)
+	ok, err = c.loginAttempts.ValidateIPAddress(ctx, clientIP)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (c *Password) AuthenticatePassword(ctx context.Context, r *authn.Request, u
 		return identity, nil
 	}
 
-	err = c.loginAttempts.Add(ctx, username, web.RemoteAddr(r.HTTPRequest))
+	err = c.loginAttempts.Add(ctx, username, clientIP)
 	if err != nil {
 		return nil, err
 	}
