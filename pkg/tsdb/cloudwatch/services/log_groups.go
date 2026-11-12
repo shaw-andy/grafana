@@ -13,10 +13,11 @@ import (
 type LogGroupsService struct {
 	logGroupsAPI          models.CloudWatchLogsAPIProvider
 	isCrossAccountEnabled bool
+	pageLimit             int
 }
 
-var NewLogGroupsService = func(logsClient models.CloudWatchLogsAPIProvider, isCrossAccountEnabled bool) models.LogGroupsProvider {
-	return &LogGroupsService{logGroupsAPI: logsClient, isCrossAccountEnabled: isCrossAccountEnabled}
+var NewLogGroupsService = func(logsClient models.CloudWatchLogsAPIProvider, isCrossAccountEnabled bool, pageLimit int) models.LogGroupsProvider {
+	return &LogGroupsService{logGroupsAPI: logsClient, isCrossAccountEnabled: isCrossAccountEnabled, pageLimit: pageLimit}
 }
 
 func (s *LogGroupsService) GetLogGroups(ctx context.Context, req resources.LogGroupsRequest) ([]resources.ResourceResponse[resources.LogGroup], *string, error) {
@@ -42,7 +43,7 @@ func (s *LogGroupsService) GetLogGroups(ctx context.Context, req resources.LogGr
 
 	result := []resources.ResourceResponse[resources.LogGroup]{}
 
-	for {
+	for page := 1; ; page++ {
 		response, err := s.logGroupsAPI.DescribeLogGroups(ctx, input)
 		if err != nil || response == nil {
 			return nil, nil, err
@@ -58,7 +59,7 @@ func (s *LogGroupsService) GetLogGroups(ctx context.Context, req resources.LogGr
 			})
 		}
 
-		if !req.ListAllLogGroups || response.NextToken == nil {
+		if !req.ListAllLogGroups || response.NextToken == nil || page >= s.pageLimit {
 			return result, response.NextToken, nil
 		}
 		input.NextToken = response.NextToken

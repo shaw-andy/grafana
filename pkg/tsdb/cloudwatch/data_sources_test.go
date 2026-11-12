@@ -22,7 +22,7 @@ func TestDataSourcesRoute(t *testing.T) {
 	})
 
 	var mockDataSourcesService = mocks.DataSourcesService{}
-	services.NewDataSourcesService = func(models.CloudWatchLogsAPIProvider, bool) models.DataSourcesProvider {
+	services.NewDataSourcesService = func(models.CloudWatchLogsAPIProvider, bool, int) models.DataSourcesProvider {
 		return &mockDataSourcesService
 	}
 
@@ -38,7 +38,7 @@ func TestDataSourcesRoute(t *testing.T) {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/data-sources", nil)
 		ds := newTestDatasource()
-		handler := http.HandlerFunc(ds.resourceRequestMiddleware(ds.DataSourcesHandler))
+		handler := http.HandlerFunc(ds.resourceRequestWithHeadersMiddleware(ds.DataSourcesHandler))
 		handler.ServeHTTP(rr, req)
 
 		assert.Equal(t, http.StatusOK, rr.Code)
@@ -52,7 +52,7 @@ func TestDataSourcesRoute(t *testing.T) {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/data-sources?pattern=amazon", nil)
 		ds := newTestDatasource()
-		handler := http.HandlerFunc(ds.resourceRequestMiddleware(ds.DataSourcesHandler))
+		handler := http.HandlerFunc(ds.resourceRequestWithHeadersMiddleware(ds.DataSourcesHandler))
 		handler.ServeHTTP(rr, req)
 
 		mockDataSourcesService.AssertCalled(t, "GetDataSources", resources.DataSourcesRequest{
@@ -68,7 +68,7 @@ func TestDataSourcesRoute(t *testing.T) {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/data-sources", nil)
 		ds := newTestDatasource()
-		handler := http.HandlerFunc(ds.resourceRequestMiddleware(ds.DataSourcesHandler))
+		handler := http.HandlerFunc(ds.resourceRequestWithHeadersMiddleware(ds.DataSourcesHandler))
 		handler.ServeHTTP(rr, req)
 
 		assert.Equal(t, http.StatusInternalServerError, rr.Code)

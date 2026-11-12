@@ -52,7 +52,7 @@ func Test_accounts_route(t *testing.T) {
 				IsMonitoringAccount: true,
 			},
 		}}, nil)
-		services.NewAccountsService = func(_ models.OAMAPIProvider) models.AccountsProvider {
+		services.NewAccountsService = func(_ models.OAMAPIProvider, _ int) models.AccountsProvider {
 			return &mockAccountsService
 		}
 
@@ -85,7 +85,7 @@ func Test_accounts_route(t *testing.T) {
 		mockAccountsService := mocks.AccountsServiceMock{}
 		mockAccountsService.On("GetAccountsForCurrentUserOrRole").Return([]resources.ResourceResponse[resources.Account](nil),
 			fmt.Errorf("%w: %s", services.ErrAccessDeniedException, "some AWS message"))
-		services.NewAccountsService = func(_ models.OAMAPIProvider) models.AccountsProvider {
+		services.NewAccountsService = func(_ models.OAMAPIProvider, _ int) models.AccountsProvider {
 			return &mockAccountsService
 		}
 
@@ -103,7 +103,7 @@ func Test_accounts_route(t *testing.T) {
 	t.Run("returns 500 when accounts service returns unknown error", func(t *testing.T) {
 		mockAccountsService := mocks.AccountsServiceMock{}
 		mockAccountsService.On("GetAccountsForCurrentUserOrRole").Return([]resources.ResourceResponse[resources.Account](nil), fmt.Errorf("some error"))
-		services.NewAccountsService = func(_ models.OAMAPIProvider) models.AccountsProvider {
+		services.NewAccountsService = func(_ models.OAMAPIProvider, _ int) models.AccountsProvider {
 			return &mockAccountsService
 		}
 

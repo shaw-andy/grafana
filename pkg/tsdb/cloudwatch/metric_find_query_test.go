@@ -55,7 +55,7 @@ func TestQuery_InstanceAttributes(t *testing.T) {
 		require.NoError(t, err)
 
 		ds := newTestDatasource()
-		resp, err := ds.handleGetEc2InstanceAttribute(
+		resp, _, err := ds.handleGetEc2InstanceAttribute(
 			context.Background(),
 			url.Values{
 				"region":        []string{"us-east-1"},
@@ -127,11 +127,13 @@ func TestQuery_InstanceAttributes(t *testing.T) {
 		}
 		for _, tc := range testcases {
 			t.Run(tc.name, func(t *testing.T) {
-				filterMap := map[string][]string{}
+				filterMap := map[string][]string{
+					"instance-state-name": {"running"},
+				}
 				filterJson, err := json.Marshal(filterMap)
 				require.NoError(t, err)
 
-				resp, err := ds.handleGetEc2InstanceAttribute(
+				resp, _, err := ds.handleGetEc2InstanceAttribute(
 					context.Background(),
 					url.Values{
 						"region":        []string{"us-east-1"},
@@ -201,7 +203,7 @@ func TestQuery_EBSVolumeIDs(t *testing.T) {
 		}
 
 		ds := newTestDatasource()
-		resp, err := ds.handleGetEbsVolumeIds(
+		resp, _, err := ds.handleGetEbsVolumeIds(
 			context.Background(),
 			url.Values{
 				"region":     []string{"us-east-1"},
@@ -262,7 +264,7 @@ func TestQuery_ResourceARNs(t *testing.T) {
 		require.NoError(t, err)
 
 		ds := newTestDatasource()
-		resp, err := ds.handleGetResourceArns(
+		resp, _, err := ds.handleGetResourceArns(
 			context.Background(),
 			url.Values{
 				"region":       []string{"us-east-1"},

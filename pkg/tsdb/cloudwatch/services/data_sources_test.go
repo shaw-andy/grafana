@@ -22,8 +22,8 @@ func TestGetDataSourcesCrossAccountQuerying(t *testing.T) {
 			IncludeLinkedAccounts: aws.Bool(true),
 		}).Return(&cloudwatchlogs.ListAggregateLogGroupSummariesOutput{}, nil)
 
-		service := NewDataSourcesService(mockLogsAPI, true)
-		resp, err := service.GetDataSources(context.Background(), resources.DataSourcesRequest{})
+		service := NewDataSourcesService(mockLogsAPI, true, 100)
+		resp, _, err := service.GetDataSources(context.Background(), resources.DataSourcesRequest{})
 
 		assert.NoError(t, err)
 		assert.Empty(t, resp)
@@ -36,8 +36,8 @@ func TestGetDataSourcesCrossAccountQuerying(t *testing.T) {
 			GroupBy: cloudwatchlogstypes.ListAggregateLogGroupSummariesGroupByDataSourceNameAndType,
 		}).Return(&cloudwatchlogs.ListAggregateLogGroupSummariesOutput{}, nil)
 
-		service := NewDataSourcesService(mockLogsAPI, false)
-		resp, err := service.GetDataSources(context.Background(), resources.DataSourcesRequest{})
+		service := NewDataSourcesService(mockLogsAPI, false, 100)
+		resp, _, err := service.GetDataSources(context.Background(), resources.DataSourcesRequest{})
 
 		assert.NoError(t, err)
 		assert.Empty(t, resp)
@@ -63,8 +63,8 @@ func TestGetDataSourcesCrossAccountQuerying(t *testing.T) {
 			},
 		}, nil)
 
-		service := NewDataSourcesService(mockLogsAPI, true)
-		resp, err := service.GetDataSources(context.Background(), resources.DataSourcesRequest{
+		service := NewDataSourcesService(mockLogsAPI, true, 100)
+		resp, _, err := service.GetDataSources(context.Background(), resources.DataSourcesRequest{
 			Pattern: aws.String("eks"),
 		})
 

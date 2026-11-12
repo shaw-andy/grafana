@@ -16,30 +16,32 @@ import (
 type DataSourcesService struct {
 	logsAPI               models.CloudWatchLogsAPIProvider
 	isCrossAccountEnabled bool
+	pageLimit             int
 }
 
-var NewDataSourcesService = func(logsClient models.CloudWatchLogsAPIProvider, isCrossAccountEnabled bool) models.DataSourcesProvider {
-	return &DataSourcesService{logsAPI: logsClient, isCrossAccountEnabled: isCrossAccountEnabled}
+var NewDataSourcesService = func(logsClient models.CloudWatchLogsAPIProvider, isCrossAccountEnabled bool, pageLimit int) models.DataSourcesProvider {
+	return &DataSourcesService{logsAPI: logsClient, isCrossAccountEnabled: isCrossAccountEnabled, pageLimit: pageLimit}
 }
 
-func (s *DataSourcesService) GetDataSources(ctx context.Context, req resources.DataSourcesRequest) ([]resources.ResourceResponse[resources.LogDataSource], error) {
+func (s *DataSourcesService) GetDataSources(ctx context.Context, req resources.DataSourcesRequest) ([]resources.ResourceResponse[resources.LogDataSource], *string, error) {
 	input := &cloudwatchlogs.ListAggregateLogGroupSummariesInput{
-		GroupBy: cloudwatchlogstypes.ListAggregateLogGroupSummariesGroupByDataSourceNameAndType,
+		GroupBy:   cloudwatchlogstypes.ListAggregateLogGroupSummariesGroupByDataSourceNameAndType,
+		NextToken: req.NextToken,
 	}
 
 	if s.isCrossAccountEnabled {
 		input.IncludeLinkedAccounts = aws.Bool(true)
 	}
 
-	paginator := cloudwatchlogs.NewListAggregateLogGroupSummariesPaginator(s.logsAPI, input)
 	results := make([]resources.ResourceResponse[resources.LogDataSource], 0)
 	seen := make(map[string]struct{})
 	pattern := strings.ToLower(strings.TrimSpace(aws.ToString(req.Pattern)))
 
-	for paginator.HasMorePages() {
-		page, err := paginator.NextPage(ctx)
+	var nextToken *string
+	for range max(s.pageLimit, 1) {
+		page, err := s.logsAPI.ListAggregateLogGroupSummaries(ctx, input)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		for _, summary := range page.AggregateLogGroupSummaries {
@@ -67,6 +69,13 @@ func (s *DataSourcesService) GetDataSources(ctx context.Context, req resources.D
 				},
 			})
 		}
+
+		nextToken = page.NextToken
+		if aws.ToString(nextToken) == "" {
+			nextToken = nil
+			break
+		}
+		input.NextToken = nextToken
 	}
 
 	sort.Slice(results, func(i, j int) bool {
@@ -75,7 +84,7 @@ func (s *DataSourcesService) GetDataSources(ctx context.Context, req resources.D
 		return left < right
 	})
 
-	return results, nil
+	return results, nextToken, nil
 }
 
 func parseDataSourceGroupingIdentifiers(identifiers []cloudwatchlogstypes.GroupingIdentifier) (string, string) {
