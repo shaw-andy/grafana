@@ -72,6 +72,10 @@ const (
 	lokiDefaultMaxQuerySize                = 65536 // 64kb
 	defaultHistorianPrometheusWriteTimeout = 10 * time.Second
 	defaultHistorianPrometheusMetricName   = "GRAFANA_ALERTS"
+	// DefaultEvaluationResultLimit caps the size of a rule's condition result when
+	// alerting_rule_evaluation_results is missing or not positive. Every result becomes
+	// in-memory alert state, so evaluation is never unbounded.
+	DefaultEvaluationResultLimit = 1000
 )
 
 var (
@@ -513,7 +517,11 @@ func (cfg *Cfg) ReadUnifiedAlertingSettings(iniFile *ini.File) error {
 
 	quotas := iniFile.Section("quota")
 	uaCfg.RulesPerRuleGroupLimit = quotas.Key("alerting_rule_group_rules").MustInt64(100)
-	uaCfg.EvaluationResultLimit = quotas.Key("alerting_rule_evaluation_results").MustInt(-1)
+	uaCfg.EvaluationResultLimit = quotas.Key("alerting_rule_evaluation_results").MustInt(DefaultEvaluationResultLimit)
+	if uaCfg.EvaluationResultLimit <= 0 {
+		cfg.Logger.Warn("The value of 'alerting_rule_evaluation_results' must be positive; using the default", "value", uaCfg.EvaluationResultLimit, "default", DefaultEvaluationResultLimit)
+		uaCfg.EvaluationResultLimit = DefaultEvaluationResultLimit
+	}
 
 	remoteAlertmanager := iniFile.Section("remote.alertmanager")
 	uaCfgRemoteAM := RemoteAlertmanagerSettings{
