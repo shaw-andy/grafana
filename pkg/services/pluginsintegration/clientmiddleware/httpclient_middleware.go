@@ -3,6 +3,7 @@ package clientmiddleware
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/httpclient"
@@ -54,6 +55,11 @@ func (m *HTTPClientMiddleware) applyHeaders(ctx context.Context, pReq any) conte
 
 			if h, ok := pReq.(backend.ForwardHTTPHeaders); ok {
 				for k, v := range h.GetHTTPHeaders() {
+					// The signed ID token is forwarded to the plugin so it can call back into Grafana,
+					// it must not reach the datasource host.
+					if strings.EqualFold(k, backend.GrafanaUserSignInTokenHeaderName) {
+						continue
+					}
 					// Only set a header if it is not already set.
 					if req.Header.Get(k) == "" {
 						req.Header[k] = v

@@ -301,7 +301,7 @@ func (proxy *DataSourceProxy) director(req *http.Request) {
 		}
 	}
 
-	proxyutil.ApplyForwardIDHeader(req, proxy.requester)
+	proxyutil.ClearForwardIDHeader(req)
 }
 
 // dsInfo builds the DSInfo that ApplyRoute needs from a v0 datasource.
