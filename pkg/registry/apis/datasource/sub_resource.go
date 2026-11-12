@@ -105,6 +105,19 @@ func (r *subResourceREST) Connect(ctx context.Context, name string, opts runtime
 			return
 		}
 
+		if datasources.ResourceCallRequiresWrite(r.builder.pluginJSON.ID, clonedReq.URL.Path) {
+			var boundUID string
+			if pluginCtx.DataSourceInstanceSettings != nil {
+				boundUID = pluginCtx.DataSourceInstanceSettings.UID
+			}
+			if err := r.builder.authorizeEdit(reqCtx, namespace, boundUID); err != nil {
+				_ = tracing.Error(reqSpan, err)
+				m.SetError()
+				responder.Error(err)
+				return
+			}
+		}
+
 		_, readBodySpan := tracing.Start(reqCtx, "datasource.resource.readRequestBody")
 		body, err := io.ReadAll(req.Body)
 		readBodySpan.End()
