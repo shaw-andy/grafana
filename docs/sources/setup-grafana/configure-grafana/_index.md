@@ -781,6 +781,8 @@ Set to `true` to disable [brute force login protection by IP address](https://ch
 
 Set to `true` if you host Grafana behind HTTPS. Default is `false`.
 
+Grafana always sets the `Secure` attribute on its cookies when `root_url` uses `https` or `protocol` is `https` or `h2`, even if `cookie_secure` is `false`.
+
 #### `cookie_samesite`
 
 Sets the `SameSite` cookie attribute and prevents the browser from sending this cookie along with cross-site requests. The main goal is to mitigate the risk of cross-origin information leakage. This setting also provides some protection against cross-site request forgery attacks (CSRF), [read more about SameSite here](https://owasp.org/www-community/SameSite). Valid values are `lax`, `strict`, `none`, and `disabled`. Default is `lax`. Using value `disabled` does not add any `SameSite` attribute to cookies.

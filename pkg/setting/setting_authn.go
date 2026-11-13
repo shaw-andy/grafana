@@ -99,7 +99,7 @@ func readOAuthRefreshLockSettings(iniFile *ini.File, cfg *Cfg) {
 
 func readCookieSecuritySettings(iniFile *ini.File, cfg *Cfg) {
 	security := iniFile.Section("security")
-	cfg.CookieSecure = security.Key("cookie_secure").MustBool(false)
+	cfg.CookieSecure = security.Key("cookie_secure").MustBool(false) || servedOverHTTPS(iniFile)
 
 	samesiteString := valueAsString(security, "cookie_samesite", "lax")
 	if samesiteString == "disabled" {
@@ -116,6 +116,20 @@ func readCookieSecuritySettings(iniFile *ini.File, cfg *Cfg) {
 			cfg.CookieSameSiteMode = http.SameSiteLaxMode
 		}
 	}
+}
+
+// servedOverHTTPS reports whether browsers reach Grafana over TLS. A cookie
+// issued over HTTPS without Secure is still sent on plain HTTP requests to the
+// same host, so cookie_secure = false only takes effect for HTTP-only installs.
+// It reads the ini rather than cfg so it does not depend on settings order.
+func servedOverHTTPS(iniFile *ini.File) bool {
+	server := iniFile.Section("server")
+	switch valueAsString(server, "protocol", "http") {
+	case "https", "h2":
+		return true
+	}
+	rootURL, err := url.Parse(valueAsString(server, "root_url", "http://localhost:3000/"))
+	return err == nil && strings.EqualFold(rootURL.Scheme, "https")
 }
 
 // readServerURLSettings sets AppURL even when the URL fails to parse, so
