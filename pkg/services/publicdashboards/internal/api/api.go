@@ -204,7 +204,7 @@ func (api *Api) CreatePublicDashboard(c *contextmodel.ReqContext) response.Respo
 	//validate accessToken
 	accessToken := pdDTO.AccessToken
 	if accessToken != "" && !validation.IsValidAccessToken(accessToken) {
-		return response.Err(models.ErrInvalidAccessToken.Errorf("CreatePublicDashboard: invalid Access Token %s", accessToken))
+		return response.Err(models.ErrInvalidAccessToken.Errorf("CreatePublicDashboard: invalid Access Token"))
 	}
 
 	// Always set the orgID and userID from the session
