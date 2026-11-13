@@ -22,44 +22,67 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - name: Get GitHub App token
-        id: get-github-app-token
-        uses: grafana/shared-workflows/actions/create-github-app-token@46f48da11e78ebdba7a8747ae456b11062fac83e # create-github-app-token/v0.3.1
-        with:
-          github_app: grafana-pr-automation
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
+      # Everything this job executes (modowners.go, the setup-go action, the root
+      # go.mod) comes from the base commit. The pull request contributes only its
+      # go.mod, as data. A same-repository branch can change scripts/modowners and
+      # .github/actions, so none of it may run in the job that holds the app token.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.base.sha }}
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
           sparse-checkout: go.mod
           sparse-checkout-cone-mode: false
-          path: _modowners_base
+          path: _modowners_pr
       - name: Setup Go
         uses: ./.github/actions/setup-go
         with:
           cache-build: 'false'
           go-version-file: scripts/modowners/go.mod
-      - name: Request module owners
+      - name: Find module owners
+        id: modowners
         env:
-          GH_TOKEN: ${{ steps.get-github-app-token.outputs.token }}
           GOWORK: 'off'
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          slugs=$(go run scripts/modowners/modowners.go reviewers _modowners_base/go.mod go.mod)
+          # Do not follow a symlink from the pull request to other runner files.
+          if [ -L _modowners_pr/go.mod ] || [ ! -f _modowners_pr/go.mod ]; then
+            echo "::error::go.mod in the pull request is not a regular file"
+            exit 1
+          fi
+          slugs=$(go run scripts/modowners/modowners.go reviewers go.mod _modowners_pr/go.mod)
           if [ -z "$slugs" ]; then
             echo "No module-owner reviewers to request"
             exit 0
           fi
-          echo "Requesting: $slugs"
+          # The slugs come from the pull request's go.mod comments. Restrict them
+          # to team-slug characters so they stay one line in GITHUB_OUTPUT.
+          if grep -Evq '^[A-Za-z0-9_-]+$' <<< "$slugs"; then
+            echo "::error::modowners returned a reviewer that is not a team slug"
+            exit 1
+          fi
+          echo "slugs=$(tr '\n' ' ' <<< "$slugs")" >> "$GITHUB_OUTPUT"
+      - name: Get GitHub App token
+        id: get-github-app-token
+        if: steps.modowners.outputs.slugs != ''
+        uses: grafana/shared-workflows/actions/create-github-app-token@46f48da11e78ebdba7a8747ae456b11062fac83e # create-github-app-token/v0.3.1
+        with:
+          github_app: grafana-pr-automation
+      - name: Request module owners
+        if: steps.modowners.outputs.slugs != ''
+        env:
+          GH_TOKEN: ${{ steps.get-github-app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SLUGS: ${{ steps.modowners.outputs.slugs }}
+        run: |
+          set -euo pipefail
+          echo "Requesting: $SLUGS"
           # One team per call so a 422 names the team. requested_teams is the
           # PR's full current set, so check the slug we asked for.
           failed=0
-          while IFS= read -r slug; do
-            [ -z "$slug" ] && continue
+          for slug in $SLUGS; do
             err=$(mktemp)
             if ! assigned=$(jq -n --arg slug "$slug" '{reviewers: [], team_reviewers: [$slug]}' |
               gh api --method POST "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/requested_reviewers" --input - 2>"$err" |
@@ -75,5 +98,5 @@ jobs:
               echo "::error::Did not assign @grafana/${slug}"
               failed=1
             fi
-          done <<< "$slugs"
+          done
           exit "$failed"
