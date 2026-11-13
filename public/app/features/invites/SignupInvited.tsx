@@ -38,24 +38,29 @@ export const SignupInvitedPage = () => {
   const [initFormModel, setInitFormModel] = useState<FormModel>();
   const [greeting, setGreeting] = useState<string>();
   const [invitedBy, setInvitedBy] = useState<string>();
+  const [invitedLogin, setInvitedLogin] = useState<string>();
   const styles = useStyles2(getStyles);
 
   useAsync(async () => {
     const invite = await getBackendSrv().get(`/api/user/invite/${code}`);
+    // An invite sent to a username has no email; the account must be created with that username.
+    const login = !invite.email && invite.username ? invite.username : undefined;
 
     setInitFormModel({
       email: invite.email,
       name: invite.name,
-      username: invite.email,
+      username: login ?? invite.email,
       orgName: invite.orgName,
     });
 
+    setInvitedLogin(login);
     setGreeting(invite.name || invite.email || invite.username);
     setInvitedBy(invite.invitedBy);
   }, [code]);
 
   const onSubmit = async (formData: FormModel) => {
-    await getBackendSrv().post('/api/user/invite/complete', { ...formData, inviteCode: code });
+    const body = invitedLogin ? { ...formData, email: '', username: invitedLogin } : formData;
+    await getBackendSrv().post('/api/user/invite/complete', { ...body, inviteCode: code });
     window.location.href = getConfig().appSubUrl + '/';
   };
 
@@ -98,23 +103,25 @@ export const SignupInvitedPage = () => {
         <Form defaultValues={initFormModel} onSubmit={onSubmit}>
           {({ register, errors }) => (
             <>
-              <Field
-                invalid={!!errors.email}
-                error={errors.email && errors.email.message}
-                label={t('invites.signup-invited-page.label-email', 'Email')}
-              >
-                <Input
-                  // eslint-disable-next-line @grafana/i18n/no-untranslated-strings
-                  placeholder="email@example.com"
-                  {...register('email', {
-                    required: 'Email is required',
-                    pattern: {
-                      value: w3cStandardEmailValidator,
-                      message: t('invites.signup-invited-page.message.email-is-invalid', 'Email is invalid'),
-                    },
-                  })}
-                />
-              </Field>
+              {!invitedLogin && (
+                <Field
+                  invalid={!!errors.email}
+                  error={errors.email && errors.email.message}
+                  label={t('invites.signup-invited-page.label-email', 'Email')}
+                >
+                  <Input
+                    // eslint-disable-next-line @grafana/i18n/no-untranslated-strings
+                    placeholder="email@example.com"
+                    {...register('email', {
+                      required: 'Email is required',
+                      pattern: {
+                        value: w3cStandardEmailValidator,
+                        message: t('invites.signup-invited-page.message.email-is-invalid', 'Email is invalid'),
+                      },
+                    })}
+                  />
+                </Field>
+              )}
               <Field
                 invalid={!!errors.name}
                 error={errors.name && errors.name.message}
@@ -131,6 +138,7 @@ export const SignupInvitedPage = () => {
                 label={t('invites.signup-invited-page.label-username', 'Username')}
               >
                 <Input
+                  readOnly={!!invitedLogin}
                   {...register('username', { required: 'Username is required' })}
                   placeholder={t('invites.signup-invited-page.placeholder-username', 'Username')}
                 />
