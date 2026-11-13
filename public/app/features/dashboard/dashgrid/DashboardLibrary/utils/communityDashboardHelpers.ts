@@ -1,4 +1,3 @@
-import { type PanelModel } from '@grafana/data';
 import { t } from '@grafana/i18n';
 import { locationService } from '@grafana/runtime';
 import { createErrorNotification } from 'app/core/copy/appNotification';
@@ -20,6 +19,7 @@ import {
 import { type GnetDashboard, type Link } from '../types';
 
 import { type InputMapping, tryAutoMapDatasources, parseConstantInputs, isDataSourceInput } from './autoMapDatasources';
+import { canCommunityDashboardContainJS } from './communityDashboardSafety';
 import type { AssistantSource } from './templateDashboardHelpers';
 
 export const DEFAULT_SORT_ORDER = 'downloads';
@@ -138,103 +138,6 @@ interface UseCommunityDashboardParams {
 }
 
 /**
- * Check if a panel contains JavaScript code using heuristic pattern matching.
- *
- * IMPORTANT: This is a heuristic-based detection, not a perfect mechanism.
- *
- * Patterns checked:
- * - HTML/Script tags: Direct XSS attack vectors
- * - Event handlers: Common JS injection points (onclick, onload, etc.)
- * - Function declarations: Actual executable code patterns
- * - eval/Function constructor: Dynamic code execution
- * - setTimeout/setInterval: Deferred code execution
- *
- * What we DON'T check:
- * - Panel title and description are excluded (already sanitized by Grafana's rendering layer)
- * - Only the panel's options and configuration are scanned
- *
- * @param panel - The panel model to check
- * @returns true if the panel might contain JavaScript code, false otherwise
- */
-function canPanelContainJS(panel: PanelModel): boolean {
-  // Create a copy of the panel without title and description, as they are already sanitized
-  // This reduces false positives while still checking all other properties for JavaScript code
-  const { title, description, ...panelWithoutSanitizedFields } = panel;
-
-  let panelJson: string;
-  try {
-    panelJson = JSON.stringify(panelWithoutSanitizedFields);
-  } catch (e) {
-    console.warn('Failed to stringify panel', e);
-    return true;
-  }
-
-  // Patterns that indicate actual JavaScript code in values
-  const valuePatterns = [
-    /<script\b/i, // HTML script tags
-    /\bon\w+\s*=\s*/i, // HTML event handlers: onclick=, onload=, etc.
-    /\bjavascript\s*:/i,
-    /\bfunction\s*\(/, // Anonymous function declarations: function(
-    /\bfunction\s+[\w$]+\s*\(/, // Named function declarations: function name(
-    /=>\s*\{[^}]*\breturn\b/, // Arrow function with return statement: () => { return ... }
-    /\beval\s*\(/i, // eval() calls
-    /\bnew\s+Function\s*\(/i, // new Function() constructor
-    /\bsetTimeout\s*\(/i, // setTimeout calls
-    /\bsetInterval\s*\(/i, // setInterval calls
-  ];
-
-  // Patterns for suspicious JSON keys that might indicate JS hooks
-  const keyPatterns = [
-    /"on[a-zA-Z]+"\s*:/, // Event handlers as keys (both camelCase and lowercase): "onClick": or "onclick":
-    /"beforeRender"\s*:/i, // beforeRender hook as JSON key
-    /"afterRender"\s*:/i, // afterRender hook as JSON key
-    /"javascript"\s*:/i, // "javascript" as a key
-    /"customCode"\s*:/i, // Common pattern for custom code injection
-    /"script"\s*:/i, // "script" as a JSON key
-    /"handler"\s*:/i, // "handler" as a JSON key - common for event handlers
-  ];
-
-  const hasSuspiciousValue = valuePatterns.some((pattern) => {
-    if (pattern.test(panelJson)) {
-      console.warn('Panel contains JavaScript code in value');
-      return true;
-    }
-    return false;
-  });
-
-  const hasSuspiciousKey = keyPatterns.some((pattern) => {
-    if (pattern.test(panelJson)) {
-      console.warn('Panel contains JavaScript code in key');
-      return true;
-    }
-    return false;
-  });
-
-  return hasSuspiciousValue || hasSuspiciousKey;
-}
-
-function isPanelModel(panel: unknown): panel is PanelModel {
-  if (!panel || typeof panel !== 'object') {
-    return false;
-  }
-  return 'options' in panel && 'type' in panel;
-}
-
-/**
- * Check if a dashboard contains JavaScript code. This is not a perfect check, but good enough
- * Used as a second filter after the first filter of panel types (see api/dashboardLibraryApi.ts)
- */
-const canDashboardContainJS = (dashboard: DashboardJson): boolean => {
-  return dashboard.panels?.some((panel) => {
-    // Skip library panels - they don't have options/type and are already validated
-    if (isPanelModel(panel)) {
-      return canPanelContainJS(panel);
-    }
-    return false;
-  });
-};
-
-/**
  * Handles the flow when a user selects a community dashboard:
  * 1. Tracks analytics
  * 2. Fetches full dashboard JSON with __inputs
@@ -257,7 +160,7 @@ export async function onUseCommunityDashboard({
     const fullDashboard = await fetchCommunityDashboard(dashboard.id);
     const dashboardJson = fullDashboard.json;
 
-    if (canDashboardContainJS(dashboardJson)) {
+    if (await canCommunityDashboardContainJS(dashboardJson)) {
       throw new Error(`Community dashboard ${dashboard.id} "${dashboard.name}" might contain JavaScript code`);
     }
 
