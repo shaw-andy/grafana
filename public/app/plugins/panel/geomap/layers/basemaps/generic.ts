@@ -1,8 +1,13 @@
+import ImageTile from 'ol/ImageTile';
+import type Tile from 'ol/Tile';
+import TileState from 'ol/TileState';
 import TileLayer from 'ol/layer/Tile';
 import XYZ from 'ol/source/XYZ';
 
 import { type MapLayerRegistryItem, textUtil } from '@grafana/data';
 import { getTemplateSrv } from '@grafana/runtime';
+
+import { isAllowedResourceUrl } from '../../utils/resourceUrl';
 
 export interface XYZConfig {
   url: string;
@@ -40,6 +45,19 @@ export function resolveXYZConfig<T extends XYZConfig = XYZConfig>(
   return { ...config, url: config.url, attribution: config.attribution ?? '' };
 }
 
+/**
+ * Checks the final tile address rather than the template, because placeholders such as
+ * {z} or {a-c} can also expand inside the host name.
+ */
+export function loadAllowedTileImage(tile: Tile, src: string) {
+  const image = tile instanceof ImageTile ? tile.getImage() : undefined;
+  if (!(image instanceof HTMLImageElement) || !isAllowedResourceUrl(src)) {
+    tile.setState(TileState.ERROR);
+    return;
+  }
+  image.src = src;
+}
+
 export const xyzTiles: MapLayerRegistryItem<UnresolvedXYZConfig<XYZConfig>> = {
   id: 'xyz',
   name: 'XYZ Tile layer',
@@ -56,6 +74,7 @@ export const xyzTiles: MapLayerRegistryItem<UnresolvedXYZConfig<XYZConfig>> = {
       return new TileLayer({
         source: new XYZ({
           url: interpolatedUrl,
+          tileLoadFunction: loadAllowedTileImage,
           // An empty string would add a blank entry to the attribution control
           attributions: interpolatedAttribution || undefined,
           wrapX: !noRepeat,

@@ -6,6 +6,8 @@ import * as style from 'ol/style';
 import { type MapLayerRegistryItem, type PanelData, PluginState } from '@grafana/data';
 import { getGeometryField, getLocationMatchers } from 'app/features/geo/utils/location';
 
+import { isAllowedResourceUrl } from '../../utils/resourceUrl';
+
 export interface LastPointConfig {
   icon?: string;
 }
@@ -35,7 +37,7 @@ export const lastPointTracker: MapLayerRegistryItem<LastPointConfig> = {
     point.setStyle(
       new style.Style({
         image: new style.Icon({
-          src: config.icon,
+          src: isAllowedResourceUrl(config.icon) ? config.icon : defaultOptions.icon,
         }),
       })
     );

@@ -60,7 +60,7 @@ describe('getWebGLStyle', () => {
   });
 
   it('returns image style with src for custom SVG symbol', async () => {
-    (getPublicOrAbsoluteUrl as jest.Mock).mockReturnValue('test.svg');
+    (getPublicOrAbsoluteUrl as jest.Mock).mockReturnValue('public/build/test.svg');
     global.fetch = jest.fn(() =>
       Promise.resolve({
         text: () => Promise.resolve('<svg width="100" height="100"></svg>'),
@@ -80,7 +80,7 @@ describe('getWebGLStyle', () => {
   });
 
   it('includes background circle with opacity-adjusted stroke when opacity is provided', async () => {
-    (getPublicOrAbsoluteUrl as jest.Mock).mockReturnValue('custom.svg');
+    (getPublicOrAbsoluteUrl as jest.Mock).mockReturnValue('public/build/custom.svg');
     global.fetch = jest.fn(() =>
       Promise.resolve({
         text: () => Promise.resolve('<svg width="100" height="100" viewBox="0 0 100 100"></svg>'),
@@ -100,7 +100,7 @@ describe('getWebGLStyle', () => {
     // Mock console.error to suppress output and verify it's called
     const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
-    (getPublicOrAbsoluteUrl as jest.Mock).mockReturnValue('error.svg');
+    (getPublicOrAbsoluteUrl as jest.Mock).mockReturnValue('public/build/error.svg');
     global.fetch = jest.fn(() => Promise.reject(new Error('Fetch failed')));
     const result = await getWebGLStyle('error.svg');
     expect(result['icon-src']).toBe(''); // Empty SVG
@@ -111,6 +111,17 @@ describe('getWebGLStyle', () => {
     // Clean up the spy
     consoleErrorSpy.mockRestore();
   });
+
+  it.each(['/logout?.svg', `${window.location.origin}/profile/switch-org/2?.svg`])(
+    'does not fetch a symbol at %s on the Grafana host',
+    async (url) => {
+      (getPublicOrAbsoluteUrl as jest.Mock).mockReturnValue(url);
+      global.fetch = jest.fn();
+      const result = await getWebGLStyle('custom.svg');
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(result['icon-src']).toBe('');
+    }
+  );
 });
 
 describe('Icon Path Consistency', () => {

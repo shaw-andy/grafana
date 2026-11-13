@@ -17,6 +17,7 @@ import { getStyleConfigState } from '../../style/utils';
 import { type FeatureRuleConfig, type FeatureStyleConfig } from '../../types';
 import { checkFeatureMatchesStyleRule } from '../../utils/checkFeatureMatchesStyleRule';
 import { getLayerPropertyInfo } from '../../utils/getFeatures';
+import { isAllowedResourceUrl } from '../../utils/resourceUrl';
 import { getStyleDimension, getPublicGeoJSONFiles } from '../../utils/utils';
 
 export interface DynamicGeoJSONMapperConfig {
@@ -61,9 +62,10 @@ export const dynamicGeoJSONLayer: MapLayerRegistryItem<DynamicGeoJSONMapperConfi
    */
   create: async (_map, options, _eventBus, theme) => {
     const config = { ...defaultOptions, ...options.config };
+    const src = config.src;
 
     const source = new VectorSource({
-      url: config.src,
+      url: isAllowedResourceUrl(src) ? src : undefined,
       format: new GeoJSON(),
     });
 
