@@ -3,6 +3,8 @@ import { apply } from 'ol-mapbox-style';
 
 import { type MapLayerRegistryItem } from '@grafana/data';
 
+import { isAllowedResourceUrl } from '../../utils/resourceUrl';
+
 // MapLibre Style Specification constants
 const LAYER_TYPE_BACKGROUND = 'background';
 const PAINT_BACKGROUND_OPACITY = 'background-opacity';
@@ -24,6 +26,16 @@ const defaultMaplibreConfig: MaplibreConfig = {
  */
 function resolveMaplibreConfig(config: Partial<MaplibreConfig> = {}): MaplibreConfig {
   return { ...config, url: config.url || defaultMaplibreConfig.url };
+}
+
+// ol-mapbox-style resolves mapbox:// itself, to api.mapbox.com.
+function isAllowedStyleUrl(url: string): boolean {
+  return url.startsWith('mapbox://') || isAllowedResourceUrl(url);
+}
+
+/** The style can reference sources, tiles and sprites anywhere, so every request it makes is checked too. */
+function refuseDisallowedRequest(url: string): Promise<Response> | undefined {
+  return isAllowedResourceUrl(url) ? undefined : Promise.resolve(new Response(null, { status: 403 }));
 }
 
 const maplibreLayer: MapLayerRegistryItem<Partial<MaplibreConfig>> = {
@@ -58,6 +70,10 @@ const maplibreLayer: MapLayerRegistryItem<Partial<MaplibreConfig>> = {
 
       // Handle async operations in the background
       const loadStyle = async () => {
+        if (!isAllowedStyleUrl(cfg.url)) {
+          console.warn(`MapLibre style URL is not allowed: ${cfg.url}`);
+          return;
+        }
         try {
           const res = await fetch(cfg.url);
           if (!res.ok) {
@@ -79,7 +95,11 @@ const maplibreLayer: MapLayerRegistryItem<Partial<MaplibreConfig>> = {
             }
           }
 
-          await apply(layer, style, { styleUrl: cfg.url, accessToken: cfg.accessToken });
+          await apply(layer, style, {
+            styleUrl: cfg.url,
+            accessToken: cfg.accessToken,
+            transformRequest: refuseDisallowedRequest,
+          });
           applyNoRepeat();
         } catch (error) {
           console.warn('Failed to parse or apply MapLibre style JSON:', error);
@@ -90,7 +110,7 @@ const maplibreLayer: MapLayerRegistryItem<Partial<MaplibreConfig>> = {
 
       const tryFallbackApply = async () => {
         try {
-          await apply(layer, cfg.url, { accessToken: cfg.accessToken });
+          await apply(layer, cfg.url, { accessToken: cfg.accessToken, transformRequest: refuseDisallowedRequest });
           applyNoRepeat();
         } catch (fallbackError) {
           console.warn('Failed to load MapLibre style from both JSON and direct URL approaches:', fallbackError);

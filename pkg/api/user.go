@@ -13,6 +13,7 @@ import (
 	claims "github.com/grafana/authlib/types"
 	"github.com/grafana/grafana/pkg/api/dtos"
 	"github.com/grafana/grafana/pkg/api/response"
+	"github.com/grafana/grafana/pkg/middleware/csrf"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
 	"github.com/grafana/grafana/pkg/services/login"
 	"github.com/grafana/grafana/pkg/services/org"
@@ -529,6 +530,11 @@ func (hs *HTTPServer) ChangeActiveOrgAndRedirectToHome(c *contextmodel.ReqContex
 	if !c.IsIdentityType(claims.TypeUser) {
 		hs.log.Debug("Requested endpoint only available to users")
 		c.JsonApiErr(http.StatusNotModified, "Endpoint only available for users", nil)
+		return
+	}
+
+	if !csrf.IsUserNavigation(c.Req) {
+		c.JsonApiErr(http.StatusForbidden, "Switching organization must be opened as a page", nil)
 		return
 	}
 

@@ -6,6 +6,8 @@ import { Registry, type RegistryItem, textUtil } from '@grafana/data';
 import { config } from '@grafana/runtime';
 import { getPublicOrAbsoluteUrl } from 'app/features/dimensions/resource';
 
+import { isAllowedResourceUrl } from '../utils/resourceUrl';
+
 import { defaultStyleConfig, DEFAULT_SIZE, type StyleConfigValues, type StyleMaker } from './types';
 import { getDisplacement } from './utils';
 
@@ -253,6 +255,9 @@ const makers: SymbolMaker[] = [
 ];
 
 async function prepareSVG(url: string, size?: number, backgroundOpacity?: number): Promise<string> {
+  if (!isAllowedResourceUrl(url)) {
+    return '';
+  }
   return fetch(url, { method: 'GET' })
     .then((res) => {
       return res.text();

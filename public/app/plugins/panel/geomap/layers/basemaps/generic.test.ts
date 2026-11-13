@@ -1,10 +1,14 @@
+import ImageTile from 'ol/ImageTile';
 import type OpenLayersMap from 'ol/Map';
+import TileState from 'ol/TileState';
 import TileLayer from 'ol/layer/Tile';
+import { get as getProjection } from 'ol/proj';
+import Projection from 'ol/proj/Projection';
 import XYZ from 'ol/source/XYZ';
 
 import { type EventBus, type GrafanaTheme2, type MapLayerOptions } from '@grafana/data';
 
-import { getTileSource } from '../test-utils';
+import { ensureInstanceOf, getTileSource } from '../test-utils';
 
 import { xyzTiles, type XYZConfig } from './generic';
 
@@ -176,6 +180,31 @@ describe('XYZ tile layer', () => {
       expect(layer.getMinZoom()).toBe(-Infinity);
       expect(layer.getMaxZoom()).toBe(Infinity);
       expect(source.getTileGrid()?.getMinZoom()).toBe(0);
+    });
+  });
+
+  describe('tile addresses', () => {
+    async function loadFirstTile(url: string) {
+      const options: MapLayerOptions<XYZConfig> = { name: 'Tiles', type: 'xyz', config: { url, attribution: '' } };
+      const layer = (await xyzTiles.create(mockMap, options, mockEventBus, mockTheme)).init();
+      const projection = ensureInstanceOf(getProjection('EPSG:3857'), Projection);
+      const tile = ensureInstanceOf(getTileSource(layer, XYZ).getTile(1, 0, 0, 1, projection), ImageTile);
+      tile.load();
+      return { tile, image: ensureInstanceOf(tile.getImage(), HTMLImageElement) };
+    }
+
+    it('loads tiles from another host', async () => {
+      const { tile, image } = await loadFirstTile('https://tiles.example.com/{z}/{x}/{y}.png');
+      expect(image.getAttribute('src')).toBe('https://tiles.example.com/1/0/0.png');
+      expect(tile.getState()).toBe(TileState.LOADING);
+    });
+
+    it('does not load a tile whose {a-z} range expands to the Grafana host', async () => {
+      const host = window.location.hostname;
+      const firstLetterRange = `{${host[0]}-${host[0]}}`;
+      const { tile, image } = await loadFirstTile(`http://${firstLetterRange}${host.slice(1)}/logout/{z}`);
+      expect(image.getAttribute('src')).toBeNull();
+      expect(tile.getState()).toBe(TileState.ERROR);
     });
   });
 });

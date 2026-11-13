@@ -18,6 +18,7 @@ import (
 	"github.com/grafana/grafana/pkg/infra/network"
 	"github.com/grafana/grafana/pkg/middleware"
 	"github.com/grafana/grafana/pkg/middleware/cookies"
+	"github.com/grafana/grafana/pkg/middleware/csrf"
 	"github.com/grafana/grafana/pkg/services/auth"
 	"github.com/grafana/grafana/pkg/services/authn"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
@@ -291,6 +292,11 @@ func (hs *HTTPServer) loginUserWithUser(user *user.User, c *contextmodel.ReqCont
 }
 
 func (hs *HTTPServer) Logout(c *contextmodel.ReqContext) {
+	if !csrf.IsUserNavigation(c.Req) {
+		c.JsonApiErr(http.StatusForbidden, "Logout must be opened as a page", nil)
+		return
+	}
+
 	// FIXME: restructure saml client to implement authn.LogoutClient
 	if hs.samlSingleLogoutEnabled(c.Req.Context()) {
 		if c.GetAuthenticatedBy() == loginservice.SAMLAuthModule {

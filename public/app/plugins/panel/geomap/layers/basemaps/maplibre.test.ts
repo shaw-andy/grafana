@@ -1,3 +1,4 @@
+import { waitFor } from '@testing-library/react';
 import type OpenLayersMap from 'ol/Map';
 import LayerGroup from 'ol/layer/Group';
 
@@ -62,5 +63,18 @@ describe('maplibre basemap', () => {
     const url = 'https://tiles.example.com/style.json';
     await initLayer({ config: { url } });
     expect(fetch).toHaveBeenCalledWith(url);
+  });
+
+  it('refuses requests the style makes to the Grafana host', async () => {
+    await initLayer({ config: { url: 'https://tiles.example.com/style.json' } });
+    await waitFor(() => expect(applyMock).toHaveBeenCalled());
+
+    const { transformRequest } = applyMock.mock.calls[0][2];
+    expect(transformRequest('https://tiles.example.com/0/0/0.pbf', 'Tiles')).toBeUndefined();
+    for (const url of [`${window.location.origin}/logout`, '/profile/switch-org/2']) {
+      const refused = await transformRequest(url, 'Tiles');
+      expect(refused).toBeInstanceOf(Response);
+      expect(refused.ok).toBe(false);
+    }
   });
 });

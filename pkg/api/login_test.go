@@ -712,8 +712,47 @@ func TestLogoutSaml(t *testing.T) {
 		return response.Empty(http.StatusOK)
 	})
 	sc.m.Get(sc.url, sc.defaultHandler)
-	sc.fakeReqNoAssertions("GET", sc.url).exec()
+	sc.fakeReqNoAssertions("GET", sc.url)
+	sc.req.Header.Set("Sec-Fetch-Dest", "document")
+	sc.exec()
 	require.Equal(t, 302, sc.resp.Code)
+}
+
+func TestLogoutRefusesSubresourceRequests(t *testing.T) {
+	fakeSetIndexViewData(t)
+	fakeViewIndex(t)
+	sc := setupScenarioContextSamlLogout(t, "/logout")
+	license := licensingtest.NewFakeLicensing()
+	license.On("FeatureEnabled", "saml").Return(true)
+
+	hs := &HTTPServer{
+		authnService: &authntest.FakeService{
+			ExpectedClientConfig: &authntest.FakeSSOClientConfig{
+				ExpectedIsSingleLogoutEnabled: true,
+			},
+		},
+		Cfg:              sc.cfg,
+		SettingsProvider: &setting.OSSImpl{Cfg: sc.cfg},
+		License:          license,
+		SocialService:    &mockSocialService{},
+		Features:         featuremgmt.WithFeatures(),
+	}
+
+	sc.defaultHandler = routing.Wrap(func(c *contextmodel.ReqContext) response.Response {
+		c.SignedInUser = &user.SignedInUser{
+			UserID:          1,
+			AuthenticatedBy: loginservice.SAMLAuthModule,
+		}
+		hs.Logout(c)
+		return nil
+	})
+	sc.m.Get(sc.url, sc.defaultHandler)
+	sc.fakeReqNoAssertions("GET", sc.url)
+	sc.req.Header.Set("Sec-Fetch-Dest", "image")
+	sc.req.Header.Set("Accept", "image/avif,image/webp,*/*")
+	sc.exec()
+	require.Equal(t, http.StatusForbidden, sc.resp.Code)
+	require.Empty(t, sc.resp.Header().Get("Location"), "an image request must not be redirected to SAML logout")
 }
 
 func TestIsExternallySynced(t *testing.T) {

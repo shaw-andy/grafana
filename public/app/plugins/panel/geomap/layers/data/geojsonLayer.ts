@@ -27,6 +27,7 @@ import { getStyleConfigState } from '../../style/utils';
 import { type FeatureRuleConfig, type FeatureStyleConfig } from '../../types';
 import { checkFeatureMatchesStyleRule } from '../../utils/checkFeatureMatchesStyleRule';
 import { getLayerPropertyInfo } from '../../utils/getFeatures';
+import { isAllowedResourceUrl } from '../../utils/resourceUrl';
 import { getPublicGeoJSONFiles } from '../../utils/utils';
 
 export interface GeoJSONMapperConfig {
@@ -83,7 +84,7 @@ export const geojsonLayer: MapLayerRegistryItem<GeoJSONMapperConfig> = {
       : `${window.__grafana_public_path__}${interpolatedUrl.replace(/^(public\/)/, '')}`;
 
     const source = new VectorSource({
-      url: layerUrl,
+      url: isAllowedResourceUrl(layerUrl) ? layerUrl : undefined,
       format: new GeoJSON(),
     });
 
