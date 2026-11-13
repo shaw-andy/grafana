@@ -40,6 +40,37 @@ const blankPixel =
 let photoLoad: number[] = []; // TODO find a better way to manage this, used to track image load
 
 /**
+ * Photo values come from query results, which editors control. Assigning them to an image
+ * makes the browser request them with the viewer's session cookie (including after a
+ * redirect back to this host), so only inline data URLs are used as-is. Remote photos are
+ * fetched without credentials or redirects and displayed from an object URL.
+ */
+type PhotoSource = { kind: 'inline'; src: string } | { kind: 'remote'; href: string };
+
+function getPhotoSource(value: unknown): PhotoSource | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol === 'data:') {
+    return { kind: 'inline', src: value };
+  }
+  if ((url.protocol === 'http:' || url.protocol === 'https:') && url.hostname !== window.location.hostname) {
+    return { kind: 'remote', href: url.href };
+  }
+  return undefined;
+}
+
+interface RemotePhoto {
+  objectUrl?: string;
+}
+
+/**
  * Map layer configuration for circle overlay
  */
 export const photosLayer: MapLayerRegistryItem<PhotoConfig> = {
@@ -69,14 +100,75 @@ export const photosLayer: MapLayerRegistryItem<PhotoConfig> = {
       source,
     });
 
-    let images: string[] = [];
+    let images: unknown[] = [];
+    const remotePhotos = new Map<string, RemotePhoto>();
+
+    const loadRemotePhoto = (href: string): RemotePhoto => {
+      const photo: RemotePhoto = {};
+      remotePhotos.set(href, photo);
+      const isCurrent = () => remotePhotos.get(href) === photo;
+      // Deferred so the style function, which runs on every render, never starts a request itself
+      Promise.resolve()
+        .then(() => {
+          if (!isCurrent()) {
+            return undefined;
+          }
+          return fetch(href, { credentials: 'omit', redirect: 'error', mode: 'cors' }).then((response) => {
+            if (!response.ok) {
+              throw new Error(`Failed to load photo: ${response.status}`);
+            }
+            return response.blob();
+          });
+        })
+        .then((blob) => {
+          if (!blob || !isCurrent()) {
+            return;
+          }
+          photo.objectUrl = URL.createObjectURL(blob);
+          vectorLayer.changed();
+        })
+        .catch(() => {
+          // Leave the placeholder image in place for photos that cannot be loaded
+        });
+      return photo;
+    };
+
+    const getPhotoSrc = (value: unknown): string => {
+      const photoSource = getPhotoSource(value);
+      if (!photoSource) {
+        return unknownImage;
+      }
+      if (photoSource.kind === 'inline') {
+        return photoSource.src;
+      }
+      const photo = remotePhotos.get(photoSource.href) ?? loadRemotePhoto(photoSource.href);
+      return photo.objectUrl ?? unknownImage;
+    };
+
+    const releaseUnusedRemotePhotos = () => {
+      const inUse = new Set<string>();
+      for (const value of images) {
+        const photoSource = getPhotoSource(value);
+        if (photoSource?.kind === 'remote') {
+          inUse.add(photoSource.href);
+        }
+      }
+      for (const [href, photo] of remotePhotos) {
+        if (!inUse.has(href)) {
+          if (photo.objectUrl) {
+            URL.revokeObjectURL(photo.objectUrl);
+          }
+          remotePhotos.delete(href);
+        }
+      }
+    };
 
     vectorLayer.setStyle((feature: FeatureLike) => {
       let src = unknownImage;
       let idx = Infinity;
       if (images.length > 0) {
         idx = feature.get('rowIndex');
-        src = images[idx] ?? unknownImage;
+        src = getPhotoSrc(images[idx]);
       }
       const photoStyle = new Style({
         image: new Photo({
@@ -141,6 +233,8 @@ export const photosLayer: MapLayerRegistryItem<PhotoConfig> = {
       update: (data: PanelData) => {
         if (!data.series?.length) {
           source.clear();
+          images = [];
+          releaseUnusedRemotePhotos();
           return; // ignore empty
         }
 
@@ -164,6 +258,7 @@ export const photosLayer: MapLayerRegistryItem<PhotoConfig> = {
           }
           break; // Only the first frame for now!
         }
+        releaseUnusedRemotePhotos();
       },
 
       // Marker overlay options

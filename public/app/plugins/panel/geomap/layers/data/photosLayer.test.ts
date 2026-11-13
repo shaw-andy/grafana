@@ -68,7 +68,30 @@ function photoSrc(layer: VectorImage, feature: Feature): string {
   return ensureInstanceOf(styles[styles.length - 1].getImage(), Photo).getPhoto().src;
 }
 
+/** Remote photos are fetched once a feature is first styled and shown once the fetch resolves */
+async function loadPhotos(layer: VectorImage, features: Feature[]) {
+  features.forEach((feature) => photoSrc(layer, feature));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 describe('photosLayer', () => {
+  let fetchSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    const objectUrls = new Map<Blob, string>();
+    fetchSpy = jest.spyOn(window, 'fetch').mockImplementation((input) => {
+      const blob = new Blob();
+      objectUrls.set(blob, `blob:${String(input)}`);
+      return Promise.resolve({ ok: true, blob: () => Promise.resolve(blob) } as Response);
+    });
+    URL.createObjectURL = jest.fn((blob: Blob) => objectUrls.get(blob)!);
+    URL.revokeObjectURL = jest.fn();
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+  });
+
   it('update() adds one feature per row', async () => {
     const { handler, layer } = await setup();
     handler.update!(photoData(['a.png', 'b.png', 'c.png']));
@@ -87,8 +110,13 @@ describe('photosLayer', () => {
     handler.update!(photoData(['https://example.com/a.png', 'https://example.com/b.png']));
 
     const [first, second] = layer.getSource()!.getFeatures();
-    expect(photoSrc(layer, first)).toBe('https://example.com/a.png');
-    expect(photoSrc(layer, second)).toBe('https://example.com/b.png');
+    await loadPhotos(layer, [first, second]);
+    expect(photoSrc(layer, first)).toBe('blob:https://example.com/a.png');
+    expect(photoSrc(layer, second)).toBe('blob:https://example.com/b.png');
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://example.com/a.png',
+      expect.objectContaining({ credentials: 'omit', redirect: 'error' })
+    );
   });
 
   it('falls back to the first string field when no source field is configured', async () => {
@@ -96,6 +124,7 @@ describe('photosLayer', () => {
     handler.update!(photoData(['https://example.com/a.png'], 'someOtherName'));
 
     const [first] = layer.getSource()!.getFeatures();
-    expect(photoSrc(layer, first)).toBe('https://example.com/a.png');
+    await loadPhotos(layer, [first]);
+    expect(photoSrc(layer, first)).toBe('blob:https://example.com/a.png');
   });
 });
