@@ -186,20 +186,20 @@ func (sc *SmtpClient) createDialer() (*gomail.Dialer, error) {
 
 	d := gomail.NewDialer(host, iPort, sc.cfg.User, sc.cfg.Password)
 	d.TLSConfig = tlsconfig
-	d.StartTLSPolicy = getStartTLSPolicy(sc.cfg.StartTLSPolicy)
+	d.StartTLSPolicy = getStartTLSPolicy(sc.cfg)
 	d.LocalName = sc.cfg.EhloIdentity
 
 	return d, nil
 }
 
-func getStartTLSPolicy(policy string) gomail.StartTLSPolicy {
-	switch policy {
-	case "NoStartTLS":
-		return -1
-	case "MandatoryStartTLS":
-		return 1
+func getStartTLSPolicy(cfg setting.SmtpSettings) gomail.StartTLSPolicy {
+	switch cfg.EffectiveStartTLSPolicy() {
+	case setting.SmtpNoStartTLS:
+		return gomail.NoStartTLS
+	case setting.SmtpOpportunisticStartTLS:
+		return gomail.OpportunisticStartTLS
 	default:
-		return 0
+		return gomail.MandatoryStartTLS
 	}
 }
 
