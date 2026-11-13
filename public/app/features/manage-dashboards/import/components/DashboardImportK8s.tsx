@@ -11,6 +11,7 @@ import { ExportFormat } from 'app/features/dashboard/api/types';
 import { isDashboardV1Resource, isDashboardV2Resource } from 'app/features/dashboard/api/utils';
 
 import { type DashboardInputs, DashboardSource } from '../../types';
+import { getGcomDashboardUrl } from '../utils/gcomDashboardUrl';
 import { detectExportFormat, extractV1Inputs, extractV2Inputs } from '../utils/inputs';
 
 import { ImportOverview } from './ImportOverview';
@@ -61,7 +62,7 @@ export function DashboardImportK8s({ queryParams }: Props) {
     setState((prev) => ({ ...prev, status: LoadingState.Loading }));
 
     try {
-      const response = await getBackendSrv().get(`/api/gnet/dashboards/${id}`);
+      const response = await getBackendSrv().get(getGcomDashboardUrl(id));
       const dashboard = response.json;
       const format = detectExportFormat(dashboard);
       const inputs =
@@ -80,6 +81,8 @@ export function DashboardImportK8s({ queryParams }: Props) {
       setState((prev) => ({ ...prev, status: LoadingState.Error }));
       if (isFetchError(error)) {
         appEvents.emit(AppEvents.alertError, ['Failed to load dashboard', error.data?.message || 'Unknown error']);
+      } else if (error instanceof Error) {
+        appEvents.emit(AppEvents.alertError, ['Failed to load dashboard', error.message]);
       }
     }
   }
