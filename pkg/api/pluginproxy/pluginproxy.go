@@ -105,13 +105,14 @@ func (proxy *PluginProxy) HandleRequest() {
 		return
 	}
 
+	referer, _ := util.SanitizeURI(proxy.req.Referer())
 	proxyErrorLogger := logger.New(
 		"userId", proxy.signedInUser.GetID(),
 		"orgId", proxy.signedInUser.GetOrgID(),
 		"uname", proxy.signedInUser.GetLogin(),
 		"path", proxy.req.URL.Path,
 		"remote_addr", web.RemoteAddr(proxy.req),
-		"referer", proxy.req.Referer(),
+		"referer", referer,
 	)
 
 	reverseProxy := proxyutil.NewReverseProxy(

@@ -32,6 +32,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginsettings"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginstore"
 	"github.com/grafana/grafana/pkg/setting"
+	"github.com/grafana/grafana/pkg/util"
 	"github.com/grafana/grafana/pkg/web"
 )
 
@@ -406,13 +407,14 @@ func (hs *HTTPServer) redirectCDNPluginAsset(c *contextmodel.ReqContext, plugin 
 		c.JsonApiErr(500, "Failed to get CDN plugin asset remote URL", err)
 		return
 	}
+	referer, _ := util.SanitizeURI(c.Req.Referer())
 	hs.log.Warn(
 		"plugin cdn redirect hit",
 		"pluginID", plugin.ID,
 		"pluginVersion", plugin.Info.Version,
 		"assetPath", assetPath,
 		"remoteURL", remoteURL,
-		"referer", c.Req.Referer(),
+		"referer", referer,
 		"user", c.Login,
 	)
 	pluginsCDNFallbackRedirectRequests.With(prometheus.Labels{
