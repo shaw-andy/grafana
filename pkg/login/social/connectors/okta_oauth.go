@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	jose "github.com/go-jose/go-jose/v4"
+	josejson "github.com/go-jose/go-jose/v4/json"
 	"github.com/go-jose/go-jose/v4/jwt"
 	"golang.org/x/oauth2"
 
@@ -23,6 +24,8 @@ import (
 
 var _ social.SocialConnector = (*SocialOkta)(nil)
 var _ ssosettings.Reloadable = (*SocialOkta)(nil)
+
+var errOktaEmailNotVerified = &SocialError{"user email is not verified"}
 
 type SocialOkta struct {
 	*SocialBase
@@ -43,6 +46,7 @@ type OktaUserInfoJson struct {
 type OktaClaims struct {
 	ID                string `json:"sub"`
 	Email             string `json:"email"`
+	EmailVerified     bool   `json:"email_verified"`
 	PreferredUsername string `json:"preferred_username"`
 	Name              string `json:"name"`
 }
@@ -148,7 +152,9 @@ func (s *SocialOkta) UserInfo(ctx context.Context, client *http.Client, token *o
 			return nil, fmt.Errorf("error validating id token signature: %w", err)
 		}
 
-		if err := json.Unmarshal(rawJSON, &claims); err != nil {
+		// Decode case-sensitively, as the unverified path below does, so a claim
+		// such as EMAIL_VERIFIED cannot stand in for email_verified.
+		if err := josejson.Unmarshal(rawJSON, &claims); err != nil {
 			return nil, fmt.Errorf("error unmarshalling verified claims: %w", err)
 		}
 	} else {
@@ -167,6 +173,12 @@ func (s *SocialOkta) UserInfo(ctx context.Context, client *http.Client, token *o
 	email := claims.extractEmail()
 	if email == "" {
 		return nil, errors.New("error getting user info: no email found in access token")
+	}
+
+	// The email becomes the Grafana login and is what allowed_domains is
+	// checked against, so it must be one the IdP has verified.
+	if !claims.EmailVerified {
+		return nil, errOktaEmailNotVerified
 	}
 
 	var data OktaUserInfoJson

@@ -30,6 +30,16 @@ import (
 func TestSocialOkta_UserInfo(t *testing.T) {
 	var boolPointer *bool
 
+	signingKey, keyID := createTestRSAKey(t)
+	idTokenWithClaims := func(extra map[string]any) string {
+		claims := map[string]any{"role": "Admin"}
+		for k, v := range extra {
+			claims[k] = v
+		}
+		return signJWT(t, signingKey, keyID, claims)
+	}
+	verifiedIDToken := idTokenWithClaims(map[string]any{"email": "okto.octopus@test.com", "email_verified": true})
+
 	tests := []struct {
 		name                    string
 		userRawJSON             string
@@ -50,10 +60,7 @@ func TestSocialOkta_UserInfo(t *testing.T) {
 			userRawJSON:       `{ "email": "okta-octopus@grafana.com", "role": "Admin" }`,
 			roleAttributePath: "role",
 			oAuth2Extra: map[string]any{
-				// {
-				// "email": "okto.octopus@test.com"
-				// },
-				"id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiQWRtaW4iLCJlbWFpbCI6Im9rdG8ub2N0b3B1c0B0ZXN0LmNvbSJ9.yhg0nvYCpMVCVrRvwtmHzhF0RJqid_YFbjJ_xuBCyHs",
+				"id_token": verifiedIDToken,
 			},
 			expectedEmail:        "okto.octopus@test.com",
 			expectedOrgRoles:     map[int64]org.RoleType{1: org.RoleAdmin},
@@ -65,10 +72,7 @@ func TestSocialOkta_UserInfo(t *testing.T) {
 			roleAttributePath: "role",
 			skipOrgRoleSync:   true,
 			oAuth2Extra: map[string]any{
-				// {
-				// "email": "okto.octopus@test.com"
-				// },
-				"id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiQWRtaW4iLCJlbWFpbCI6Im9rdG8ub2N0b3B1c0B0ZXN0LmNvbSJ9.yhg0nvYCpMVCVrRvwtmHzhF0RJqid_YFbjJ_xuBCyHs",
+				"id_token": verifiedIDToken,
 			},
 			expectedEmail:        "okto.octopus@test.com",
 			expectedOrgRoles:     nil,
@@ -80,10 +84,7 @@ func TestSocialOkta_UserInfo(t *testing.T) {
 			roleAttributePath:       "role",
 			allowAssignGrafanaAdmin: true,
 			oAuth2Extra: map[string]any{
-				// {
-				// "email": "okto.octopus@test.com"
-				// },
-				"id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiQWRtaW4iLCJlbWFpbCI6Im9rdG8ub2N0b3B1c0B0ZXN0LmNvbSJ9.yhg0nvYCpMVCVrRvwtmHzhF0RJqid_YFbjJ_xuBCyHs",
+				"id_token": verifiedIDToken,
 			},
 			expectedEmail:        "okto.octopus@test.com",
 			expectedOrgRoles:     map[int64]org.RoleType{1: org.RoleAdmin},
@@ -93,10 +94,7 @@ func TestSocialOkta_UserInfo(t *testing.T) {
 			name:        "should fallback to default org role when role attribute path is empty",
 			userRawJSON: fmt.Sprintf(`{ "email": "okta-octopus@grafana.com", "groups": ["Group 1"], "role": "%s" }`, org.RoleEditor),
 			oAuth2Extra: map[string]any{
-				// {
-				// "email": "okto.octopus@test.com"
-				// },
-				"id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiQWRtaW4iLCJlbWFpbCI6Im9rdG8ub2N0b3B1c0B0ZXN0LmNvbSJ9.yhg0nvYCpMVCVrRvwtmHzhF0RJqid_YFbjJ_xuBCyHs",
+				"id_token": verifiedIDToken,
 			},
 			expectedEmail:    "okto.octopus@test.com",
 			expectedOrgRoles: map[int64]org.RoleType{1: org.RoleViewer},
@@ -108,10 +106,7 @@ func TestSocialOkta_UserInfo(t *testing.T) {
 			orgMapping:          []string{"Group 1:Org4:Editor", "*:Org5:Viewer"},
 			roleAttributeStrict: false,
 			oAuth2Extra: map[string]any{
-				// {
-				// "email": "okto.octopus@test.com"
-				// },
-				"id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiQWRtaW4iLCJlbWFpbCI6Im9rdG8ub2N0b3B1c0B0ZXN0LmNvbSJ9.yhg0nvYCpMVCVrRvwtmHzhF0RJqid_YFbjJ_xuBCyHs",
+				"id_token": verifiedIDToken,
 			},
 			expectedEmail:    "okto.octopus@test.com",
 			expectedOrgRoles: map[int64]org.RoleType{4: org.RoleEditor, 5: org.RoleViewer},
@@ -123,10 +118,7 @@ func TestSocialOkta_UserInfo(t *testing.T) {
 			orgMapping:          []string{"Group 1:Org4:Editor", "*:Org5:Viewer"},
 			roleAttributeStrict: true,
 			oAuth2Extra: map[string]any{
-				// {
-				// "email": "okto.octopus@test.com"
-				// },
-				"id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiQWRtaW4iLCJlbWFpbCI6Im9rdG8ub2N0b3B1c0B0ZXN0LmNvbSJ9.yhg0nvYCpMVCVrRvwtmHzhF0RJqid_YFbjJ_xuBCyHs",
+				"id_token": verifiedIDToken,
 			},
 			expectedEmail:    "okto.octopus@test.com",
 			expectedOrgRoles: map[int64]org.RoleType{4: org.RoleEditor, 5: org.RoleViewer},
@@ -137,10 +129,7 @@ func TestSocialOkta_UserInfo(t *testing.T) {
 			roleAttributePath: "role",
 			skipOrgRoleSync:   true,
 			oAuth2Extra: map[string]any{
-				// {
-				// "email": "okto.octopus@test.com"
-				// },
-				"id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiQWRtaW4iLCJlbWFpbCI6Im9rdG8ub2N0b3B1c0B0ZXN0LmNvbSJ9.yhg0nvYCpMVCVrRvwtmHzhF0RJqid_YFbjJ_xuBCyHs",
+				"id_token": verifiedIDToken,
 			},
 			expectedOrgRoles: nil,
 			expectedEmail:    "okto.octopus@test.com",
@@ -151,10 +140,7 @@ func TestSocialOkta_UserInfo(t *testing.T) {
 			roleAttributePath:   "invalid_role_path",
 			roleAttributeStrict: true,
 			oAuth2Extra: map[string]any{
-				// {
-				// "email": "okto.octopus@test.com"
-				// },
-				"id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiQWRtaW4iLCJlbWFpbCI6Im9rdG8ub2N0b3B1c0B0ZXN0LmNvbSJ9.yhg0nvYCpMVCVrRvwtmHzhF0RJqid_YFbjJ_xuBCyHs",
+				"id_token": verifiedIDToken,
 			},
 			expectedErr: errRoleAttributeStrictViolation,
 		},
@@ -163,12 +149,42 @@ func TestSocialOkta_UserInfo(t *testing.T) {
 			userRawJSON:         fmt.Sprintf(`{ "email": "okta-octopus@grafana.com", "role": "%s" }`, org.RoleEditor),
 			roleAttributeStrict: true,
 			oAuth2Extra: map[string]any{
-				// {
-				// "email": "okto.octopus@test.com"
-				// },
-				"id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiQWRtaW4iLCJlbWFpbCI6Im9rdG8ub2N0b3B1c0B0ZXN0LmNvbSJ9.yhg0nvYCpMVCVrRvwtmHzhF0RJqid_YFbjJ_xuBCyHs",
+				"id_token": verifiedIDToken,
 			},
 			expectedErr: errRoleAttributeStrictViolation,
+		},
+		{
+			name:        "should return error when email_verified is false",
+			userRawJSON: `{ "email": "okta-octopus@grafana.com" }`,
+			oAuth2Extra: map[string]any{
+				"id_token": idTokenWithClaims(map[string]any{"email": "okto.octopus@test.com", "email_verified": false}),
+			},
+			expectedErr: errOktaEmailNotVerified,
+		},
+		{
+			name:        "should return error when email_verified is missing",
+			userRawJSON: `{ "email": "okta-octopus@grafana.com" }`,
+			oAuth2Extra: map[string]any{
+				"id_token": idTokenWithClaims(map[string]any{"email": "okto.octopus@test.com"}),
+			},
+			expectedErr: errOktaEmailNotVerified,
+		},
+		{
+			name:        "should return error when preferred_username fallback is not verified",
+			userRawJSON: `{ "email": "okta-octopus@grafana.com" }`,
+			oAuth2Extra: map[string]any{
+				"id_token": idTokenWithClaims(map[string]any{"preferred_username": "okto.octopus@test.com", "email_verified": false}),
+			},
+			expectedErr: errOktaEmailNotVerified,
+		},
+		{
+			name:        "should use preferred_username when email is empty and email_verified is true",
+			userRawJSON: `{ "email": "okta-octopus@grafana.com" }`,
+			oAuth2Extra: map[string]any{
+				"id_token": idTokenWithClaims(map[string]any{"preferred_username": "okto.octopus@test.com", "email_verified": true}),
+			},
+			expectedEmail:    "okto.octopus@test.com",
+			expectedOrgRoles: map[int64]org.RoleType{1: org.RoleViewer},
 		},
 	}
 	for _, tt := range tests {
@@ -551,10 +567,11 @@ func TestSocialOkta_UserInfo_WithIDTokenValidation(t *testing.T) {
 	defer userInfoServer.Close()
 
 	claims := map[string]any{
-		"sub":   "123456789",
-		"email": "test@example.com",
-		"exp":   time.Now().Add(time.Hour).Unix(),
-		"iat":   time.Now().Unix(),
+		"sub":            "123456789",
+		"email":          "test@example.com",
+		"email_verified": true,
+		"exp":            time.Now().Add(time.Hour).Unix(),
+		"iat":            time.Now().Unix(),
 	}
 
 	tests := []struct {
