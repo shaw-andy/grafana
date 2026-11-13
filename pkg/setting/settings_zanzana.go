@@ -39,6 +39,9 @@ type ZanzanaClientSettings struct {
 	// Certificate used to authenticate the Server
 	// Only used when mode is set to client
 	ServerCertFile string
+	// AllowInsecure dials the server without TLS when no ServerCertFile is set,
+	// which sends the access token in plaintext. Only used when mode is set to client.
+	AllowInsecure bool
 	// Token used to perform the exchange request.
 	// Only used when mode is set to client.
 	Token string
@@ -309,6 +312,7 @@ func (cfg *Cfg) readZanzanaSettings() {
 
 	zc.Addr = clientSec.Key("address").MustString("")
 	zc.ServerCertFile = clientSec.Key("tls_cert").MustString("")
+	zc.AllowInsecure = clientSec.Key("allow_insecure").MustBool(false)
 	zc.KeepaliveTime = clientSec.Key("grpc_client_keepalive_time").MustDuration(6 * time.Minute)
 	zc.CallTimeout = clientSec.Key("grpc_client_timeout").MustDuration(30 * time.Second)
 

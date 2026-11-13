@@ -23,8 +23,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	healthv1pb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -67,6 +65,7 @@ func ProvideZanzanaClient(cfg *setting.Cfg, db db.DB, zanzanaServer zanzana.Serv
 			TokenExchangeURL: cfg.ZanzanaClient.TokenExchangeURL,
 			TokenNamespace:   cfg.ZanzanaClient.TokenNamespace,
 			ServerCertFile:   cfg.ZanzanaClient.ServerCertFile,
+			AllowInsecure:    cfg.ZanzanaClient.AllowInsecure,
 			KeepaliveTime:    cfg.ZanzanaClient.KeepaliveTime,
 			CallTimeout:      cfg.ZanzanaClient.CallTimeout,
 		}
@@ -268,6 +267,7 @@ func ProvideStandaloneZanzanaClient(cfg *setting.Cfg, features featuremgmt.Featu
 		TokenExchangeURL: cfg.ZanzanaClient.TokenExchangeURL,
 		TokenNamespace:   cfg.ZanzanaClient.TokenNamespace,
 		ServerCertFile:   cfg.ZanzanaClient.ServerCertFile,
+		AllowInsecure:    cfg.ZanzanaClient.AllowInsecure,
 		KeepaliveTime:    cfg.ZanzanaClient.KeepaliveTime,
 		CallTimeout:      cfg.ZanzanaClient.CallTimeout,
 	}
@@ -281,6 +281,7 @@ type ZanzanaClientConfig struct {
 	TokenExchangeURL string
 	TokenNamespace   string
 	ServerCertFile   string
+	AllowInsecure    bool
 	KeepaliveTime    time.Duration
 	CallTimeout      time.Duration
 }
@@ -323,12 +324,9 @@ func NewRemoteZanzanaClient(cfg ZanzanaClientConfig, reg prometheus.Registerer) 
 		return nil, fmt.Errorf("failed to create token exchange client: %w", err)
 	}
 
-	transportCredentials := insecure.NewCredentials()
-	if cfg.ServerCertFile != "" {
-		transportCredentials, err = credentials.NewClientTLSFromFile(cfg.ServerCertFile, "")
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize TLS certificate: %w", err)
-		}
+	transportCredentials, tokenCredentials, err := newRemoteAuthzCredentials(cfg.ServerCertFile, cfg.AllowInsecure, cfg.TokenNamespace, tokenClient)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize TLS certificate: %w", err)
 	}
 
 	authzRequestDuration := promauto.With(reg).NewHistogramVec(prometheus.HistogramOpts{
@@ -365,9 +363,7 @@ func NewRemoteZanzanaClient(cfg ZanzanaClientConfig, reg prometheus.Registerer) 
 
 	dialOptions := []grpc.DialOption{
 		grpc.WithTransportCredentials(transportCredentials),
-		grpc.WithPerRPCCredentials(
-			NewGRPCTokenAuth(AuthzServiceAudience, cfg.TokenNamespace, tokenClient),
-		),
+		grpc.WithPerRPCCredentials(tokenCredentials),
 		grpc.WithChainUnaryInterceptor(unaryChain...),
 		grpc.WithChainStreamInterceptor(streamInterceptors...),
 		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
