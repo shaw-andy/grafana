@@ -13,6 +13,7 @@ import { ASSISTANT_PLUGIN_ID } from '../components/AssistantOverview/constants';
 import { Changelog } from '../components/Changelog';
 import { PluginDetailsPanel } from '../components/PluginDetailsPanel';
 import { VersionList } from '../components/VersionList';
+import { getCatalogPluginAssetUrl } from '../helpers';
 import { usePluginConfig } from '../hooks/usePluginConfig';
 import { type CatalogPlugin, type Permission, PluginTabIds, type Screenshots } from '../types';
 
@@ -48,10 +49,6 @@ export function PluginDetailsBody({ plugin, queryParams, pageId, info, showDetai
     ],
     []
   );
-
-  const buildScreenshotPath = (plugin: CatalogPlugin, path: string) => {
-    return `${config.appSubUrl}/api/gnet/plugins/${plugin.id}/versions/${plugin.latestVersion}/images/${path}`;
-  };
 
   if (pageId === PluginTabIds.OVERVIEW) {
     const readme = (
@@ -90,10 +87,10 @@ export function PluginDetailsBody({ plugin, queryParams, pageId, info, showDetai
   }
 
   if (pageId === PluginTabIds.SCREENSHOTS && plugin?.details?.screenshots?.length) {
-    const carouselImages: Screenshots[] = plugin?.details?.screenshots.map((screenshot) => ({
-      path: buildScreenshotPath(plugin, screenshot.path),
-      name: screenshot.name,
-    }));
+    const carouselImages: Screenshots[] = plugin.details.screenshots.flatMap((screenshot) => {
+      const path = getCatalogPluginAssetUrl(plugin.id, plugin.latestVersion, 'images', screenshot.path);
+      return path ? [{ path, name: screenshot.name }] : [];
+    });
     return <Carousel images={carouselImages} />;
   }
 
