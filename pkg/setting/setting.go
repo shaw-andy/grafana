@@ -805,6 +805,7 @@ type Cfg struct {
 	VectorDBUser                 string
 	VectorDBPassword             string
 	VectorDBSSLMode              string
+	VectorDBAllowCleartext       bool
 	VectorIndexingEnabled        bool          // run the embedding backfiller and reconciler
 	VectorReconcilerInterval     time.Duration // reconciler tick interval; default 60s
 	VectorEmbeddingCountInterval time.Duration // stored-embedding gauge sample interval; 0 disables

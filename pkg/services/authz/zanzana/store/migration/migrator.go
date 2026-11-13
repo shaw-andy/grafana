@@ -207,7 +207,7 @@ func openDB(engine, uri string) (*sql.DB, error) {
 
 // constructPostgresConnStrForOpenFGA parses a PostgreSQL connection string into a map of key-value pairs
 // parses into a format like
-// postgresql://grafana:password@127.0.0.1:5432/grafana?sslmode=disable&lock_timeout=2s&statement_timeout=10s
+// postgresql://grafana:password@127.0.0.1:5432/grafana?sslmode=verify-full&lock_timeout=2s&statement_timeout=10s
 func constructPostgresConnStrForOpenFGA(grafanaDBCfg *sqlstore.DatabaseConfig) string {
 	var host, port, user, password, dbname, sslmode string
 
@@ -225,16 +225,20 @@ func constructPostgresConnStrForOpenFGA(grafanaDBCfg *sqlstore.DatabaseConfig) s
 		password = grafanaDBCfg.Pwd
 		dbname = grafanaDBCfg.Name
 		sslmode = grafanaDBCfg.SslMode
+		if sslmode == "" {
+			sslmode = "verify-full"
+		}
 	} else {
 		// Parse from connection string (test environment case)
 		// Connection string format: "user=grafanatest password=grafanatest host=127.0.0.1 port=5432 dbname=grafanatest sslmode=disable"
 		connStr := grafanaDBCfg.ConnectionString
 		parts := strings.Fields(connStr)
 
-		// Set defaults
+		// Set defaults. lib/pq, which opens the Grafana connection from this same string,
+		// defaults to require; pgx would default to prefer, which falls back to cleartext.
 		host = "127.0.0.1"
 		port = "5432"
-		sslmode = "disable"
+		sslmode = "require"
 
 		for _, part := range parts {
 			if strings.Contains(part, "=") {

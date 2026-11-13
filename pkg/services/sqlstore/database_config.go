@@ -3,6 +3,7 @@ package sqlstore
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"os"
 	"path"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/go-sql-driver/mysql"
+	"github.com/lib/pq"
 
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	"github.com/grafana/grafana/pkg/services/sqlstore/migrator"
@@ -25,6 +27,7 @@ type DatabaseConfig struct {
 	Pwd                         string
 	Path                        string
 	SslMode                     string
+	InsecureAllowCleartext      bool
 	SSLSNI                      string
 	CaCertPath                  string
 	ClientKeyPath               string
@@ -108,6 +111,7 @@ func (dbCfg *DatabaseConfig) readConfig(cfg *setting.Cfg) error {
 	dbCfg.ConnMaxLifetime = sec.Key("conn_max_lifetime").MustInt(14400)
 
 	dbCfg.SslMode = sec.Key("ssl_mode").String()
+	dbCfg.InsecureAllowCleartext = sec.Key("insecure_allow_cleartext").MustBool(false)
 	dbCfg.SSLSNI = sec.Key("ssl_sni").String()
 	dbCfg.CaCertPath = sec.Key("ca_cert_path").String()
 	dbCfg.ClientKeyPath = sec.Key("client_key_path").String()
@@ -134,7 +138,7 @@ func (dbCfg *DatabaseConfig) readConfig(cfg *setting.Cfg) error {
 
 func (dbCfg *DatabaseConfig) buildConnectionString(cfg *setting.Cfg, features featuremgmt.FeatureToggles) error {
 	if dbCfg.ConnectionString != "" {
-		return nil
+		return dbCfg.requireEncryptedTransport()
 	}
 
 	cnnstr := ""
@@ -144,6 +148,17 @@ func (dbCfg *DatabaseConfig) buildConnectionString(cfg *setting.Cfg, features fe
 		protocol := "tcp"
 		if strings.HasPrefix(dbCfg.Host, "/") {
 			protocol = "unix"
+		}
+
+		switch dbCfg.SslMode {
+		case "":
+			dbCfg.SslMode = "true"
+			if protocol == "unix" {
+				dbCfg.SslMode = "false"
+			}
+		case "true", "skip-verify", "false":
+		default:
+			return fmt.Errorf(`invalid ssl_mode %q for mysql: use "true", "skip-verify" or "false"`, dbCfg.SslMode)
 		}
 
 		cnnstr = fmt.Sprintf("%s:%s@%s(%s)/%s?collation=utf8mb4_unicode_ci&allowNativePasswords=true&clientFoundRows=true&parseTime=true",
@@ -172,6 +187,10 @@ func (dbCfg *DatabaseConfig) buildConnectionString(cfg *setting.Cfg, features fe
 		addr, err := util.SplitHostPortDefault(dbCfg.Host, "127.0.0.1", "5432")
 		if err != nil {
 			return fmt.Errorf("invalid host specifier '%s': %w", dbCfg.Host, err)
+		}
+
+		if dbCfg.SslMode == "" {
+			dbCfg.SslMode = string(pq.SSLModeVerifyFull)
 		}
 
 		args := []any{dbCfg.User, addr.Host, addr.Port, dbCfg.Name, dbCfg.SslMode, dbCfg.ClientCertPath,
@@ -217,7 +236,70 @@ func (dbCfg *DatabaseConfig) buildConnectionString(cfg *setting.Cfg, features fe
 
 	dbCfg.ConnectionString = cnnstr
 
+	return dbCfg.requireEncryptedTransport()
+}
+
+var errCleartextDatabaseConnection = errors.New("database connection would not be encrypted: enable TLS in the ssl mode setting, " +
+	"or set insecure_allow_cleartext = true to accept credentials and queries being readable on the network")
+
+func (dbCfg *DatabaseConfig) requireEncryptedTransport() error {
+	if dbCfg.InsecureAllowCleartext {
+		return nil
+	}
+	switch dbCfg.Type {
+	case migrator.MySQL:
+		return requireMySQLTLS(dbCfg.ConnectionString)
+	case migrator.Postgres:
+		return RequirePostgresTLS(dbCfg.ConnectionString)
+	}
 	return nil
+}
+
+func requireMySQLTLS(connStr string) error {
+	myCfg, err := mysql.ParseDSN(connStr)
+	if err != nil {
+		return fmt.Errorf("invalid mysql connection string: %w", err)
+	}
+	if myCfg.Net == "unix" {
+		return nil
+	}
+	if myCfg.TLS == nil || myCfg.AllowFallbackToPlaintext {
+		return errCleartextDatabaseConnection
+	}
+	return nil
+}
+
+// RequirePostgresTLS returns an error when connStr lets a session to a network host run without TLS.
+// An unset sslmode is refused as well: lib/pq treats it as require, but pgx, which OpenFGA uses to
+// open the same string, treats it as prefer and falls back to cleartext.
+func RequirePostgresTLS(connStr string) error {
+	pgCfg, err := pq.NewConfig(connStr)
+	if err != nil {
+		return fmt.Errorf("invalid postgres connection string: %w", err)
+	}
+	switch pgCfg.SSLMode {
+	case pq.SSLModeRequire, pq.SSLModeVerifyCA, pq.SSLModeVerifyFull:
+		return nil
+	}
+	if postgresUnixSocketsOnly(pgCfg) {
+		return nil
+	}
+	return fmt.Errorf("%w (sslmode %q)", errCleartextDatabaseConnection, pgCfg.SSLMode)
+}
+
+func postgresUnixSocketsOnly(pgCfg pq.Config) bool {
+	isUnix := func(host string, hostaddr netip.Addr) bool {
+		return hostaddr == (netip.Addr{}) && (filepath.IsAbs(host) || strings.HasPrefix(host, "@"))
+	}
+	if !isUnix(pgCfg.Host, pgCfg.Hostaddr) {
+		return false
+	}
+	for _, m := range pgCfg.Multi {
+		if !isUnix(m.Host, m.Hostaddr) {
+			return false
+		}
+	}
+	return true
 }
 
 func buildExtraConnectionString(sep rune, urlQueryParams map[string][]string) string {

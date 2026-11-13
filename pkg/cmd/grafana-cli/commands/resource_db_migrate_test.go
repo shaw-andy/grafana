@@ -174,6 +174,7 @@ func newEmptyResourceDB(t *testing.T) (*setting.Cfg, *xorm.Engine) {
 		t.Fatalf("unsupported GRAFANA_TEST_DB: %s", dbType)
 	}
 	setKey("connection_string", connString)
+	setKey("insecure_allow_cleartext", "true")
 
 	engine, err := xorm.NewEngine(dbType, connString)
 	require.NoError(t, err)
