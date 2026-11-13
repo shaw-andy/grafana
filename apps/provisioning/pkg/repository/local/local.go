@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -198,27 +199,26 @@ func (r *localRepository) Read(ctx context.Context, filePath string, ref string)
 		}, nil
 	}
 
-	if max := r.maxBytes.Load(); max > 0 && info.Size() > max {
-		return nil, apierrors.NewRequestEntityTooLargeError(
-			fmt.Sprintf("file %q is %d bytes; max allowed is %d bytes", filePath, info.Size(), max),
-		)
+	file, err := r.openRegularFile(actualPath)
+	if err != nil {
+		return nil, err
 	}
+	defer func() { _ = file.Close() }()
 
-	//nolint:gosec
-	data, err := os.ReadFile(actualPath)
+	data, err := io.ReadAll(r.limitedReader(file))
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
-
-	hash, _, err := r.calculateFileHash(actualPath)
-	if err != nil {
-		return nil, fmt.Errorf("calculate hash of file: %w", err)
+	if err := r.checkSize(actualPath, int64(len(data))); err != nil {
+		return nil, err
 	}
+
+	sum := sha1.Sum(data)
 
 	return &repository.FileInfo{
 		Path: filePath,
 		Data: data,
-		Hash: hash,
+		Hash: hex.EncodeToString(sum[:]),
 		Modified: &metav1.Time{
 			Time: info.ModTime(),
 		},
@@ -276,27 +276,90 @@ func (r *localRepository) ReadTree(ctx context.Context, ref string) (tree []repo
 }
 
 func (r *localRepository) calculateFileHash(path string) (string, int64, error) {
+	file, err := r.openRegularFile(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer func() { _ = file.Close() }()
+
+	// TODO: Define what hashing algorithm we want to use for the entire repository. Maybe a config option?
+	hasher := sha1.New()
+	// TODO: context-aware io.Copy? Is that even possible with a reasonable impl?
+	size, err := io.Copy(hasher, r.limitedReader(file))
+	if err != nil {
+		return "", 0, fmt.Errorf("copy file: %w", err)
+	}
+	if err := r.checkSize(path, size); err != nil {
+		return "", 0, err
+	}
+	// NOTE: EncodeToString (& hex.Encode for that matter) return lower-case hex.
+	return hex.EncodeToString(hasher.Sum(nil)), size, nil
+}
+
+// openRegularFile opens path for reading only if it is a regular file within
+// the max size. The checks run on the symlink-resolved target before opening,
+// so an oversized or special file is never opened, and are repeated on the
+// opened descriptor in case the path was replaced in between. Callers must
+// still bound their reads with limitedReader because the file can grow.
+func (r *localRepository) openRegularFile(path string) (*os.File, error) {
 	// Treats https://securego.io/docs/rules/g304.html
 	if !safepath.InDir(path, r.path) {
-		return "", 0, repository.ErrFileNotFound
+		return nil, repository.ErrFileNotFound
+	}
+
+	info, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, repository.ErrFileNotFound
+	} else if err != nil {
+		return nil, fmt.Errorf("stat file: %w", err)
+	}
+	if err := r.checkRegularFile(path, info); err != nil {
+		return nil, err
 	}
 
 	// We've already made sure the path is safe, so we'll ignore the gosec lint.
 	//nolint:gosec
 	file, err := os.OpenFile(path, os.O_RDONLY, 0)
 	if err != nil {
-		return "", 0, fmt.Errorf("open file: %w", err)
+		return nil, fmt.Errorf("open file: %w", err)
 	}
 
-	// TODO: Define what hashing algorithm we want to use for the entire repository. Maybe a config option?
-	hasher := sha1.New()
-	// TODO: context-aware io.Copy? Is that even possible with a reasonable impl?
-	size, err := io.Copy(hasher, file)
-	if err != nil {
-		return "", 0, fmt.Errorf("copy file: %w", err)
+	info, err = file.Stat()
+	if err == nil {
+		err = r.checkRegularFile(path, info)
+	} else {
+		err = fmt.Errorf("stat opened file: %w", err)
 	}
-	// NOTE: EncodeToString (& hex.Encode for that matter) return lower-case hex.
-	return hex.EncodeToString(hasher.Sum(nil)), size, nil
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return file, nil
+}
+
+func (r *localRepository) checkRegularFile(path string, info fs.FileInfo) error {
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("path %q is not a regular file", path)
+	}
+	return r.checkSize(path, info.Size())
+}
+
+func (r *localRepository) checkSize(path string, size int64) error {
+	if max := r.maxBytes.Load(); max > 0 && size > max {
+		return apierrors.NewRequestEntityTooLargeError(
+			fmt.Sprintf("file %q is larger than the max allowed %d bytes", strings.TrimLeft(strings.TrimPrefix(path, r.path), "/"), max),
+		)
+	}
+	return nil
+}
+
+// limitedReader reads at most one byte past the max size, enough for
+// checkSize to detect a file that grew after it was opened.
+func (r *localRepository) limitedReader(file *os.File) io.Reader {
+	if max := r.maxBytes.Load(); max > 0 && max < math.MaxInt64 {
+		return io.LimitReader(file, max+1)
+	}
+	return file
 }
 
 func (r *localRepository) Create(ctx context.Context, filepath string, ref string, data []byte, comment string) (err error) {
