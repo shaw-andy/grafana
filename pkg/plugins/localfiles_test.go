@@ -83,17 +83,14 @@ func TestLocalFS_Remove(t *testing.T) {
 
 func TestLocalFile_Read(t *testing.T) {
 	t.Run("not exists", func(t *testing.T) {
-		var out []byte
-		f := LocalFile{path: "does not exist"}
-		n, err := f.Read(out)
-		require.Zero(t, n)
+		_, err := NewLocalFS(t.TempDir()).Open("does not exist")
 		require.Equal(t, ErrFileNotExist, err)
 	})
 
 	t.Run("read", func(t *testing.T) {
 		t.Run("extra", func(t *testing.T) {
 			s := newTempFileScenarioForTest(t)
-			f := s.newLocalFile()
+			f := s.newLocalFile(t)
 
 			const bufSize = 512
 			out := make([]byte, bufSize)
@@ -108,7 +105,7 @@ func TestLocalFile_Read(t *testing.T) {
 
 		t.Run("empty", func(t *testing.T) {
 			s := newTempFileScenarioForTest(t)
-			f := s.newLocalFile()
+			f := s.newLocalFile(t)
 
 			var out []byte
 			n, err := f.Read(out)
@@ -120,7 +117,7 @@ func TestLocalFile_Read(t *testing.T) {
 
 		t.Run("multiple", func(t *testing.T) {
 			s := newTempFileScenarioForTest(t)
-			f := s.newLocalFile()
+			f := s.newLocalFile(t)
 
 			a := make([]byte, 2)
 			b := make([]byte, 3)
@@ -155,7 +152,7 @@ func TestLocalFile_Read(t *testing.T) {
 func TestLocalFile_Close(t *testing.T) {
 	t.Run("once after read", func(t *testing.T) {
 		s := newTempFileScenarioForTest(t)
-		f := s.newLocalFile()
+		f := s.newLocalFile(t)
 
 		_, err := f.Read(nil)
 		require.NoError(t, err)
@@ -164,14 +161,14 @@ func TestLocalFile_Close(t *testing.T) {
 
 	t.Run("never opened", func(t *testing.T) {
 		s := newTempFileScenarioForTest(t)
-		f := s.newLocalFile()
+		f := s.newLocalFile(t)
 
 		require.NoError(t, f.Close())
 	})
 
 	t.Run("twice", func(t *testing.T) {
 		s := newTempFileScenarioForTest(t)
-		f := s.newLocalFile()
+		f := s.newLocalFile(t)
 
 		_, err := f.Read(nil)
 		require.NoError(t, err)
@@ -184,8 +181,11 @@ type tempFileScenario struct {
 	filePath string
 }
 
-func (s tempFileScenario) newLocalFile() LocalFile {
-	return LocalFile{path: s.filePath}
+func (s tempFileScenario) newLocalFile(t *testing.T) *LocalFile {
+	t.Helper()
+	f, err := NewLocalFS(filepath.Dir(s.filePath)).Open(filepath.Base(s.filePath))
+	require.NoError(t, err)
+	return f.(*LocalFile)
 }
 
 func newTempFileScenario(t *testing.T) (tempFileScenario, error) {

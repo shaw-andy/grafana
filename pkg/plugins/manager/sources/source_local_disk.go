@@ -246,9 +246,7 @@ func (s *LocalSource) readFile(pluginJSONPath string) (io.ReadCloser, error) {
 		return nil, err
 	}
 
-	// Wrapping in filepath.Clean to properly handle
-	// gosec G304 Potential file inclusion via variable rule.
-	return os.Open(filepath.Clean(absPluginJSONPath))
+	return plugins.NewLocalFS(filepath.Dir(absPluginJSONPath)).Open(filepath.Base(absPluginJSONPath))
 }
 
 func DirAsLocalSources(cfg *config.PluginManagementCfg, pluginsPaths []string, class plugins.Class, logger log.Logger) []*LocalSource {

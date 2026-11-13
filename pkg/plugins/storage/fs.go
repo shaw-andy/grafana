@@ -383,16 +383,15 @@ func removeGitBuildFromName(filename, pluginID string) string {
 }
 
 func readPluginJSON(pluginDir string) (plugins.JSONData, error) {
-	pluginPath := filepath.Join(pluginDir, "plugin.json")
-
-	// It's safe to ignore gosec warning G304 since the file path suffix is hardcoded
-	// nolint:gosec
-	data, err := os.ReadFile(pluginPath)
+	root, err := os.OpenRoot(pluginDir)
 	if err != nil {
-		pluginPath = filepath.Join(pluginDir, "dist", "plugin.json")
-		// It's safe to ignore gosec warning G304 since the file path suffix is hardcoded
-		// nolint:gosec
-		data, err = os.ReadFile(pluginPath)
+		return plugins.JSONData{}, fmt.Errorf("could not find plugin.json or dist/plugin.json in %s", pluginDir)
+	}
+	defer func() { _ = root.Close() }()
+
+	data, err := root.ReadFile("plugin.json")
+	if err != nil {
+		data, err = root.ReadFile(filepath.Join("dist", "plugin.json"))
 		if err != nil {
 			return plugins.JSONData{}, fmt.Errorf("could not find plugin.json or dist/plugin.json in %s", pluginDir)
 		}

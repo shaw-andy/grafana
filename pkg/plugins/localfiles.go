@@ -20,12 +20,46 @@ var (
 type LocalFS struct {
 	// basePath is the basePath that will be prepended to all the files to get their absolute path.
 	basePath string
+
+	// resolvedBasePath is basePath with symbolic links resolved when the LocalFS was created.
+	// Files are always opened beneath it, so re-pointing basePath later does not change which directory is served.
+	resolvedBasePath string
 }
 
 // NewLocalFS returns a new LocalFS that can access any file in the specified base path on the filesystem.
 // basePath must use os-specific path separator for Open() to work properly.
 func NewLocalFS(basePath string) LocalFS {
-	return LocalFS{basePath: basePath}
+	return LocalFS{basePath: basePath, resolvedBasePath: resolvePath(basePath)}
+}
+
+func resolvePath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	return abs
+}
+
+// openRoot opens the base directory resolved when the LocalFS was created. Its last element is opened beneath
+// its parent, so swapping the directory for a symbolic link cannot point it outside that parent.
+func (f LocalFS) openRoot() (*os.Root, error) {
+	base := f.resolvedBasePath
+	if base == "" {
+		base = resolvePath(f.basePath)
+	}
+	parent, name := filepath.Dir(base), filepath.Base(base)
+	if parent == base {
+		return os.OpenRoot(base)
+	}
+	parentRoot, err := os.OpenRoot(parent)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = parentRoot.Close() }()
+	return parentRoot.OpenRoot(name)
 }
 
 func (f LocalFS) Type() FSType {
@@ -106,27 +140,39 @@ func (f LocalFS) walkFunc(basePath string, acc map[string]struct{}) filepath.Wal
 // The provided name must be a relative file name that uses os-specific path separators.
 // The function returns the corresponding fs.File for accessing the file on the local filesystem.
 // If a nil error is returned, the caller should take care of calling Close() the returned fs.File.
-// If the file does not exist, ErrFileNotExist is returned.
+// If the file does not exist, or resolves (through symbolic links) to a location outside the base path,
+// ErrFileNotExist is returned.
 func (f LocalFS) Open(name string) (fs.File, error) {
 	cleanPath, err := CleanRelativePath(name)
 	if err != nil {
 		return nil, err
 	}
-	basePath := f.Base()
-	absFn := filepath.Join(basePath, cleanPath)
-	finfo, err := os.Stat(absFn)
+	// The file is resolved and opened relative to a handle on the base directory, so symbolic links cannot
+	// lead outside of it, and the returned file is bound to the descriptor that passed that check: replacing
+	// the name afterwards does not change what is read.
+	root, err := f.openRoot()
 	if err != nil {
 		return nil, ErrFileNotExist
 	}
-	// Make sure access to the file is allowed (symlink check, etc)
-	ok, err := f.fileIsAllowed(basePath, absFn, finfo)
+	defer func() { _ = root.Close() }()
+
+	file, err := root.Open(cleanPath)
 	if err != nil {
-		return nil, err
-	}
-	if !ok {
+		if errors.Is(err, fs.ErrPermission) {
+			return nil, ErrPluginFileRead
+		}
 		return nil, ErrFileNotExist
 	}
-	return &LocalFile{path: absFn}, nil
+	fi, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, ErrPluginFileRead
+	}
+	if !fi.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, ErrFileNotExist
+	}
+	return &LocalFile{f: file}, nil
 }
 
 // Base returns the base path for the LocalFS.
@@ -252,19 +298,19 @@ func (f StaticFS) Remove() error {
 }
 
 // LocalFile implements a fs.File for accessing the local filesystem.
+// It wraps a file opened by LocalFS.Open and never re-resolves the file by its path.
 type LocalFile struct {
-	f    *os.File
-	path string
+	f *os.File
 }
 
-// Stat returns a FileInfo describing the named file.
-// It returns ErrFileNotExist if the file does not exist, or ErrPluginFileRead if another error occurs.
+// Stat returns a FileInfo describing the file.
+// It returns ErrFileNotExist if the file was never opened, or ErrPluginFileRead if another error occurs.
 func (p *LocalFile) Stat() (fs.FileInfo, error) {
-	fi, err := os.Stat(p.path)
+	if p.f == nil {
+		return nil, ErrFileNotExist
+	}
+	fi, err := p.f.Stat()
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, ErrFileNotExist
-		}
 		return nil, ErrPluginFileRead
 	}
 	return fi, nil
@@ -273,23 +319,11 @@ func (p *LocalFile) Stat() (fs.FileInfo, error) {
 // Read reads up to len(b) bytes from the File and stores them in b.
 // It returns the number of bytes read and any error encountered.
 // At end of file, Read returns 0, io.EOF.
-// If the file is already open, it is opened again, without closing it first.
 // The file is not closed at the end of the read operation. If a non-nil error is returned, it
 // must be manually closed by the caller by calling Close().
 func (p *LocalFile) Read(b []byte) (int, error) {
-	if p.f != nil {
-		// File is already open, Read() can be called more than once.
-		// io.EOF is returned if the file has been read entirely.
-		return p.f.Read(b)
-	}
-
-	var err error
-	p.f, err = os.Open(p.path)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return 0, ErrFileNotExist
-		}
-		return 0, ErrPluginFileRead
+	if p.f == nil {
+		return 0, ErrFileNotExist
 	}
 	return p.f.Read(b)
 }
@@ -298,9 +332,8 @@ func (p *LocalFile) Read(b []byte) (int, error) {
 // If the file was never open, nil is returned.
 // If the file is already closed, an error is returned.
 func (p *LocalFile) Close() error {
-	if p.f != nil {
-		return p.f.Close()
+	if p.f == nil {
+		return nil
 	}
-	p.f = nil
-	return nil
+	return p.f.Close()
 }
