@@ -35,6 +35,10 @@ import {
   isDashboardV2Spec,
   isV2StoredVersion,
 } from 'app/features/dashboard/api/utils';
+import {
+  canCommunityDashboardContainJS,
+  canInputMappingsContainJS,
+} from 'app/features/dashboard/dashgrid/DashboardLibrary/utils/communityDashboardSafety';
 import { initializeDashboardAnalyticsAggregator } from 'app/features/dashboard/services/DashboardAnalyticsAggregator';
 import { recordDashboardFetchTiming } from 'app/features/dashboard/services/DashboardFetchTiming';
 import { dashboardLoaderSrv, DashboardLoaderSrvV2 } from 'app/features/dashboard/services/DashboardLoaderSrv';
@@ -48,6 +52,7 @@ import { CustomDashboardTemplateInteractions } from 'app/features/dashboard-scen
 import { transformTemplateToSaveModelSchemaV2 } from 'app/features/dashboard-scene/utils/dashboardTemplateEnvelope';
 import { trackDashboardSceneLoaded } from 'app/features/dashboard-scene/utils/tracking';
 import { interpolateV1Dashboard } from 'app/features/manage-dashboards/import/utils/inputs';
+import { type DashboardJson } from 'app/features/manage-dashboards/types';
 import { playlistSrv } from 'app/features/playlist/PlaylistSrv';
 import { isRefNotFoundError } from 'app/features/provisioning/components/utils/errors';
 import { type ProvisioningPreview } from 'app/features/provisioning/types';
@@ -683,6 +688,21 @@ export class DashboardScenePageStateManager extends DashboardScenePageStateManag
     throw new Error('Snapshot not found');
   }
 
+  /**
+   * Grafana.com JSON reaches this route straight from the URL, so it gets the same screening as
+   * the dashboard library, applied to the interpolated JSON that is actually rendered.
+   */
+  private async buildCommunityDashboardDTO(
+    gnetId: string,
+    interpolatedDashboard: DashboardJson
+  ): Promise<DashboardDTO> {
+    if (await canCommunityDashboardContainJS(interpolatedDashboard)) {
+      throw new Error(`Community dashboard ${gnetId} might contain JavaScript code`);
+    }
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+    return this.buildDashboardDTOFromInterpolated(interpolatedDashboard as DashboardDataDTO);
+  }
+
   private buildDashboardDTOFromInterpolated(interpolatedDashboard: DashboardDataDTO): DashboardDTO {
     return {
       dashboard: {
@@ -769,11 +789,10 @@ export class DashboardScenePageStateManager extends DashboardScenePageStateManag
         value: datasource ?? '',
       },
     ]);
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-    return this.buildDashboardDTOFromInterpolated(interpolatedDashboard as DashboardDataDTO);
+    return this.buildCommunityDashboardDTO(gnetId, interpolatedDashboard);
   }
 
-  private async loadCommunityTemplateDashboard(gnetId: number | string): Promise<DashboardDTO> {
+  private async loadCommunityTemplateDashboard(gnetId: string): Promise<DashboardDTO> {
     // Extract mappings from URL params
     const location = locationService.getLocation();
     const searchParams = new URLSearchParams(location.search);
@@ -790,6 +809,10 @@ export class DashboardScenePageStateManager extends DashboardScenePageStateManag
       throw new Error('Invalid mappings parameter: ' + err);
     }
 
+    if (canInputMappingsContainJS(mappings)) {
+      throw new Error(`Mappings for community dashboard ${gnetId} might contain JavaScript code`);
+    }
+
     // Fetch the community dashboard from grafana.com
     const gnetDashboard = await getBackendSrv().get(`/api/gnet/dashboards/${gnetId}`);
 
@@ -798,8 +821,7 @@ export class DashboardScenePageStateManager extends DashboardScenePageStateManag
 
     // Interpolate in the frontend — no backend round-trip needed
     const interpolatedDashboard = await interpolateV1Dashboard(dashboardJson, mappings);
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-    return this.buildDashboardDTOFromInterpolated(interpolatedDashboard as DashboardDataDTO);
+    return this.buildCommunityDashboardDTO(gnetId, interpolatedDashboard);
   }
 
   public async fetchDashboard({

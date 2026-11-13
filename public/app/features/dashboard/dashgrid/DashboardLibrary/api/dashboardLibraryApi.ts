@@ -3,19 +3,7 @@ import { type DashboardJson } from 'app/features/manage-dashboards/types';
 import { type PluginDashboard } from 'app/types/plugins';
 
 import { type GnetDashboard, type GnetDashboardsResponse, type Link } from '../types';
-
-/**
- * Panel types that are known to allow JavaScript code execution.
- * These panels are filtered out due to security concerns.
- */
-const UNSAFE_PANEL_TYPE_SLUGS = [
-  'aceiot-svg-panel',
-  'ae3e-plotly-panel',
-  'gapit-htmlgraphics-panel',
-  'marcusolsson-dynamictext-panel',
-  'volkovlabs-echarts-panel',
-  'volkovlabs-form-panel',
-];
+import { UNSAFE_PANEL_TYPE_SLUGS } from '../utils/communityDashboardSafety';
 
 /**
  * Parameters for fetching community dashboards from Grafana.com
