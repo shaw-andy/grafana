@@ -290,7 +290,20 @@ func (hs *HTTPServer) loginUserWithUser(user *user.User, c *contextmodel.ReqCont
 	return nil
 }
 
+// Logout signs the user out on POST. Any other method only shows a page that
+// asks for confirmation, so following a link to /logout cannot end the session.
 func (hs *HTTPServer) Logout(c *contextmodel.ReqContext) {
+	if c.Req.Method != http.MethodPost {
+		hs.renderSessionActionPage(c, sessionActionPage{
+			Title:     "Sign out",
+			Message:   "Do you want to sign out of Grafana?",
+			Confirm:   "Sign out",
+			Action:    hs.Cfg.AppSubURL + "/logout",
+			CancelURL: hs.Cfg.AppSubURL + "/",
+		})
+		return
+	}
+
 	// FIXME: restructure saml client to implement authn.LogoutClient
 	if hs.samlSingleLogoutEnabled(c.Req.Context()) {
 		if c.GetAuthenticatedBy() == loginservice.SAMLAuthModule {
