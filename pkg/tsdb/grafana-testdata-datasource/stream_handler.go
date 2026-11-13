@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"regexp"
 	"strings"
 	"time"
 
@@ -12,26 +11,49 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/data"
 )
 
-var random20HzStreamRegex = regexp.MustCompile(`random-20Hz-stream(-\d+)?`)
+// Every accepted path becomes its own Live channel with a dedicated stream
+// goroutine, so only these exact paths may be subscribed to.
+var testStreams = map[string]testStreamConfig{
+	"random-2s-stream": {
+		Interval: 2 * time.Second,
+	},
+	"random-flakey-stream": {
+		Interval: 100 * time.Millisecond,
+		Drop:     0.90, // keep 10%
+	},
+	"random-labeled-stream": {
+		Interval: 200 * time.Millisecond,
+		Drop:     0.2, // keep 80%
+		Labeled:  true,
+	},
+	"random-20Hz-stream": {
+		Interval: 50 * time.Millisecond,
+	},
+}
 
 func (s *Service) SubscribeStream(ctx context.Context, req *backend.SubscribeStreamRequest) (*backend.SubscribeStreamResponse, error) {
 	ctxLogger := s.logger.FromContext(ctx)
-	ctxLogger.Debug("Allowing access to stream", "path", req.Path, "user", req.PluginContext.User)
 
 	if strings.HasPrefix(req.Path, "sim/") {
 		return s.sims.SubscribeStream(ctx, req)
 	}
 
-	initialData, err := backend.NewInitialFrame(s.frame, data.IncludeSchemaOnly)
+	conf, ok := testStreams[req.Path]
+	if !ok {
+		ctxLogger.Debug("Refusing access to unknown stream", "path", req.Path, "user", req.PluginContext.User)
+		return &backend.SubscribeStreamResponse{
+			Status: backend.SubscribeStreamStatusNotFound,
+		}, nil
+	}
+	ctxLogger.Debug("Allowing access to stream", "path", req.Path, "user", req.PluginContext.User)
+
+	frame := s.frame
+	if conf.Labeled {
+		frame = s.labelFrame
+	}
+	initialData, err := backend.NewInitialFrame(frame, data.IncludeSchemaOnly)
 	if err != nil {
 		return nil, err
-	}
-
-	if strings.Contains(req.Path, "-labeled") {
-		initialData, err = backend.NewInitialFrame(s.labelFrame, data.IncludeSchemaOnly)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	return &backend.SubscribeStreamResponse{
@@ -61,28 +83,8 @@ func (s *Service) RunStream(ctx context.Context, request *backend.RunStreamReque
 		return s.sims.RunStream(ctx, request, sender)
 	}
 
-	var conf testStreamConfig
-	switch {
-	case request.Path == "random-2s-stream":
-		conf = testStreamConfig{
-			Interval: 2 * time.Second,
-		}
-	case request.Path == "random-flakey-stream":
-		conf = testStreamConfig{
-			Interval: 100 * time.Millisecond,
-			Drop:     0.90, // keep 10%
-		}
-	case request.Path == "random-labeled-stream":
-		conf = testStreamConfig{
-			Interval: 200 * time.Millisecond,
-			Drop:     0.2, // keep 80%
-			Labeled:  true,
-		}
-	case random20HzStreamRegex.MatchString(request.Path):
-		conf = testStreamConfig{
-			Interval: 50 * time.Millisecond,
-		}
-	default:
+	conf, ok := testStreams[request.Path]
+	if !ok {
 		return fmt.Errorf("testdata plugin does not support path: %s", request.Path)
 	}
 	return s.runTestStream(ctx, request.Path, conf, sender)

@@ -29,9 +29,16 @@ type SimulationEngine struct {
 	// The running instances
 	running map[string]Simulation
 
+	// Number of active RunStream calls per simulation key
+	streaming map[string]int
+
 	// safe changes
 	mutex sync.Mutex
 }
+
+// The simulation key (type, tick and uid) comes from the subscribed channel
+// path, so every distinct key would otherwise start another ticking stream.
+const maxStreamingSimulations = 20
 
 func (s *SimulationEngine) register(info simulationInfo) error {
 	if info.create == nil {
@@ -57,9 +64,10 @@ type simulationInitializer = func() simulationInfo
 
 func NewSimulationEngine() (*SimulationEngine, error) {
 	s := &SimulationEngine{
-		registry: make(map[string]simulationInfo),
-		running:  make(map[string]Simulation),
-		logger:   backend.NewLoggerWith("logger", "tsdb.sims"),
+		registry:  make(map[string]simulationInfo),
+		running:   make(map[string]Simulation),
+		streaming: make(map[string]int),
+		logger:    backend.NewLoggerWith("logger", "tsdb.sims"),
 	}
 	// Initialize each type
 	initializers := []simulationInitializer{
@@ -179,6 +187,16 @@ func (s *SimulationEngine) QueryData(ctx context.Context, req *backend.QueryData
 }
 
 func (s *SimulationEngine) getSimFromPath(path string) (Simulation, error) {
+	key, err := parseSimKey(path)
+	if err != nil {
+		return nil, err
+	}
+	return s.Lookup(simulationState{
+		Key: key,
+	})
+}
+
+func parseSimKey(path string) (simulationKey, error) {
 	idx := strings.Index(path, "sim/")
 	if idx >= 0 {
 		path = path[idx+4:]
@@ -186,14 +204,14 @@ func (s *SimulationEngine) getSimFromPath(path string) (Simulation, error) {
 
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
-		return nil, fmt.Errorf("missing frequency")
+		return simulationKey{}, fmt.Errorf("missing frequency")
 	}
 	if !strings.HasSuffix(parts[1], "hz") {
-		return nil, fmt.Errorf("invalid path frequency.  Expecting `hz` suffix")
+		return simulationKey{}, fmt.Errorf("invalid path frequency.  Expecting `hz` suffix")
 	}
 	hz, err := strconv.ParseFloat(strings.TrimSuffix(parts[1], "hz"), 64)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing frequency from: %s", parts[1])
+		return simulationKey{}, fmt.Errorf("error parsing frequency from: %s", parts[1])
 	}
 	if len(parts) == 2 {
 		parts = append(parts, "") // empty UID
@@ -205,12 +223,35 @@ func (s *SimulationEngine) getSimFromPath(path string) (Simulation, error) {
 		UID:    parts[2],
 	}
 	if path != key.String() {
-		return nil, fmt.Errorf("path should match: %s", key.String())
+		return simulationKey{}, fmt.Errorf("path should match: %s", key.String())
 	}
+	return key, nil
+}
 
-	return s.Lookup(simulationState{
-		Key: key,
-	})
+func (s *SimulationEngine) canStream(key string) bool {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	_, ok := s.streaming[key]
+	return ok || len(s.streaming) < maxStreamingSimulations
+}
+
+func (s *SimulationEngine) acquireStream(key string) bool {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if _, ok := s.streaming[key]; !ok && len(s.streaming) >= maxStreamingSimulations {
+		return false
+	}
+	s.streaming[key]++
+	return true
+}
+
+func (s *SimulationEngine) releaseStream(key string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.streaming[key]--
+	if s.streaming[key] <= 0 {
+		delete(s.streaming, key)
+	}
 }
 
 func (s *SimulationEngine) GetSimulationHandler(rw http.ResponseWriter, req *http.Request) {
@@ -256,7 +297,16 @@ func (s *SimulationEngine) GetSimulationHandler(rw http.ResponseWriter, req *htt
 }
 
 func (s *SimulationEngine) SubscribeStream(ctx context.Context, req *backend.SubscribeStreamRequest) (*backend.SubscribeStreamResponse, error) {
-	sim, err := s.getSimFromPath(req.Path) // includes sim
+	key, err := parseSimKey(req.Path) // includes sim
+	if err != nil {
+		return nil, err
+	}
+	if !s.canStream(key.String()) {
+		return &backend.SubscribeStreamResponse{
+			Status: backend.SubscribeStreamStatusPermissionDenied,
+		}, nil
+	}
+	sim, err := s.Lookup(simulationState{Key: key})
 	if err != nil {
 		return nil, err
 	}
@@ -272,10 +322,23 @@ func (s *SimulationEngine) SubscribeStream(ctx context.Context, req *backend.Sub
 }
 
 func (s *SimulationEngine) RunStream(ctx context.Context, req *backend.RunStreamRequest, sender *backend.StreamSender) error {
-	sim, err := s.getSimFromPath(req.Path) // includes sim
+	simKey, err := parseSimKey(req.Path) // includes sim
 	if err != nil {
 		return err
 	}
+	sim, err := s.Lookup(simulationState{Key: simKey})
+	if err != nil {
+		return err
+	}
+
+	key := simKey.String()
+	if !s.acquireStream(key) {
+		// Returning nil, not an error, so the stream manager stops this stream
+		// instead of retrying it while the channel has subscribers.
+		s.logger.Warn("Too many streaming simulations, not starting stream", "path", req.Path)
+		return nil
+	}
+	defer s.releaseStream(key)
 
 	frequency := 1.0 / sim.GetState().Key.TickHZ
 	ticker := time.NewTicker(time.Duration(frequency * float64(time.Second)))
