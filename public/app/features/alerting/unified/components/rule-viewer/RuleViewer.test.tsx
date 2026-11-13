@@ -184,6 +184,24 @@ describe('RuleViewer', () => {
       ]);
     });
 
+    it('keeps the return link on this server when returnTo is a same-origin double-slash path', async () => {
+      const attack = `${window.location.origin}//attacker.example`;
+      const path = `/alerting/${mockRuleIdentifier.ruleSourceName}/${stringifyIdentifier(mockRuleIdentifier)}/view?returnTo=${encodeURIComponent(attack)}`;
+      render(
+        <AlertRuleProvider identifier={mockRuleIdentifier} rule={mockRule}>
+          <RuleViewer />
+        </AlertRuleProvider>,
+        { historyOptions: { initialEntries: [path] } }
+      );
+
+      const link = await screen.findByRole('link', { name: 'Return to previous view' });
+      link.addEventListener('click', (event) => event.preventDefault());
+      link.click();
+
+      expect((link as HTMLAnchorElement).href).toBe('http://localhost/alerting/list');
+      expect(link).toHaveAttribute('href', '/alerting/list');
+    });
+
     it('should render a Grafana managed alert rule', async () => {
       await renderRuleViewer(mockRule, mockRuleIdentifier);
 
