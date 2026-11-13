@@ -191,29 +191,34 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
-      - name: Get GitHub App token
-        id: get-github-app-token
-        uses: grafana/shared-workflows/actions/create-github-app-token@46f48da11e78ebdba7a8747ae456b11062fac83e # create-github-app-token/v0.3.1
-        with:
-          github_app: grafana-pr-automation
-
+      # This job holds the grafana-pr-automation token, so it runs scripts from the
+      # base commit only. The levitate artifact was produced by pull request code and
+      # is read as data from its own directory.
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
 
       - name: 'Download artifact'
         uses: actions/download-artifact@v8
         with:
           name: levitate
+          path: _levitate
 
       - name: Parsing levitate result
         uses: actions/github-script@v8
         id: levitate-run
         with:
           script: |
-            const filePath = 'result.json';
+            const filePath = '_levitate/result.json';
             const script = require('./.github/workflows/scripts/levitate/json-file-to-job-output.js');
             await script({ core, filePath });
+
+      - name: Get GitHub App token
+        id: get-github-app-token
+        uses: grafana/shared-workflows/actions/create-github-app-token@46f48da11e78ebdba7a8747ae456b11062fac83e # create-github-app-token/v0.3.1
+        with:
+          github_app: grafana-pr-automation
 
       # Check if label exists
       - name: Check if "levitate breaking change" label exists
@@ -234,10 +239,10 @@ jobs:
       - name: Levitate Markdown
         id: levitate-markdown
         run: |
-            if [ -f "levitate.md" ]; then
+            if [ -f "_levitate/levitate.md" ]; then
             {
               echo 'levitate_markdown<<EOF'
-              cat levitate.md
+              cat _levitate/levitate.md
               echo EOF
             } >> "$GITHUB_OUTPUT"
             else
