@@ -4,6 +4,7 @@ import { type JSX } from 'react';
 import { type GrafanaTheme2 } from '@grafana/data';
 import { sanitizeUrl } from '@grafana/data/internal';
 import { t } from '@grafana/i18n';
+import { config } from '@grafana/runtime';
 import { Icon, Tooltip, useStyles2 } from '@grafana/ui';
 
 const MARKDOWN_LINK_REGEX = /\[([^\]]+)\]\(([^)\s]+)\)/g;
@@ -107,14 +108,18 @@ function renderExternalLinkOrText(
     return label;
   }
 
+  // Links to this Grafana server carry the viewer's session cookie, so the viewer
+  // must see where they lead rather than a label chosen by the dashboard author.
+  const text = isGrafanaHost(safeUrl) ? safeUrl.href : label;
+
   return (
-    <a key={key} href={safeUrl} target="_blank" rel="noopener noreferrer" className={linkClassName}>
-      {label}
+    <a key={key} href={safeUrl.href} target="_blank" rel="noopener noreferrer" className={linkClassName}>
+      {text}
     </a>
   );
 }
 
-function getSafeExternalUrl(url: string): string | undefined {
+function getSafeExternalUrl(url: string): URL | undefined {
   const trimmedUrl = url.trim();
 
   if (!SAFE_PROTOCOL_REGEX.test(trimmedUrl)) {
@@ -127,7 +132,36 @@ function getSafeExternalUrl(url: string): string | undefined {
     return undefined;
   }
 
-  return sanitizedUrl;
+  try {
+    const parsedUrl = new URL(sanitizedUrl);
+    return SAFE_PROTOCOL_REGEX.test(parsedUrl.href) ? parsedUrl : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Session cookies are scoped to a hostname regardless of scheme or port.
+function isGrafanaHost(url: URL): boolean {
+  const target = normalizeHostname(url.hostname);
+  const hostnames = [normalizeHostname(window.location.hostname), getHostname(config.appUrl)];
+  return hostnames.some((hostname) => hostname !== undefined && hostname === target);
+}
+
+function getHostname(url: string | undefined): string | undefined {
+  if (!url) {
+    return undefined;
+  }
+
+  try {
+    return normalizeHostname(new URL(url).hostname);
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeHostname(hostname: string): string | undefined {
+  const normalized = hostname.toLowerCase().replace(/\.+$/, '');
+  return normalized === '' ? undefined : normalized;
 }
 
 const getStyles = (theme: GrafanaTheme2) => ({
