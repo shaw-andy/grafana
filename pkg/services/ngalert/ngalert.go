@@ -255,7 +255,7 @@ func (ng *AlertNG) init() error {
 			User:           ng.Cfg.Smtp.User,
 			Password:       ng.Cfg.Smtp.Password,
 			EhloIdentity:   ng.Cfg.Smtp.EhloIdentity,
-			StartTLSPolicy: ng.Cfg.Smtp.StartTLSPolicy,
+			StartTLSPolicy: ng.Cfg.Smtp.EffectiveStartTLSPolicy(),
 			SkipVerify:     ng.Cfg.Smtp.SkipVerify,
 			StaticHeaders:  ng.Cfg.Smtp.StaticHeaders,
 		}

@@ -162,6 +162,7 @@ func TestSmtpSend(t *testing.T) {
 
 	cfg := createSmtpConfig()
 	cfg.Smtp.Host = fmt.Sprintf("127.0.0.1:%d", srv.PortNumber())
+	cfg.Smtp.StartTLSPolicy = setting.SmtpNoStartTLS
 	cfg.Smtp.EnableTracing = true
 
 	client, err := NewSmtpClient(cfg.Smtp)
@@ -354,6 +355,7 @@ func TestSmtpSendPartialFailure(t *testing.T) {
 
 	cfg := createSmtpConfig()
 	cfg.Smtp.Host = fmt.Sprintf("127.0.0.1:%d", srv.PortNumber())
+	cfg.Smtp.StartTLSPolicy = setting.SmtpNoStartTLS
 
 	client, err := NewSmtpClient(cfg.Smtp)
 	require.NoError(t, err)

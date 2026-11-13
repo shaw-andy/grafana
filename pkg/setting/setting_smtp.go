@@ -27,6 +27,25 @@ type SmtpSettings struct {
 	ContentTypes             []string
 }
 
+const (
+	SmtpNoStartTLS            = "NoStartTLS"
+	SmtpOpportunisticStartTLS = "OpportunisticStartTLS"
+	SmtpMandatoryStartTLS     = "MandatoryStartTLS"
+)
+
+// EffectiveStartTLSPolicy returns the STARTTLS policy mail must be sent with.
+// Sending without TLS is an explicit opt-in: an empty or unrecognized value
+// requires STARTTLS, so a peer that hides the STARTTLS extension cannot get
+// credentials or message bodies in cleartext.
+func (s SmtpSettings) EffectiveStartTLSPolicy() string {
+	switch s.StartTLSPolicy {
+	case SmtpNoStartTLS, SmtpOpportunisticStartTLS:
+		return s.StartTLSPolicy
+	default:
+		return SmtpMandatoryStartTLS
+	}
+}
+
 // validates mail headers
 var mailHeaderRegex = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*(-[A-Z][A-Za-z0-9]*)*$`)
 

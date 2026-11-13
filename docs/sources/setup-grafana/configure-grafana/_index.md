@@ -1570,7 +1570,13 @@ Name to be used as client identity for EHLO in SMTP conversation, default is `<i
 
 #### `startTLS_policy`
 
-Either `OpportunisticStartTLS`, `MandatoryStartTLS`, `NoStartTLS`, or `empty`. Default is `empty`.
+Either `MandatoryStartTLS`, `OpportunisticStartTLS`, `NoStartTLS`, or `empty`. Default is `empty`, which Grafana treats as `MandatoryStartTLS`.
+
+- **`MandatoryStartTLS`:** Grafana upgrades the connection with STARTTLS before it authenticates or sends a message, and aborts delivery if the server doesn't complete STARTTLS. Grafana also applies this policy for an empty or unrecognized value.
+- **`OpportunisticStartTLS`:** Grafana uses STARTTLS only if the server advertises it, and otherwise sends credentials and messages in cleartext.
+- **`NoStartTLS`:** Grafana never uses STARTTLS and sends credentials and messages in cleartext.
+
+Password reset, invite, sign-up, verification, and alert emails contain links and codes that grant account access. Only set `OpportunisticStartTLS` or `NoStartTLS` when the network path to the mail server is already trusted, for example a relay on the same host. This setting doesn't apply when you use port 465, which always uses implicit TLS.
 
 #### `enable_tracing`
 
