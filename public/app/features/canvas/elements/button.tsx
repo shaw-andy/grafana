@@ -1,16 +1,19 @@
 import { css } from '@emotion/css';
-import { useState } from 'react';
+import { type SyntheticEvent, useState } from 'react';
 
-import { type GrafanaTheme2, PluginState } from '@grafana/data';
+import { AppEvents, type GrafanaTheme2, PluginState } from '@grafana/data';
 import { t } from '@grafana/i18n';
+import { type BackendSrvRequest } from '@grafana/runtime';
 import { TextDimensionMode } from '@grafana/schema';
-import { Button, Spinner, useStyles2 } from '@grafana/ui';
+import { Button, ConfirmModal, Spinner, useStyles2 } from '@grafana/ui';
+import { ActionRequestDetails } from '@grafana/ui/internal';
+import { appEvents } from 'app/core/app_events';
 import { type DimensionContext } from 'app/features/dimensions/context';
 import { ColorDimensionEditor } from 'app/features/dimensions/editors/ColorDimensionEditor';
 import { TextDimensionEditor } from 'app/features/dimensions/editors/TextDimensionEditor';
 import { APIEditor, type APIEditorConfig } from 'app/plugins/panel/canvas/editor/element/APIEditor';
 import { type ButtonStyleConfig, ButtonStyleEditor } from 'app/plugins/panel/canvas/editor/element/ButtonStyleEditor';
-import { callApi } from 'app/plugins/panel/canvas/editor/element/utils';
+import { getRequest, sendRequest } from 'app/plugins/panel/canvas/editor/element/utils';
 import { HttpRequestMethod } from 'app/plugins/panel/canvas/panelcfg.gen';
 
 import {
@@ -45,29 +48,76 @@ export const defaultStyleConfig: ButtonStyleConfig = {
   variant: 'primary',
 };
 
+interface PendingApiCall {
+  request: BackendSrvRequest;
+  successMessage?: string;
+}
+
+const stopPropagation = (event: SyntheticEvent) => event.stopPropagation();
+
 const ButtonDisplay = ({ data }: CanvasElementProps<ButtonConfig, ButtonData>) => {
   const styles = useStyles2(getStyles, data);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingCall, setPendingCall] = useState<PendingApiCall | undefined>();
 
   const updateLoadingStateCallback = (loading: boolean) => {
     setIsLoading(loading);
   };
 
   const onClick = () => {
-    if (data?.api && data?.api?.endpoint) {
-      setIsLoading(true);
-      callApi(data.api, updateLoadingStateCallback);
+    if (!data?.api?.endpoint) {
+      return;
+    }
+
+    try {
+      setPendingCall(Object.freeze({ request: getRequest(data.api), successMessage: data.api.successMessage }));
+    } catch (error) {
+      appEvents.emit(AppEvents.alertError, ['An error has occurred. Check console output for more details.']);
+      console.error('API call error: ', error);
     }
   };
 
+  const onConfirm = () => {
+    if (!pendingCall) {
+      return;
+    }
+
+    setPendingCall(undefined);
+    setIsLoading(true);
+    sendRequest(pendingCall.request, pendingCall.successMessage, updateLoadingStateCallback);
+  };
+
   return (
-    <Button type="submit" variant={data?.style?.variant} onClick={onClick} className={styles.button}>
-      <span>
-        {isLoading && <Spinner inline={true} className={styles.buttonSpinner} />}
-        {data?.text}
-      </span>
-    </Button>
+    <>
+      <Button type="submit" variant={data?.style?.variant} onClick={onClick} className={styles.button}>
+        <span>
+          {isLoading && <Spinner inline={true} className={styles.buttonSpinner} />}
+          {data?.text}
+        </span>
+      </Button>
+      {pendingCall && (
+        // The modal is portaled, but its events still bubble to the canvas element's click and key handlers
+        <span role="presentation" onClick={stopPropagation} onKeyDown={stopPropagation}>
+          <ConfirmModal
+            isOpen={true}
+            title={t('canvas.button-item.confirm-title', 'Confirm API call')}
+            body={t('canvas.button-item.confirm-body', 'Do you want to send this request?')}
+            description={
+              <ActionRequestDetails
+                method={pendingCall.request.method ?? HttpRequestMethod.GET}
+                url={pendingCall.request.url}
+                body={typeof pendingCall.request.data === 'string' ? pendingCall.request.data : undefined}
+              />
+            }
+            confirmText={t('canvas.button-item.confirm', 'Confirm')}
+            confirmVariant="primary"
+            onConfirm={onConfirm}
+            onDismiss={() => setPendingCall(undefined)}
+          />
+        </span>
+      )}
+    </>
   );
 };
 

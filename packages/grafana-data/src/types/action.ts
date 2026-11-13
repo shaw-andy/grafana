@@ -28,9 +28,22 @@ export interface ActionModel<T = any> {
   type?: ActionType;
   onClick: (event: any, origin?: any, actionVars?: ActionVariableInput) => void;
   confirmation: (actionVars?: ActionVariableInput) => ReactNode;
+  /**
+   * Builds the request once so it can be shown to the user before it is sent.
+   * `execute` sends exactly the request described by `method`, `url` and `body`.
+   * Returns undefined when the request cannot be built; the error is reported by the implementation.
+   */
+  prepare?: (actionVars?: ActionVariableInput) => PreparedActionRequest | undefined;
   oneClick?: boolean;
   style: ActionButtonCssProperties;
   variables?: ActionVariable[];
+}
+
+export interface PreparedActionRequest {
+  method: string;
+  url: string;
+  body?: string;
+  execute: () => void;
 }
 
 export type ActionVariable = {

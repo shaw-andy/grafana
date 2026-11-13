@@ -16,10 +16,16 @@ export const callApi = (api: APIEditorConfig, updateLoadingStateCallback?: IsLoa
     return;
   }
 
-  const request = getRequest(api);
+  sendRequest(getRequest(api), api.successMessage, updateLoadingStateCallback);
+};
 
+export const sendRequest = (
+  request: BackendSrvRequest,
+  successMessage?: string,
+  updateLoadingStateCallback?: IsLoadingCallback
+) => {
   getBackendSrv()
-    .fetch(request)
+    .fetch({ ...request, headers: request.headers ? { ...request.headers } : undefined })
     .subscribe({
       error: (error) => {
         appEvents.emit(AppEvents.alertError, ['An error has occurred. Check console output for more details.']);
@@ -27,7 +33,7 @@ export const callApi = (api: APIEditorConfig, updateLoadingStateCallback?: IsLoa
         updateLoadingStateCallback && updateLoadingStateCallback(false);
       },
       complete: () => {
-        const message = api.successMessage || 'API call was successful';
+        const message = successMessage || 'API call was successful';
         appEvents.emit(AppEvents.alertSuccess, [message]);
         updateLoadingStateCallback && updateLoadingStateCallback(false);
       },

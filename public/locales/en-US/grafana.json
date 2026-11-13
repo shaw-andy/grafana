@@ -4746,6 +4746,9 @@
     },
     "button-item": {
       "category-button": "Button",
+      "confirm": "Confirm",
+      "confirm-body": "Do you want to send this request?",
+      "confirm-title": "Confirm API call",
       "label": {
         "center": "Center",
         "left": "Left",
@@ -10321,6 +10324,12 @@
         "connection-placeholder": "Select connection",
         "one-click-description": "Only one link or action can have one click enabled at a time"
       }
+    },
+    "action-request-details": {
+      "body": "Body",
+      "description": "This will send the following request using your Grafana session.",
+      "method": "Method",
+      "url": "URL"
     },
     "alert": {
       "close-button": "Close alert"

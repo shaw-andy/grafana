@@ -90,6 +90,7 @@ export { DataLinkSuggestions } from '../components/DataLinks/DataLinkSuggestions
 export { type Props as AlertProps } from '../components/Alert/Alert';
 export { type TooltipPlacement } from '../components/Tooltip/types';
 export { ConfirmContent, type ConfirmContentProps } from '../components/ConfirmModal/ConfirmContent';
+export { ActionRequestDetails } from '../components/Actions/ActionRequestDetails';
 
 export { EmotionPerfTest } from '../components/ThemeDemos/EmotionPerfTest';
 export { ThemeDemo } from '../components/ThemeDemos/ThemeDemo';
