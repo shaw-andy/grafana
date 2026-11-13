@@ -210,6 +210,7 @@ func (cfg *Cfg) setUnifiedStorageConfig() {
 	cfg.IndexWorkers = section.Key("index_workers").MustInt(10)
 	cfg.IndexRebuildWorkers = section.Key("index_rebuild_workers").MustInt(5)
 	cfg.EnableSharding = section.Key("enable_sharding").MustBool(false)
+	cfg.RingAdminToken = section.Key("ring_admin_token").String()
 	cfg.QOSEnabled = section.Key("qos_enabled").MustBool(false)
 	cfg.QOSNumberWorker = section.Key("qos_num_worker").MustInt(16)
 	cfg.QOSMaxSizePerTenant = section.Key("qos_max_size_per_tenant").MustInt(1000)

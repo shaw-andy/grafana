@@ -750,6 +750,7 @@ type Cfg struct {
 	DiskIndexCleanupGracePeriod                time.Duration // Minimum age a candidate folder must have before disk cleanup is allowed to delete it (default: 1h).
 	DiskIndexCleanupUnopenedGracePeriod        time.Duration // Longer grace applied to the newest on-disk index of a resource this pod owns but has not opened. Lets cold-start BuildIndex reuse it instead of rebuilding from scratch (default: 24h).
 	EnableSharding                             bool
+	RingAdminToken                             string // Bearer token required by the /ring, /memberlist and /prepare-downscale HTTP endpoints. Empty refuses every request.
 	QOSEnabled                                 bool
 	QOSNumberWorker                            int
 	QOSMaxSizePerTenant                        int
