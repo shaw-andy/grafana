@@ -63,6 +63,7 @@ func (v *RepositoryValidator) Validate(ctx context.Context, cfg *provisioning.Re
 	// This creates a coupling between RepositoryValidator and Factory that is not ideal from a separation
 	// of concerns perspective, but avoids more extensive refactoring.
 	list = append(list, v.repoFactory.Validate(ctx, cfg)...)
+	list = append(list, validateNoURLUserinfo(cfg)...)
 	if cfg.Spec.Title == "" {
 		list = append(list, field.Required(field.NewPath("spec", "title"), "a repository title must be given"))
 	}
@@ -182,13 +183,44 @@ func (v *RepositoryValidator) validatePrivateEndpoint(ctx context.Context, cfg *
 		return field.ErrorList{
 			field.Invalid(
 				field.NewPath("spec", string(cfg.Spec.Type), "url"),
-				rawURL,
+				provisioning.RemoveURLUserinfo(rawURL),
 				"repository URL host must resolve to a public or allowed address",
 			),
 		}
 	}
 
 	return nil
+}
+
+// validateNoURLUserinfo rejects credentials embedded in repository URLs. The spec is readable
+// by every role allowed to read repositories; credentials belong in secure.token.
+func validateNoURLUserinfo(cfg *provisioning.Repository) field.ErrorList {
+	var list field.ErrorList
+	check := func(path *field.Path, rawURL string) {
+		if provisioning.HasURLUserinfo(rawURL) {
+			list = append(list, field.Invalid(path, provisioning.RemoveURLUserinfo(rawURL),
+				"the URL must not include a username or password; configure credentials in secure.token instead"))
+		}
+	}
+
+	spec := field.NewPath("spec")
+	if c := cfg.Spec.GitHub; c != nil {
+		check(spec.Child("github", "url"), c.URL)
+	}
+	if c := cfg.Spec.GitHubEnterprise; c != nil {
+		check(spec.Child("githubEnterprise", "url"), c.URL)
+		check(spec.Child("githubEnterprise", "serverUrl"), c.ServerURL)
+	}
+	if c := cfg.Spec.Git; c != nil {
+		check(spec.Child("git", "url"), c.URL)
+	}
+	if c := cfg.Spec.Bitbucket; c != nil {
+		check(spec.Child("bitbucket", "url"), c.URL)
+	}
+	if c := cfg.Spec.GitLab; c != nil {
+		check(spec.Child("gitlab", "url"), c.URL)
+	}
+	return list
 }
 
 func hasURLHost(rawURL string) bool {

@@ -112,6 +112,8 @@ func (r *githubRepository) SetBranch(branch string) {
 }
 
 func ParseOwnerRepoGithub(giturl string) (owner string, repo string, err error) {
+	// Parse errors quote their input, so never parse the URL with its userinfo.
+	giturl = provisioning.RemoveURLUserinfo(giturl)
 	giturl = strings.TrimSuffix(giturl, ".git")
 	giturl = strings.TrimSuffix(giturl, "/")
 

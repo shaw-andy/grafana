@@ -191,7 +191,7 @@ func (b *APIBuilder) handleSettings(w http.ResponseWriter, r *http.Request) {
 
 	for i, val := range all {
 		branch := val.Branch()
-		url := val.URL()
+		url := provisioning.RemoveURLUserinfo(val.URL())
 		path := val.Path()
 
 		settings.Items[i] = provisioning.RepositoryView{

@@ -38,11 +38,11 @@ func Validate(_ context.Context, obj runtime.Object, allowInsecure bool) field.E
 	} else {
 		_, _, err := ParseOwnerRepoGithub(gh.URL)
 		if err != nil {
-			list = append(list, field.Invalid(field.NewPath("spec", "github", "url"), gh.URL, err.Error()))
+			list = append(list, field.Invalid(field.NewPath("spec", "github", "url"), provisioning.RemoveURLUserinfo(gh.URL), err.Error()))
 		}
 		// Allow any HTTPS or HTTP GitHub server (github.com, GitHub Enterprise, local instances, etc.)
 		if !strings.HasPrefix(gh.URL, "https://") && !strings.HasPrefix(gh.URL, "http://") {
-			list = append(list, field.Invalid(field.NewPath("spec", "github", "url"), gh.URL, "URL must start with https:// or http://"))
+			list = append(list, field.Invalid(field.NewPath("spec", "github", "url"), provisioning.RemoveURLUserinfo(gh.URL), "URL must start with https:// or http://"))
 		}
 	}
 

@@ -83,6 +83,14 @@ func (f *factory) Build(ctx context.Context, r *provisioning.Repository) (Reposi
 	)
 	defer span.End()
 
+	// Objects stored before admission rejected URL userinfo can still carry it.
+	// Build from a copy without it so no repository, URL it derives, or status it
+	// reports exposes those credentials.
+	if r.HasURLUserinfo() {
+		r = r.DeepCopy()
+		r.RemoveURLUserinfo()
+	}
+
 	for _, e := range f.extras {
 		if e.Type() == r.Spec.Type {
 			if _, enabled := f.enabled[e.Type()]; !enabled {
