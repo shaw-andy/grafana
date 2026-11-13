@@ -259,7 +259,7 @@ export class BackendSrv implements BackendService {
     options = this.parseRequestOptions(options);
 
     const token = loadUrlToken();
-    if (token !== null && token !== '') {
+    if (token !== null && token !== '' && isLocalUrl(options.url)) {
       if (config.jwtUrlLogin && config.jwtHeaderName) {
         options.headers = options.headers ?? {};
         options.headers[config.jwtHeaderName] = `${token}`;
@@ -292,6 +292,14 @@ export class BackendSrv implements BackendService {
     // init retry counter
     options.retry = options.retry ?? 0;
 
+    if (isLocalUrl(options.url) && options.url.startsWith('/')) {
+      const relativeUrl = options.url.substring(1);
+      // Dropping the slash can turn a local path such as "/https://host/" into an absolute external URL.
+      if (isLocalUrl(relativeUrl)) {
+        options.url = relativeUrl;
+      }
+    }
+
     if (isLocalUrl(options.url)) {
       if (orgId) {
         options.headers = options.headers ?? {};
@@ -301,10 +309,6 @@ export class BackendSrv implements BackendService {
       if (!!this.deviceID) {
         options.headers = options.headers ?? {};
         options.headers['X-Grafana-Device-Id'] = `${this.deviceID}`;
-      }
-
-      if (options.url.startsWith('/')) {
-        options.url = options.url.substring(1);
       }
 
       if (options.headers?.Authorization) {

@@ -22,6 +22,18 @@ export function reduceError(error: any) {
   return error;
 }
 
+/**
+ * Returns true when the URL resolves to the origin Grafana is served from, i.e. the request goes
+ * through Grafana's data source proxy rather than straight from the browser to another host.
+ */
+export function isGrafanaOriginUrl(url: string | undefined): boolean {
+  try {
+    return new URL(url ?? '', document.baseURI).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
 export function isGraphiteParserError(e: unknown): e is GraphiteParserError {
   return typeof e === 'object' && e !== null && 'message' in e && 'pos' in e;
 }
