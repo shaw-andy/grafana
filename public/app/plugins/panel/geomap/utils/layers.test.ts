@@ -17,7 +17,6 @@ import {
   type MapLayerHandler,
   type MapLayerOptions,
   type PanelData,
-  textUtil,
   type TimeRange,
 } from '@grafana/data';
 import { config } from '@grafana/runtime';
@@ -197,7 +196,6 @@ describe('initLayer', () => {
   });
 
   it('sanitizes the attribution config', async () => {
-    const spy = jest.spyOn(textUtil, 'sanitizeTextPanelContent').mockReturnValue('SANITIZED');
     const panel = createPanel();
     getIfExists.mockReturnValue({
       id: 'markers',
@@ -211,13 +209,11 @@ describe('initLayer', () => {
       {
         type: 'markers',
         name: 'x',
-        config: { attribution: '<script>alert(1)</script>' },
+        config: { attribution: '© Tiles<img src="/logout"><script>alert(1)</script>' },
       } as MapLayerOptions
     );
 
-    expect(spy).toHaveBeenCalledWith('<script>alert(1)</script>');
-    expect((state.options.config as { attribution?: string })?.attribution).toBe('SANITIZED');
-    spy.mockRestore();
+    expect((state.options.config as { attribution?: string })?.attribution).toBe('© Tiles');
   });
 
   it('falls back to the markers layer when no type is provided', async () => {
@@ -319,12 +315,12 @@ describe('initLayer', () => {
       const child = new TileLayer({
         source: new XYZ({
           url: 'http://x/{z}/{x}/{y}',
-          attributions: '<img src="x" onerror="window.__pwned = 1">',
+          attributions: '© Style<img src="/logout" onerror="window.__pwned = 1">',
         }),
       });
       group.getLayers().push(child);
 
-      expect(attributionOf(child)).toEqual(['<img src="x">']);
+      expect(attributionOf(child)).toEqual(['© Style']);
     });
   });
 });

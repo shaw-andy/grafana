@@ -3,7 +3,7 @@ import type BaseLayer from 'ol/layer/Base';
 import LayerGroup from 'ol/layer/Group';
 import WebGLPointsLayer from 'ol/layer/WebGLPoints';
 
-import { getFrameMatchers, type MapLayerHandler, type MapLayerOptions, type PanelData, textUtil } from '@grafana/data';
+import { getFrameMatchers, type MapLayerHandler, type MapLayerOptions, type PanelData } from '@grafana/data';
 import { config } from '@grafana/runtime';
 
 import { type GeomapPanel } from '../GeomapPanel';
@@ -11,7 +11,12 @@ import { MARKERS_LAYER_ID } from '../layers/data/markersLayer';
 import { DEFAULT_BASEMAP_CONFIG, geomapLayerRegistry } from '../layers/registry';
 import { type MapLayerState } from '../types';
 
-import { captureLayerAttribution, guardLayerAttribution, updateAttributionVisibility } from './attribution';
+import {
+  captureLayerAttribution,
+  guardLayerAttribution,
+  sanitizeAttribution,
+  updateAttributionVisibility,
+} from './attribution';
 import { getNextLayerName } from './utils';
 
 const layerStateMap = new WeakMap<BaseLayer, MapLayerState>();
@@ -127,7 +132,7 @@ export async function initLayer(
   }
 
   if (options.config?.attribution) {
-    options.config.attribution = textUtil.sanitizeTextPanelContent(options.config.attribution);
+    options.config.attribution = sanitizeAttribution(options.config.attribution);
   }
 
   const handler = await item.create(map, options, panel.props.eventBus, config.theme2);
