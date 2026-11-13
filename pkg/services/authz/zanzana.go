@@ -24,7 +24,6 @@ import (
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	healthv1pb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -315,20 +314,21 @@ func unaryRetryInstrument(metric *prometheus.CounterVec) grpc.UnaryClientInterce
 
 // NewRemoteZanzanaClient creates a new Zanzana client that connects to remote Zanzana server.
 func NewRemoteZanzanaClient(cfg ZanzanaClientConfig, reg prometheus.Registerer) (zanzana.Client, error) {
+	// Every call carries an access token, so the connection must never be plaintext.
+	if cfg.ServerCertFile == "" {
+		return nil, errors.New("zanzana client mode requires [zanzana.client] tls_cert to be set")
+	}
+	transportCredentials, err := credentials.NewClientTLSFromFile(cfg.ServerCertFile, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize TLS certificate: %w", err)
+	}
+
 	tokenClient, err := authnlib.NewTokenExchangeClient(authnlib.TokenExchangeConfig{
 		Token:            cfg.Token,
 		TokenExchangeURL: cfg.TokenExchangeURL,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create token exchange client: %w", err)
-	}
-
-	transportCredentials := insecure.NewCredentials()
-	if cfg.ServerCertFile != "" {
-		transportCredentials, err = credentials.NewClientTLSFromFile(cfg.ServerCertFile, "")
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize TLS certificate: %w", err)
-		}
 	}
 
 	authzRequestDuration := promauto.With(reg).NewHistogramVec(prometheus.HistogramOpts{

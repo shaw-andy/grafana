@@ -15,7 +15,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/client-go/rest"
 
 	authnlib "github.com/grafana/authlib/authn"
@@ -284,20 +283,21 @@ type remoteRBACClient struct {
 }
 
 func newRemoteRBACClient(clientCfg *authzClientSettings, tracer trace.Tracer, reg prometheus.Registerer) (*remoteRBACClient, error) {
+	// Every call carries an access token, so the connection must never be plaintext.
+	if clientCfg.certFile == "" {
+		return nil, errors.New("authorization cloud mode requires [authorization] cert_file to be set")
+	}
+	transportCreds, err := credentials.NewClientTLSFromFile(clientCfg.certFile, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load TLS credentials: %w", err)
+	}
+
 	tokenClient, err := authnlib.NewTokenExchangeClient(authnlib.TokenExchangeConfig{
 		Token:            clientCfg.token,
 		TokenExchangeURL: clientCfg.tokenExchangeURL,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize token exchange client: %w", err)
-	}
-
-	transportCreds := insecure.NewCredentials()
-	if clientCfg.certFile != "" {
-		transportCreds, err = credentials.NewClientTLSFromFile(clientCfg.certFile, "")
-		if err != nil {
-			return nil, fmt.Errorf("failed to load TLS credentials: %w", err)
-		}
 	}
 
 	authzRequestDuration := promauto.With(reg).NewHistogramVec(prometheus.HistogramOpts{
