@@ -193,14 +193,15 @@ describe('AnnotationsPlugin', () => {
         jest.restoreAllMocks();
       });
 
-      it.each([userEvent.hover, userEvent.click])('avatar', async (event) => {
+      it.each([userEvent.hover, userEvent.click])('does not render images embedded in the text', async (event) => {
         setUp({ annotations: [frame] });
         const firstMarker = screen.queryAllByTestId(selectors.pages.Dashboard.Annotations.marker)[0];
         expect(firstMarker).toBeVisible();
         await event(firstMarker);
         expect(screen.queryByTestId('mock-annotation-title')).toBeVisible();
         expect(screen.queryByTestId('mock-annotation-text')).toBeVisible();
-        expect(screen.queryByTestId('mock-annotation-text')?.querySelector('img')).toBeVisible();
+        expect(screen.queryByTestId('mock-annotation-text')).toHaveTextContent('Declared by Batman');
+        expect(screen.queryByTestId('mock-annotation-text')?.querySelector('img')).toBeNull();
       });
       it.each([userEvent.hover, userEvent.click])('text', async (event) => {
         setUp({ annotations: [frame] });

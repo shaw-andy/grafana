@@ -279,7 +279,8 @@ func buildAnnotationTextAndData(rule history_model.RuleMeta, currentState *state
 	labels := removePrivateLabels(currentState.Labels)
 	tags := convertLabelsToTagsWithLogger(labels, maxTagsLength, logger)
 
-	return fmt.Sprintf("%s {%s} - %s", rule.Title, labels.String(), value), jsonData, tags
+	text := annotations.SanitizeText(fmt.Sprintf("%s {%s} - %s", rule.Title, labels.String(), value))
+	return text, jsonData, tags
 }
 
 func jsonifyValues(vs map[string]float64) *simplejson.Json {

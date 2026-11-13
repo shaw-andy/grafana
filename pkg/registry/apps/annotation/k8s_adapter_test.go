@@ -213,6 +213,22 @@ func TestK8sAdapter_Create(t *testing.T) {
 		assert.Equal(t, created.Spec.Time, *created.Spec.TimeEnd)
 	})
 
+	t.Run("removes resource-loading markup from text", func(t *testing.T) {
+		adapter := newTestAdapter(NewMemoryStore(), allowAll)
+		ctx := k8srequest.WithNamespace(identity.WithServiceIdentityContext(t.Context(), 1), ns)
+
+		obj := &annotationV0.Annotation{
+			ObjectMeta: metav1.ObjectMeta{Name: "media", Namespace: ns},
+			Spec:       annotationV0.AnnotationSpec{Text: `deploy <img src="/api/x"><b>v2</b>`, Time: 1000},
+		}
+		_, err := adapter.Create(ctx, obj, nil, &metav1.CreateOptions{})
+		require.NoError(t, err)
+
+		got, err := adapter.Get(ctx, "media", &metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, "deploy <b>v2</b>", got.(*annotationV0.Annotation).Spec.Text)
+	})
+
 	t.Run("preserves caller-supplied timeEnd", func(t *testing.T) {
 		adapter := newTestAdapter(NewMemoryStore(), allowAll)
 		ctx := k8srequest.WithNamespace(identity.WithServiceIdentityContext(t.Context(), 1), ns)
@@ -479,6 +495,21 @@ func TestK8sAdapter_Update(t *testing.T) {
 		got, err := adapter.Get(ctx, "anno", &metav1.GetOptions{})
 		require.NoError(t, err)
 		assert.Equal(t, `{"foo":"bar"}`, testGetLegacyData(t, got.(*annotationV0.Annotation)))
+	})
+
+	t.Run("removes resource-loading markup from text", func(t *testing.T) {
+		adapter, ctx := seedWithData(t)
+
+		incoming := &annotationV0.Annotation{
+			ObjectMeta: metav1.ObjectMeta{Name: "anno", Namespace: ns},
+			Spec:       annotationV0.AnnotationSpec{Text: `updated <video poster="/api/x"></video>`, Time: 1000, TimeEnd: ptr.To(int64(1000))},
+		}
+		_, _, err := adapter.Update(ctx, "anno", &updatedObjectInfo{obj: incoming}, nil, nil, false, &metav1.UpdateOptions{})
+		require.NoError(t, err)
+
+		got, err := adapter.Get(ctx, "anno", &metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, "updated ", got.(*annotationV0.Annotation).Spec.Text)
 	})
 
 	t.Run("clears legacy data when the update supplies an empty value", func(t *testing.T) {

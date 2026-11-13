@@ -151,6 +151,7 @@ func (a *sqlAdapter) Create(ctx context.Context, anno *annotationV0.Annotation) 
 
 	created := anno.DeepCopy()
 	created.Name = fmt.Sprintf("a-%d", item.ID)
+	created.Spec.Text = item.Text
 
 	return created, nil
 }
@@ -168,7 +169,9 @@ func (a *sqlAdapter) Update(ctx context.Context, anno *annotationV0.Annotation) 
 		return nil, err
 	}
 
-	return anno, nil
+	updated := anno.DeepCopy()
+	updated.Spec.Text = item.Text
+	return updated, nil
 }
 
 func (a *sqlAdapter) Delete(ctx context.Context, namespace, name string) error {
@@ -266,7 +269,7 @@ func (a *sqlAdapter) toK8sResource(item *annotations.ItemDTO, namespace string) 
 
 func (a *sqlAdapter) fromK8sResource(anno *annotationV0.Annotation) *annotations.Item {
 	item := &annotations.Item{
-		Text:  anno.Spec.Text,
+		Text:  annotations.SanitizeText(anno.Spec.Text),
 		Epoch: anno.Spec.Time,
 		Tags:  anno.Spec.Tags,
 	}

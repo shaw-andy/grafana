@@ -148,7 +148,7 @@ func (hs *HTTPServer) PostAnnotation(c *contextmodel.ReqContext) response.Respon
 		PanelID:      cmd.PanelId,
 		Epoch:        cmd.Time,
 		EpochEnd:     cmd.TimeEnd,
-		Text:         cmd.Text,
+		Text:         annotations.SanitizeText(cmd.Text),
 		Data:         cmd.Data,
 		Tags:         cmd.Tags,
 	}
@@ -188,7 +188,7 @@ func (hs *HTTPServer) PostGraphiteAnnotation(c *contextmodel.ReqContext) respons
 		return response.Error(http.StatusBadRequest, "Failed to save Graphite annotation", err)
 	}
 
-	text := annotationapp.FormatGraphiteText(cmd.What, cmd.Data)
+	text := annotations.SanitizeText(annotationapp.FormatGraphiteText(cmd.What, cmd.Data))
 	userID, _ := identity.UserIdentifier(c.GetID())
 	item := annotations.Item{
 		OrgID:  c.GetOrgID(),
@@ -243,7 +243,7 @@ func (hs *HTTPServer) UpdateAnnotation(c *contextmodel.ReqContext) response.Resp
 		ID:       annotationID,
 		Epoch:    cmd.Time,
 		EpochEnd: cmd.TimeEnd,
-		Text:     cmd.Text,
+		Text:     annotations.SanitizeText(cmd.Text),
 		Tags:     cmd.Tags,
 	}
 	// Data is omitted unless supplied; the repository preserves the stored value.
@@ -308,7 +308,7 @@ func (hs *HTTPServer) PatchAnnotation(c *contextmodel.ReqContext) response.Respo
 		existing.Tags = cmd.Tags
 	}
 	if cmd.Text != "" {
-		existing.Text = cmd.Text
+		existing.Text = annotations.SanitizeText(cmd.Text)
 	}
 	if cmd.Time > 0 {
 		existing.Epoch = cmd.Time

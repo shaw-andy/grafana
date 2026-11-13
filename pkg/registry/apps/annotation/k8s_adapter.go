@@ -28,6 +28,7 @@ import (
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/services/annotations"
 	"github.com/grafana/grafana/pkg/util"
 )
 
@@ -268,6 +269,8 @@ func (s *k8sRESTAdapter) Create(ctx context.Context,
 		return nil, err
 	}
 
+	annotation.Spec.Text = annotations.SanitizeText(annotation.Spec.Text)
+
 	if annotation.Spec.TimeEnd == nil {
 		annotation.Spec.TimeEnd = new(annotation.Spec.Time)
 	}
@@ -377,6 +380,8 @@ func (s *k8sRESTAdapter) Update(ctx context.Context,
 	if err := validateUpdate(existing, resource); err != nil {
 		return nil, false, err
 	}
+
+	resource.Spec.Text = annotations.SanitizeText(resource.Spec.Text)
 
 	// Preserve legacy data when the caller omits it, mirroring the legacy API's behavior.
 	// An absent annotation keeps the stored value, while a present annotation overwrites or clears it.

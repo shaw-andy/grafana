@@ -1,4 +1,11 @@
-import { sanitizeTextPanelContent, sanitizeUrl, sanitize, validatePath, PathValidationError } from './sanitize';
+import {
+  sanitizeTextPanelContent,
+  sanitizeUrl,
+  sanitize,
+  sanitizeWithoutResourceLoading,
+  validatePath,
+  PathValidationError,
+} from './sanitize';
 
 describe('sanitizeTextPanelContent', () => {
   it('should allow whitelisted styles in text panel', () => {
@@ -90,6 +97,46 @@ describe('sanitize', () => {
       const str = sanitize(html);
       expect(str).toBe('<a href="https://example.com">Link</a>');
     });
+  });
+
+  it('should keep images', () => {
+    expect(sanitize('<img src="/avatar.png">')).toBe('<img src="/avatar.png">');
+  });
+});
+
+describe('sanitizeWithoutResourceLoading', () => {
+  it.each([
+    ['image', 'note <img src="/api/x" alt="">'],
+    ['image alias', 'note <image src="/api/x">'],
+    ['entity-encoded image path', 'note <img src="&#47;api&#47;x">'],
+    ['image srcset', 'note <img srcset="/api/x 1x">'],
+    ['picture source', 'note <picture><source srcset="/api/x"></picture>'],
+    ['audio', 'note <audio src="/api/x"></audio>'],
+    ['audio source', 'note <audio><source src="/api/x"></audio>'],
+    ['video poster', 'note <video poster="/api/x"></video>'],
+    ['video track', 'note <video><track src="/api/x"></video>'],
+    ['svg image', 'note <svg><image href="/api/x"></image></svg>'],
+    ['stylesheet', 'note <style>@import "/api/x";</style>'],
+    ['inline style', 'note <span style="background-image:url(/api/x)"></span>'],
+    ['table background', 'note <table background="/api/x"></table>'],
+    ['input image', 'note <input type="image" src="/api/x">'],
+  ])('should remove %s', (_label, html) => {
+    const str = sanitizeWithoutResourceLoading(html);
+    expect(str).toContain('note');
+    expect(str).not.toContain('/api/x');
+  });
+
+  it('should keep formatting and links', () => {
+    const html = '<b>deploy</b> <a href="/d/abc" target="_blank">dashboard</a>';
+    expect(sanitizeWithoutResourceLoading(html)).toBe(
+      '<b>deploy</b> <a href="/d/abc" target="_blank" rel="noopener noreferrer">dashboard</a>'
+    );
+  });
+
+  it('should sanitize xss payload', () => {
+    expect(sanitizeWithoutResourceLoading('<script>alert(1)</script><a href="javascript:alert(1)">x</a>')).toBe(
+      '<a>x</a>'
+    );
   });
 });
 

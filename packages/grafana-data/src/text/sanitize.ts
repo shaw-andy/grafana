@@ -59,6 +59,23 @@ const sanitizeTextPanelWhitelist = new xss.FilterXSS({
  * We don't allow form or input elements.
  */
 export function sanitize(unsanitizedString: string): string {
+  return sanitizeHtml(unsanitizedString, [], []);
+}
+
+// Elements and attributes that make the browser request a URL as soon as the content is rendered.
+const RESOURCE_LOADING_TAGS = ['audio', 'img', 'picture', 'source', 'style', 'track', 'video'];
+const RESOURCE_LOADING_ATTRS = ['background', 'poster', 'src', 'srcset', 'style'];
+
+/**
+ * Like `sanitize`, but also removes images, audio, video, stylesheets and inline styles.
+ * Use it for content written by one user and rendered for another, where any request the
+ * browser makes on render would carry the viewer's session.
+ */
+export function sanitizeWithoutResourceLoading(unsanitizedString: string): string {
+  return sanitizeHtml(unsanitizedString, RESOURCE_LOADING_TAGS, RESOURCE_LOADING_ATTRS);
+}
+
+function sanitizeHtml(unsanitizedString: string, forbidTags: string[], forbidAttrs: string[]): string {
   try {
     DOMPurify.addHook('afterSanitizeAttributes', (node) => {
       if (node.tagName === 'A' && node.getAttribute('target') === '_blank') {
@@ -68,7 +85,8 @@ export function sanitize(unsanitizedString: string): string {
 
     return DOMPurify.sanitize(unsanitizedString, {
       USE_PROFILES: { html: true },
-      FORBID_TAGS: ['form', 'input'],
+      FORBID_TAGS: ['form', 'input', ...forbidTags],
+      FORBID_ATTR: forbidAttrs,
       ADD_ATTR: ['target'],
     });
   } catch (error) {
@@ -183,6 +201,7 @@ export const textUtil = {
   escapeHtml,
   hasAnsiCodes,
   sanitize,
+  sanitizeWithoutResourceLoading,
   sanitizeTextPanelContent,
   sanitizeUrl,
   sanitizeSVGContent,

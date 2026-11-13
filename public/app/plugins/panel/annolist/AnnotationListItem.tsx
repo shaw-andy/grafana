@@ -1,9 +1,9 @@
 import { css } from '@emotion/css';
 import { type MouseEvent } from 'react';
 
-import { type AnnotationEvent, type DateTimeInput, type GrafanaTheme2, type PanelProps } from '@grafana/data';
+import { type AnnotationEvent, type DateTimeInput, type GrafanaTheme2, type PanelProps, textUtil } from '@grafana/data';
 import { Trans } from '@grafana/i18n';
-import { RenderUserContentAsHTML, TagList, Tooltip, useStyles2 } from '@grafana/ui';
+import { TagList, Tooltip, useStyles2 } from '@grafana/ui';
 
 import { type Options } from './panelcfg.gen';
 
@@ -54,7 +54,10 @@ export const AnnotationListItem = ({ options, annotation, formatDate, onClick, o
         }
       }}
     >
-      <RenderUserContentAsHTML className={styles.heading} content={text} />
+      <span
+        className={styles.heading}
+        dangerouslySetInnerHTML={{ __html: textUtil.sanitizeWithoutResourceLoading(text) }}
+      />
       {showTimeStamp && (
         <div className={styles.timestamp}>
           <TimeStamp formatDate={formatDate} time={time!} />
