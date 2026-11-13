@@ -53,7 +53,7 @@ import {
   type MetricTankRequestMeta,
   type MetricTankSeriesMeta,
 } from './types';
-import { reduceError } from './utils';
+import { isGrafanaOriginUrl, reduceError } from './utils';
 import { DEFAULT_GRAPHITE_VERSION } from './versions';
 
 const GRAPHITE_TAG_COMPARATORS = {
@@ -378,7 +378,7 @@ export class GraphiteDatasource
   }
 
   addTracingHeaders(httpOptions: BackendSrvRequest, options: Partial<DataQueryRequest<GraphiteQuery>>) {
-    const proxyMode = !this.url?.match(/^http/);
+    const proxyMode = isGrafanaOriginUrl(this.url);
     if (!httpOptions.headers) {
       httpOptions.headers = {};
     }

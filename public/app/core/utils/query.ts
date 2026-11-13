@@ -39,8 +39,19 @@ export function isDataQuery(url: string): boolean {
   return false;
 }
 
+/**
+ * Returns true when the URL resolves to the origin Grafana is served from.
+ *
+ * Requests to local URLs carry the viewer's org and device identifiers, so the decision has to be
+ * made the same way the browser resolves the URL: scheme casing, leading whitespace, protocol-relative
+ * URLs and backslashes must not make an external host look local.
+ */
 export function isLocalUrl(url: string) {
-  return !url.match(/^http/);
+  try {
+    return new URL(url, document.baseURI).origin === window.location.origin;
+  } catch {
+    return false;
+  }
 }
 
 /**

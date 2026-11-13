@@ -402,6 +402,7 @@ func (hs *HTTPServer) AddDataSource(c *contextmodel.ReqContext) response.Respons
 		if resp := validateURL(cmd.Type, cmd.URL); resp != nil {
 			return resp
 		}
+		cmd.URL = datasources.NormalizeURLScheme(cmd.URL)
 	}
 
 	if err := validateJSONData(cmd.JsonData, hs.Cfg); err != nil {
@@ -471,6 +472,7 @@ func (hs *HTTPServer) UpdateDataSourceByID(c *contextmodel.ReqContext) response.
 	if resp := validateURL(cmd.Type, cmd.URL); resp != nil {
 		return resp
 	}
+	cmd.URL = datasources.NormalizeURLScheme(cmd.URL)
 	if err := validateJSONData(cmd.JsonData, hs.Cfg); err != nil {
 		return response.Error(http.StatusBadRequest, "Failed to update datasource", err)
 	}
@@ -516,6 +518,7 @@ func (hs *HTTPServer) UpdateDataSourceByUID(c *contextmodel.ReqContext) response
 	if resp := validateURL(cmd.Type, cmd.URL); resp != nil {
 		return resp
 	}
+	cmd.URL = datasources.NormalizeURLScheme(cmd.URL)
 	if err := validateJSONData(cmd.JsonData, hs.Cfg); err != nil {
 		return response.Error(http.StatusBadRequest, "Failed to update datasource", err)
 	}

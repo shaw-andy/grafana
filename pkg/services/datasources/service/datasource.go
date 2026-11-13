@@ -357,7 +357,7 @@ func (s *Service) AddDataSource(ctx context.Context, cmd *datasources.AddDataSou
 	}
 
 	// The mutable properties
-	cmd.URL = settings.URL
+	cmd.URL = datasources.NormalizeURLScheme(settings.URL)
 	cmd.User = settings.User
 	cmd.BasicAuth = settings.BasicAuthEnabled
 	cmd.BasicAuthUser = settings.BasicAuthUser
@@ -645,7 +645,7 @@ func (s *Service) UpdateDataSource(ctx context.Context, cmd *datasources.UpdateD
 		}
 
 		// The mutable properties
-		cmd.URL = settings.URL
+		cmd.URL = datasources.NormalizeURLScheme(settings.URL)
 		cmd.User = settings.User
 		cmd.BasicAuth = settings.BasicAuthEnabled
 		cmd.BasicAuthUser = settings.BasicAuthUser
