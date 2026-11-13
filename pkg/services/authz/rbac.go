@@ -14,8 +14,6 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/client-go/rest"
 
 	authnlib "github.com/grafana/authlib/authn"
@@ -292,12 +290,9 @@ func newRemoteRBACClient(clientCfg *authzClientSettings, tracer trace.Tracer, re
 		return nil, fmt.Errorf("failed to initialize token exchange client: %w", err)
 	}
 
-	transportCreds := insecure.NewCredentials()
-	if clientCfg.certFile != "" {
-		transportCreds, err = credentials.NewClientTLSFromFile(clientCfg.certFile, "")
-		if err != nil {
-			return nil, fmt.Errorf("failed to load TLS credentials: %w", err)
-		}
+	transportCreds, tokenCreds, err := newRemoteAuthzCredentials(clientCfg.certFile, clientCfg.allowInsecure, clientCfg.tokenNamespace, tokenClient)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load TLS credentials: %w", err)
 	}
 
 	authzRequestDuration := promauto.With(reg).NewHistogramVec(prometheus.HistogramOpts{
@@ -312,9 +307,7 @@ func newRemoteRBACClient(clientCfg *authzClientSettings, tracer trace.Tracer, re
 
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(transportCreds),
-		grpc.WithPerRPCCredentials(
-			NewGRPCTokenAuth(AuthzServiceAudience, clientCfg.tokenNamespace, tokenClient),
-		),
+		grpc.WithPerRPCCredentials(tokenCreds),
 		grpc.WithChainUnaryInterceptor(unaryInterceptors...),
 		grpc.WithChainStreamInterceptor(streamInterceptors...),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),

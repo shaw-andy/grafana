@@ -25,6 +25,7 @@ const (
 type authzClientSettings struct {
 	remoteAddress        string
 	certFile             string
+	allowInsecure        bool
 	mode                 clientMode
 	loadBalancingEnabled bool
 
@@ -56,6 +57,7 @@ func readAuthzClientSettings(cfg *setting.Cfg) (*authzClientSettings, error) {
 
 	s.remoteAddress = authzSection.Key("remote_address").MustString("")
 	s.certFile = authzSection.Key("cert_file").MustString("")
+	s.allowInsecure = authzSection.Key("allow_insecure").MustBool(false)
 
 	s.token = grpcClientAuthSection.Key("token").MustString("")
 	s.tokenNamespace = grpcClientAuthSection.Key("token_namespace").MustString("stacks-" + cfg.StackID)
