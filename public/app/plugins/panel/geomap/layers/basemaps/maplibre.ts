@@ -7,6 +7,12 @@ import { type MapLayerRegistryItem } from '@grafana/data';
 const LAYER_TYPE_BACKGROUND = 'background';
 const PAINT_BACKGROUND_OPACITY = 'background-opacity';
 
+// ol-mapbox-style loads label fonts by adding a stylesheet <link> built from this template and the
+// font names, which bypasses transformRequest and sends cookies. A template without placeholders
+// keeps a style, or the tiles feeding its font expressions, from pointing that link anywhere.
+const WEBFONTS_METADATA = 'ol:webfonts';
+const NO_WEBFONTS = 'data:text/css,';
+
 export interface MaplibreConfig {
   url: string;
   accessToken?: string;
@@ -24,6 +30,54 @@ const defaultMaplibreConfig: MaplibreConfig = {
  */
 function resolveMaplibreConfig(config: Partial<MaplibreConfig> = {}): MaplibreConfig {
   return { ...config, url: config.url || defaultMaplibreConfig.url };
+}
+
+/**
+ * The style URL is chosen by an editor but loaded by every viewer, and the style names further URLs
+ * of its own. None of them may reach Grafana itself, and none may carry the viewer's credentials.
+ */
+function toExternalUrl(url: string): string | undefined {
+  let target: URL;
+  try {
+    target = new URL(url, window.location.href);
+  } catch {
+    return undefined;
+  }
+  return target.origin === window.location.origin ? undefined : target.href;
+}
+
+function transformRequest(url: string, type: string, layerOpacity: number) {
+  const target = toExternalUrl(url);
+  if (!target) {
+    return Response.error();
+  }
+  if (type === 'Style') {
+    return fetchStyle(target, layerOpacity).then((style) => new Response(JSON.stringify(style)));
+  }
+  return new Request(target, { credentials: 'omit' });
+}
+
+async function fetchStyle(url: string, layerOpacity: number) {
+  const res = await fetch(url, { credentials: 'omit' });
+  if (!res.ok) {
+    throw new Error(`Failed to load MapLibre style from ${url}: ${res.status} ${res.statusText}`);
+  }
+  const style = await res.json();
+  if (typeof style !== 'object' || style === null) {
+    throw new Error(`MapLibre style from ${url} is not a JSON object`);
+  }
+
+  // Adjust background opacity - let LayerGroup opacity handle everything else
+  if (Array.isArray(style?.layers)) {
+    for (const l of style.layers) {
+      if (l && l.type === LAYER_TYPE_BACKGROUND) {
+        l.paint = l.paint || {};
+        l.paint[PAINT_BACKGROUND_OPACITY] = layerOpacity;
+      }
+    }
+  }
+  style.metadata = { ...style.metadata, [WEBFONTS_METADATA]: NO_WEBFONTS };
+  return style;
 }
 
 const maplibreLayer: MapLayerRegistryItem<Partial<MaplibreConfig>> = {
@@ -56,41 +110,33 @@ const maplibreLayer: MapLayerRegistryItem<Partial<MaplibreConfig>> = {
         }
       };
 
+      const styleUrl = toExternalUrl(cfg.url);
+      const applyOptions = {
+        accessToken: cfg.accessToken,
+        transformRequest: (url: string, type: string) => transformRequest(url, type, layerOpacity),
+      };
+
       // Handle async operations in the background
       const loadStyle = async () => {
+        if (!styleUrl) {
+          console.warn(`Refusing to load MapLibre style from ${cfg.url}: it must be an external URL`);
+          return;
+        }
         try {
-          const res = await fetch(cfg.url);
-          if (!res.ok) {
-            console.warn(`Failed to load MapLibre style from ${cfg.url}: ${res.status} ${res.statusText}`);
-            // Try fallback approach
-            await tryFallbackApply();
-            return;
-          }
-
-          const style = await res.json();
-
-          // Adjust background opacity - let LayerGroup opacity handle everything else
-          if (Array.isArray(style?.layers)) {
-            for (const l of style.layers) {
-              if (l && l.type === LAYER_TYPE_BACKGROUND) {
-                l.paint = l.paint || {};
-                l.paint[PAINT_BACKGROUND_OPACITY] = layerOpacity;
-              }
-            }
-          }
-
-          await apply(layer, style, { styleUrl: cfg.url, accessToken: cfg.accessToken });
+          const style = await fetchStyle(styleUrl, layerOpacity);
+          await apply(layer, style, { ...applyOptions, styleUrl });
           applyNoRepeat();
         } catch (error) {
-          console.warn('Failed to parse or apply MapLibre style JSON:', error);
+          console.warn('Failed to load or apply MapLibre style JSON:', error);
           // Try fallback approach
-          await tryFallbackApply();
+          await tryFallbackApply(styleUrl);
         }
       };
 
-      const tryFallbackApply = async () => {
+      // ol-mapbox-style resolves mapbox:// style URLs itself, which fetch cannot
+      const tryFallbackApply = async (url: string) => {
         try {
-          await apply(layer, cfg.url, { accessToken: cfg.accessToken });
+          await apply(layer, url, applyOptions);
           applyNoRepeat();
         } catch (fallbackError) {
           console.warn('Failed to load MapLibre style from both JSON and direct URL approaches:', fallbackError);

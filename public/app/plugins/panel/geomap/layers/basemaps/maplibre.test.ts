@@ -1,3 +1,4 @@
+import { waitFor } from '@testing-library/react';
 import type OpenLayersMap from 'ol/Map';
 import LayerGroup from 'ol/layer/Group';
 
@@ -53,14 +54,65 @@ describe('maplibre basemap', () => {
     expect(layer.getOpacity()).toBe(0.4);
   });
 
-  it('fetches the default style URL when no config url is set', async () => {
+  it('fetches the default style URL without credentials when no config url is set', async () => {
     await initLayer({ config: {} });
-    expect(fetch).toHaveBeenCalledWith(DEFAULT_STYLE_URL);
+    expect(fetch).toHaveBeenCalledWith(DEFAULT_STYLE_URL, { credentials: 'omit' });
   });
 
-  it('fetches the configured style URL when one is provided', async () => {
+  it('fetches the configured style URL without credentials when one is provided', async () => {
     const url = 'https://tiles.example.com/style.json';
     await initLayer({ config: { url } });
-    expect(fetch).toHaveBeenCalledWith(url);
+    expect(fetch).toHaveBeenCalledWith(url, { credentials: 'omit' });
+  });
+
+  it.each(['/logout', `${window.location.origin}/logout`, `//${window.location.host}/logout`, ' /logout'])(
+    'does not load a style URL on the Grafana origin: %s',
+    async (url) => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation();
+      await initLayer({ config: { url } });
+      await waitFor(() => expect(warn).toHaveBeenCalled());
+      expect(fetch).not.toHaveBeenCalled();
+      expect(applyMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it('pins the webfont template so the style cannot choose where label fonts load from', async () => {
+    const style = { layers: [], metadata: { 'ol:webfonts': `${window.location.origin}/logout?{font-family}` } };
+    jest.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify(style), { status: 200 }));
+    await initLayer({ config: { url: 'https://tiles.example.com/style.json' } });
+    await waitFor(() => expect(applyMock).toHaveBeenCalled());
+    const [, appliedStyle] = applyMock.mock.calls[0];
+    expect(appliedStyle.metadata['ol:webfonts']).toBe('data:text/css,');
+  });
+
+  describe('resources the style references', () => {
+    async function getTransformRequest() {
+      await initLayer({ config: { url: 'https://tiles.example.com/style.json' } });
+      await waitFor(() => expect(applyMock).toHaveBeenCalled());
+      const [, , applyOptions] = applyMock.mock.calls[0];
+      return applyOptions.transformRequest;
+    }
+
+    it('requests external resources without credentials', async () => {
+      const transformRequest = await getTransformRequest();
+      const request = transformRequest('https://tiles.example.com/sprite.json', 'Sprite');
+      expect(request).toBeInstanceOf(Request);
+      expect(request.url).toBe('https://tiles.example.com/sprite.json');
+      expect(request.credentials).toBe('omit');
+    });
+
+    it.each([
+      `${window.location.origin}/logout`,
+      `${window.location.protocol}//${window.location.host}%5C@tiles.example.com/`,
+    ])('refuses resources on the Grafana origin: %s', async (url) => {
+      const transformRequest = await getTransformRequest();
+      const fetchCalls = jest.mocked(fetch).mock.calls.length;
+      for (const type of ['Style', 'Source', 'Sprite', 'SpriteImage', 'Tiles', 'GeoJSON']) {
+        const result = await transformRequest(decodeURI(url), type);
+        expect(result).toBeInstanceOf(Response);
+        expect(result.type).toBe('error');
+      }
+      expect(fetch).toHaveBeenCalledTimes(fetchCalls);
+    });
   });
 });
