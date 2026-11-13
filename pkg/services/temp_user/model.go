@@ -62,6 +62,12 @@ type CreateTempUserCommand struct {
 type UpdateTempUserStatusCommand struct {
 	Code   string
 	Status TempUserStatus
+
+	// When ExpectedStatus is set, only the temp user with this ID and Code is
+	// updated, and only while it still has ExpectedStatus. ErrTempUserNotFound
+	// is returned if no row was updated.
+	ID             int64
+	ExpectedStatus TempUserStatus
 }
 
 type ExpireTempUsersCommand struct {

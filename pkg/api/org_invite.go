@@ -315,8 +315,11 @@ func (hs *HTTPServer) CompleteInvite(c *contextmodel.ReqContext) response.Respon
 		return response.Error(http.StatusInternalServerError, "failed to publish event", err)
 	}
 
-	if ok, rsp := hs.applyUserInvite(c.Req.Context(), usr, invite, true); !ok {
-		return rsp
+	if err := hs.applyUserInvite(c.Req.Context(), usr, invite, true); err != nil {
+		if errors.Is(err, tempuser.ErrTempUserNotFound) {
+			return response.Error(http.StatusPreconditionFailed, "Invite is no longer pending", nil)
+		}
+		return response.Error(http.StatusInternalServerError, "Failed to apply invite", err)
 	}
 
 	err = hs.loginUserWithUser(usr, c)
@@ -343,28 +346,39 @@ func (hs *HTTPServer) updateTempUserStatus(ctx context.Context, code string, sta
 	return true, nil
 }
 
-func (hs *HTTPServer) applyUserInvite(ctx context.Context, usr *user.User, invite *tempuser.TempUserDTO, setActive bool) (bool, response.Response) {
-	// add to org
+// applyUserInvite must only be called with an invite the caller has already
+// authorized for usr. The invite is claimed by its ID and code before any
+// membership is granted, so it is applied at most once; tempuser.ErrTempUserNotFound
+// is returned if it is no longer pending.
+func (hs *HTTPServer) applyUserInvite(ctx context.Context, usr *user.User, invite *tempuser.TempUserDTO, setActive bool) error {
+	claimCmd := tempuser.UpdateTempUserStatusCommand{
+		ID:             invite.ID,
+		Code:           invite.Code,
+		ExpectedStatus: tempuser.TmpUserInvitePending,
+		Status:         tempuser.TmpUserCompleted,
+	}
+	if err := hs.tempUserService.UpdateTempUserStatus(ctx, &claimCmd); err != nil {
+		return err
+	}
+
 	addOrgUserCmd := org.AddOrgUserCommand{OrgID: invite.OrgID, UserID: usr.ID, Role: invite.Role}
 	if err := hs.orgService.AddOrgUser(ctx, &addOrgUserCmd); err != nil {
 		if !errors.Is(err, org.ErrOrgUserAlreadyAdded) {
-			return false, response.Error(http.StatusInternalServerError, "Error while trying to create org user", err)
+			return fmt.Errorf("add org user: %w", err)
 		}
-	}
-
-	// update temp user status
-	if ok, rsp := hs.updateTempUserStatus(ctx, invite.Code, tempuser.TmpUserCompleted); !ok {
-		return false, rsp
+		updateOrgUserCmd := org.UpdateOrgUserCommand{OrgID: invite.OrgID, UserID: usr.ID, Role: invite.Role}
+		if err := hs.orgService.UpdateOrgUser(ctx, &updateOrgUserCmd); err != nil {
+			return fmt.Errorf("update org user role: %w", err)
+		}
 	}
 
 	if setActive {
-		// set org to active
 		if err := hs.userService.Update(ctx, &user.UpdateUserCommand{OrgID: &invite.OrgID, UserID: usr.ID}); err != nil {
-			return false, response.Error(http.StatusInternalServerError, "Failed to set org as active", err)
+			return fmt.Errorf("set org as active: %w", err)
 		}
 	}
 
-	return true, nil
+	return nil
 }
 
 // swagger:response SMTPNotEnabledError

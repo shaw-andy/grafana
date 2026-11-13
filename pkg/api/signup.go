@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/grafana/grafana/pkg/api/dtos"
 	"github.com/grafana/grafana/pkg/api/response"
@@ -103,9 +104,10 @@ func (hs *HTTPServer) SignUpStep2(c *contextmodel.ReqContext) response.Response 
 		OrgName:  form.OrgName,
 	}
 
-	// verify email
+	var verification *tempuser.TempUserDTO
 	if hs.Cfg.VerifyEmailEnabled {
-		if ok, rsp := hs.verifyUserSignUpEmail(c.Req.Context(), form.Email, form.Code); !ok {
+		var rsp response.Response
+		if verification, rsp = hs.verifyUserSignUpEmail(c.Req.Context(), form.Email, form.Code); rsp != nil {
 			return rsp
 		}
 		createUserCmd.EmailVerified = true
@@ -128,22 +130,18 @@ func (hs *HTTPServer) SignUpStep2(c *contextmodel.ReqContext) response.Response 
 		return response.Error(http.StatusInternalServerError, "Failed to publish event", err)
 	}
 
-	// mark temp user as completed
-	if ok, rsp := hs.updateTempUserStatus(c.Req.Context(), form.Code, tempuser.TmpUserCompleted); !ok {
+	invites, rsp := hs.authorizedSignUpInvites(c.Req.Context(), form, verification)
+	if rsp != nil {
 		return rsp
 	}
 
-	// check for pending invites
-	invitesQuery := tempuser.GetTempUsersQuery{Email: form.Email, Status: tempuser.TmpUserInvitePending}
-	invitesQueryResult, err := hs.tempUserService.GetTempUsersQuery(c.Req.Context(), &invitesQuery)
-	if err != nil {
-		return response.Error(http.StatusInternalServerError, "Failed to query database for invites", err)
-	}
-
 	apiResponse := util.DynMap{"message": "User sign up completed successfully", "code": "redirect-to-landing-page"}
-	for _, invite := range invitesQueryResult {
-		if ok, rsp := hs.applyUserInvite(c.Req.Context(), usr, invite, false); !ok {
-			return rsp
+	for _, invite := range invites {
+		if err := hs.applyUserInvite(c.Req.Context(), usr, invite, false); err != nil {
+			if errors.Is(err, tempuser.ErrTempUserNotFound) {
+				continue
+			}
+			return response.Error(http.StatusInternalServerError, "Failed to apply invite", err)
 		}
 		apiResponse["code"] = "redirect-to-select-org"
 	}
@@ -158,21 +156,97 @@ func (hs *HTTPServer) SignUpStep2(c *contextmodel.ReqContext) response.Response 
 	return response.JSON(http.StatusOK, apiResponse)
 }
 
-func (hs *HTTPServer) verifyUserSignUpEmail(ctx context.Context, email string, code string) (bool, response.Response) {
-	query := tempuser.GetTempUserByCodeQuery{Code: code}
+// authorizedSignUpInvites returns the pending invites the completed sign up is
+// allowed to claim. A verified email address authorizes every pending invite
+// for that address. Without verification, only the invite whose code was
+// submitted is authorized, since the email address alone proves nothing.
+func (hs *HTTPServer) authorizedSignUpInvites(ctx context.Context, form dtos.SignUpStep2Form, verification *tempuser.TempUserDTO) ([]*tempuser.TempUserDTO, response.Response) {
+	if verification != nil {
+		claimCmd := tempuser.UpdateTempUserStatusCommand{
+			ID:             verification.ID,
+			Code:           verification.Code,
+			ExpectedStatus: tempuser.TmpUserSignUpStarted,
+			Status:         tempuser.TmpUserCompleted,
+		}
+		if err := hs.tempUserService.UpdateTempUserStatus(ctx, &claimCmd); err != nil {
+			if errors.Is(err, tempuser.ErrTempUserNotFound) {
+				return nil, nil
+			}
+			return nil, response.Error(http.StatusInternalServerError, "Failed to update sign up status", err)
+		}
 
-	queryResult, err := hs.tempUserService.GetTempUserByCode(ctx, &query)
+		invitesQuery := tempuser.GetTempUsersQuery{Email: verification.Email, Status: tempuser.TmpUserInvitePending}
+		invites, err := hs.tempUserService.GetTempUsersQuery(ctx, &invitesQuery)
+		if err != nil {
+			return nil, response.Error(http.StatusInternalServerError, "Failed to query database for invites", err)
+		}
+		return invites, nil
+	}
+
+	if form.Code == "" {
+		return nil, nil
+	}
+
+	tempUser, err := hs.tempUserService.GetTempUserByCode(ctx, &tempuser.GetTempUserByCodeQuery{Code: form.Code})
 	if err != nil {
 		if errors.Is(err, tempuser.ErrTempUserNotFound) {
-			return false, response.Error(http.StatusNotFound, "Invalid email verification code", nil)
+			return nil, nil
 		}
-		return false, response.Error(http.StatusInternalServerError, "Failed to read temp user", err)
+		return nil, response.Error(http.StatusInternalServerError, "Failed to read temp user", err)
 	}
 
-	tempUser := queryResult
+	if !sameEmailAddress(tempUser.Email, form.Email) {
+		return nil, nil
+	}
+
+	switch tempUser.Status {
+	case tempuser.TmpUserInvitePending:
+		return []*tempuser.TempUserDTO{tempUser}, nil
+	case tempuser.TmpUserSignUpStarted:
+		claimCmd := tempuser.UpdateTempUserStatusCommand{
+			ID:             tempUser.ID,
+			Code:           tempUser.Code,
+			ExpectedStatus: tempuser.TmpUserSignUpStarted,
+			Status:         tempuser.TmpUserCompleted,
+		}
+		if err := hs.tempUserService.UpdateTempUserStatus(ctx, &claimCmd); err != nil && !errors.Is(err, tempuser.ErrTempUserNotFound) {
+			return nil, response.Error(http.StatusInternalServerError, "Failed to update sign up status", err)
+		}
+	}
+
+	return nil, nil
+}
+
+func sameEmailAddress(a, b string) bool {
+	normalizedA, err := ValidateAndNormalizeEmail(a)
+	if err != nil {
+		return false
+	}
+	normalizedB, err := ValidateAndNormalizeEmail(b)
+	if err != nil {
+		return false
+	}
+	return normalizedA != "" && strings.EqualFold(normalizedA, normalizedB)
+}
+
+func (hs *HTTPServer) verifyUserSignUpEmail(ctx context.Context, email string, code string) (*tempuser.TempUserDTO, response.Response) {
+	query := tempuser.GetTempUserByCodeQuery{Code: code}
+
+	tempUser, err := hs.tempUserService.GetTempUserByCode(ctx, &query)
+	if err != nil {
+		if errors.Is(err, tempuser.ErrTempUserNotFound) {
+			return nil, response.Error(http.StatusNotFound, "Invalid email verification code", nil)
+		}
+		return nil, response.Error(http.StatusInternalServerError, "Failed to read temp user", err)
+	}
+
+	if tempUser.Status != tempuser.TmpUserSignUpStarted {
+		return nil, response.Error(http.StatusNotFound, "Invalid email verification code", nil)
+	}
+
 	if tempUser.Email != email {
-		return false, response.Error(http.StatusNotFound, "Email verification code does not match email", nil)
+		return nil, response.Error(http.StatusNotFound, "Email verification code does not match email", nil)
 	}
 
-	return true, nil
+	return tempUser, nil
 }
