@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/grafana/dskit/services"
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/middleware"
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
@@ -115,12 +116,17 @@ func (s *instrumentationService) newInstrumentationServer() (*http.Server, *mux.
 
 	RegisterHealthEndpoints(router, s.healthNotifier)
 
+	var handler http.Handler = router
+	if s.cfg.EnforceDomain {
+		handler = middleware.ValidateHostHeader(s.cfg)(router)
+	}
+
 	addr := net.JoinHostPort(s.cfg.HTTPAddr, s.cfg.HTTPPort)
 	srv := &http.Server{
 		// 5s timeout for header reads to avoid Slowloris attacks (https://thetooth.io/blog/slowloris-attack/)
 		ReadHeaderTimeout: 5 * time.Second,
 		Addr:              addr,
-		Handler:           router,
+		Handler:           handler,
 	}
 
 	return srv, router

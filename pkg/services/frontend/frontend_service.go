@@ -176,6 +176,10 @@ func (s *frontendService) addMiddlewares(m *web.Mux) {
 	m.UseMiddleware(s.contextMiddleware())
 	m.UseMiddleware(loggermiddleware.Middleware())
 
+	if s.cfg.EnforceDomain {
+		m.UseMiddleware(middleware.ValidateHostHeader(s.cfg))
+	}
+
 	// Must run before CSP middleware since CSP reads config from context
 	m.UseMiddleware(RequestConfigMiddleware(s.cfg, s.license, s.settingsService, s.pluginsCDN))
 

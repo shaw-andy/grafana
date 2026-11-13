@@ -237,7 +237,6 @@ To configure Grafana HTTPS and restart Grafana, complete the following steps.
    root_url = https://subdomain.mysite.com:3000
    cert_key = /etc/grafana/grafana.key
    cert_file = /etc/grafana/grafana.crt
-   enforce_domain = False
    protocol = https
    ```
 

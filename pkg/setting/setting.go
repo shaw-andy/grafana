@@ -163,6 +163,10 @@ type Cfg struct {
 	EnforceDomain     bool
 	MinTLSVersion     string
 
+	// EnforceDomainAllowedHosts are extra Host names accepted when EnforceDomain
+	// is on. A leading "*." matches any subdomain.
+	EnforceDomainAllowedHosts []string
+
 	// FrontendDevServerURL is the origin of the frontend bundler's dev server. Empty unless
 	// Env is Dev. See readFrontendDevSettings.
 	FrontendDevServerURL string
@@ -2384,7 +2388,8 @@ func (cfg *Cfg) readServerSettings(iniFile *ini.File) error {
 	cfg.RouterLogging = server.Key("router_logging").MustBool(false)
 
 	cfg.EnableGzip = server.Key("enable_gzip").MustBool(true)
-	cfg.EnforceDomain = server.Key("enforce_domain").MustBool(false)
+	cfg.EnforceDomain = server.Key("enforce_domain").MustBool(true)
+	cfg.EnforceDomainAllowedHosts = util.SplitString(server.Key("enforce_domain_allowed_hosts").String())
 	staticRoot := valueAsString(server, "static_root_path", "")
 	cfg.StaticRootPath = makeAbsolute(staticRoot, cfg.HomePath)
 

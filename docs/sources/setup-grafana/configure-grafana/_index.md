@@ -278,7 +278,17 @@ This setting is only used in as a part of the `root_url` setting (see below). Im
 
 #### `enforce_domain`
 
-Redirect to correct domain if the host header does not match the domain. Prevents DNS rebinding attacks. Default is `false`.
+Redirect to correct domain if the host header does not match the domain. Prevents DNS rebinding attacks. Default is `true`.
+
+The check runs before every route, including `/metrics`, `/api/health`, and `/healthz`.
+Grafana always accepts requests addressed to an IP address, to `localhost`, to `domain`, to the host of `root_url`, to `http_addr`, or to the host of the `[rendering]` `callback_url`.
+
+If a reverse proxy, load balancer, or service discovery reaches Grafana under another host name, add that name to `enforce_domain_allowed_hosts` instead of turning off this setting.
+
+#### `enforce_domain_allowed_hosts`
+
+Additional host names that Grafana accepts when `enforce_domain` is `true`, separated by comma or space.
+A leading `*.` matches any subdomain, for example `*.example.com`. Default is empty.
 
 #### `root_url`
 
