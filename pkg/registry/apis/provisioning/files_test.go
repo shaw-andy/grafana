@@ -18,6 +18,10 @@ import (
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 )
 
 func TestCheckQuota(t *testing.T) {
@@ -169,7 +173,7 @@ func TestHandleDirectoryListing_RefNotFoundMapsTo404(t *testing.T) {
 	mockReadWriter := repository.NewMockReaderWriter(t)
 	mockReadWriter.EXPECT().ReadTree(mock.Anything, "test-panel").Return([]repository.FileTreeEntry(nil), wrappedErr)
 
-	connector := &filesConnector{access: mockAccess}
+	connector := &filesConnector{access: mockAccess, readFallbackAccess: mockAccess}
 	responder := &fakeResponder{}
 
 	connector.handleDirectoryListing(
@@ -177,6 +181,7 @@ func TestHandleDirectoryListing_RefNotFoundMapsTo404(t *testing.T) {
 		"test-repo",
 		resources.DualWriteOptions{Path: "", Ref: "test-panel"},
 		mockReadWriter,
+		nil,
 		responder,
 	)
 
@@ -612,7 +617,7 @@ func TestHandleGetRawFile_FolderScopedAuth(t *testing.T) {
 		mockAccess := auth.NewMockAccessChecker(t)
 
 		repo := &provisioningapi.Repository{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-repo"},
+			ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "default"},
 			Spec: provisioningapi.RepositorySpec{
 				Sync: provisioningapi.SyncOptions{Target: provisioningapi.SyncTargetTypeFolder},
 			},
@@ -624,7 +629,19 @@ func TestHandleGetRawFile_FolderScopedAuth(t *testing.T) {
 			Check(mock.Anything, mock.Anything, mock.Anything).
 			Return(apierrors.NewForbidden(provisioningapi.RepositoryResourceInfo.GroupResource(), "team-a", errors.New("denied")))
 
-		authorizer := resources.NewAuthorizer(repo, mockReadWriter, mockAccess, resources.NewMockResourceClients(t), false)
+		// The denied folder exists in Grafana, so no role fallback may apply.
+		folderID := resources.ParseFolder("team-a/", repo.Name).ID
+		existingFolder := &unstructured.Unstructured{}
+		existingFolder.SetGroupVersionKind(resources.FolderKind)
+		existingFolder.SetNamespace(repo.Namespace)
+		existingFolder.SetName(folderID)
+		folderGVR := resources.FolderResource
+		dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+			map[schema.GroupVersionResource]string{folderGVR: resources.FolderKind.Kind + "List"}, existingFolder)
+		mockClients := resources.NewMockResourceClients(t)
+		mockClients.EXPECT().Folder(mock.Anything).Return(dynamicClient.Resource(folderGVR).Namespace(repo.Namespace), resources.FolderKind, nil)
+
+		authorizer := resources.NewAuthorizer(repo, mockReadWriter, mockAccess, mockClients, false)
 		connector := &filesConnector{access: mockAccess}
 
 		_, err := connector.handleGetRawFile(
