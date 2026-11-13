@@ -244,8 +244,14 @@ func (hs *HTTPServer) GetInviteInfoByCode(c *contextmodel.ReqContext) response.R
 		return response.Error(http.StatusInternalServerError, "Failed to get org", err)
 	}
 
+	// Email is empty for an invite sent to a username; completing it must not supply one.
+	inviteMail, err := ValidateAndNormalizeEmail(invite.Email)
+	if err != nil {
+		inviteMail = ""
+	}
+
 	return response.JSON(http.StatusOK, dtos.InviteInfo{
-		Email:     invite.Email,
+		Email:     inviteMail,
 		Name:      invite.Name,
 		Username:  invite.Email,
 		InvitedBy: util.StringsFallback3(invite.InvitedByName, invite.InvitedByLogin, invite.InvitedByEmail),
@@ -283,26 +289,39 @@ func (hs *HTTPServer) CompleteInvite(c *contextmodel.ReqContext) response.Respon
 		return response.Error(http.StatusPreconditionFailed, fmt.Sprintf("Invite cannot be used in status %s", invite.Status), nil)
 	}
 
-	// In case the user is invited by email address
-	if inviteMail, err := ValidateAndNormalizeEmail(invite.Email); err == nil {
-		// Make sure that the email address is not amended
+	cmd := user.CreateUserCommand{
+		Name:         completeInvite.Name,
+		Password:     completeInvite.Password,
+		SkipOrgSetup: true,
+	}
+
+	// The invite code is the only proof of who is completing it, so the account's identity
+	// comes from the invite: an email invite fixes the address, a username invite fixes the
+	// login and allows no address.
+	if inviteMail, err := ValidateAndNormalizeEmail(invite.Email); err == nil && inviteMail != "" {
 		if completeInvite.Email != inviteMail {
 			return response.Error(http.StatusBadRequest, "The provided email is different from the address that is found in the invite", nil)
 		}
-	}
-
-	cmd := user.CreateUserCommand{
-		Email:        completeInvite.Email,
-		Name:         completeInvite.Name,
-		Login:        completeInvite.Username,
-		Password:     completeInvite.Password,
-		SkipOrgSetup: true,
+		cmd.Email = inviteMail
+		cmd.Login = completeInvite.Username
+	} else {
+		invitedLogin := strings.TrimSpace(invite.Email)
+		if invitedLogin == "" {
+			return response.Error(http.StatusPreconditionFailed, "Invite does not name a user", nil)
+		}
+		if completeInvite.Email != "" {
+			return response.Error(http.StatusBadRequest, "An email address cannot be provided for an invite sent to a username", nil)
+		}
+		if !strings.EqualFold(completeInvite.Username, invitedLogin) {
+			return response.Error(http.StatusBadRequest, "The provided username is different from the username that is found in the invite", nil)
+		}
+		cmd.Login = invitedLogin
 	}
 
 	usr, err := hs.userService.Create(c.Req.Context(), &cmd)
 	if err != nil {
 		if errors.Is(err, user.ErrUserAlreadyExists) {
-			return response.Error(http.StatusPreconditionFailed, fmt.Sprintf("User with email '%s' or username '%s' already exists", completeInvite.Email, completeInvite.Username), err)
+			return response.Error(http.StatusPreconditionFailed, fmt.Sprintf("User with email '%s' or username '%s' already exists", cmd.Email, cmd.Login), err)
 		}
 
 		return response.Error(http.StatusInternalServerError, "failed to create user", err)
