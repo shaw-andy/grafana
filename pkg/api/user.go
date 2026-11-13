@@ -13,6 +13,9 @@ import (
 	claims "github.com/grafana/authlib/types"
 	"github.com/grafana/grafana/pkg/api/dtos"
 	"github.com/grafana/grafana/pkg/api/response"
+	"github.com/grafana/grafana/pkg/infra/network"
+	"github.com/grafana/grafana/pkg/services/auth"
+	"github.com/grafana/grafana/pkg/services/authn"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
 	"github.com/grafana/grafana/pkg/services/login"
 	"github.com/grafana/grafana/pkg/services/org"
@@ -585,7 +588,35 @@ func (hs *HTTPServer) ChangeUserPassword(c *contextmodel.ReqContext) response.Re
 		return response.ErrOrFallback(http.StatusInternalServerError, "Failed to change user password", err)
 	}
 
+	// Storing the password revoked every session of the user, including this
+	// one, so the browser that made the change gets a new session.
+	if c.UserToken != nil {
+		if err := hs.issueSessionAfterPasswordChange(c, userID); err != nil {
+			c.Logger.Warn("Failed to create a new session after password change", "userID", userID, "err", err)
+		}
+	}
+
 	return response.Success("User password changed")
+}
+
+func (hs *HTTPServer) issueSessionAfterPasswordChange(c *contextmodel.ReqContext, userID int64) error {
+	ip, err := network.GetIPFromAddress(c.RemoteAddr())
+	if err != nil {
+		hs.log.Debug("Failed to get IP from client address", "addr", c.RemoteAddr())
+	}
+
+	token, err := hs.AuthTokenService.CreateToken(c.Req.Context(), &auth.CreateTokenCommand{
+		User:      &user.User{ID: userID},
+		ClientIP:  ip,
+		UserAgent: c.Req.UserAgent(),
+	})
+	if err != nil {
+		return err
+	}
+
+	c.UserToken = token
+	authn.WriteSessionCookie(c.Resp, hs.Cfg, token)
+	return nil
 }
 
 // redirectToChangePassword handles GET /.well-known/change-password.

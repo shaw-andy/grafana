@@ -82,6 +82,16 @@ func TestTemplates(t *testing.T) {
 					},
 				},
 			},
+			deleteUserAuthTokensTemplate: {
+				{
+					Name: "delete_user_auth_tokens",
+					Data: &deleteUserAuthTokensQuery{
+						SQLTemplate: queryTemplate(),
+						TokenTable:  dbHelper.Table("user_auth_token"),
+						UserID:      42,
+					},
+				},
+			},
 			getUserTemplate: {
 				{
 					Name: "by_id",
