@@ -1,5 +1,5 @@
 import { css, cx } from '@emotion/css';
-import { createElement, useId } from 'react';
+import { createElement, useId, useState } from 'react';
 import Skeleton from 'react-loading-skeleton';
 
 import { type DataFrameView, type GrafanaTheme2, textUtil, dateTimeFormat } from '@grafana/data';
@@ -8,6 +8,7 @@ import { TextLink, useStyles2 } from '@grafana/ui';
 import { attachSkeleton, type SkeletonComponent } from '@grafana/ui/unstable';
 
 import { type NewsItem } from '../types';
+import { getExternalImageUrl } from '../utils';
 
 interface NewsItemProps {
   showImage?: boolean;
@@ -23,6 +24,8 @@ function NewsComponent({ showImage, onClick, data, index, className, headingLeve
   const visualRefreshEnabled = useFlagGrafanaVisualDesignRefresh();
   const styles = useStyles2(getStyles, visualRefreshEnabled);
   const newsItem = data.get(index);
+  const imageUrl = showImage ? getExternalImageUrl(newsItem.ogImage) : undefined;
+  const [failedImageUrl, setFailedImageUrl] = useState<string>();
   const title = (
     <TextLink href={textUtil.sanitizeUrl(newsItem.link)} external inline={false} onClick={onClick}>
       {newsItem.title}
@@ -38,7 +41,7 @@ function NewsComponent({ showImage, onClick, data, index, className, headingLeve
 
   return (
     <article aria-labelledby={titleId} className={cx(styles.item, className)}>
-      {showImage && newsItem.ogImage && (
+      {imageUrl && imageUrl !== failedImageUrl && (
         <a
           tabIndex={-1}
           href={textUtil.sanitizeUrl(newsItem.link)}
@@ -48,7 +51,13 @@ function NewsComponent({ showImage, onClick, data, index, className, headingLeve
           aria-hidden
           onClick={onClick}
         >
-          <img src={newsItem.ogImage} alt={newsItem.title} />
+          {/* Without CORS mode, an external image that redirects back to Grafana would be sent with the viewer's cookies */}
+          <img
+            crossOrigin="anonymous"
+            src={imageUrl}
+            alt={newsItem.title}
+            onError={() => setFailedImageUrl(imageUrl)}
+          />
         </a>
       )}
       <div className={styles.body}>
