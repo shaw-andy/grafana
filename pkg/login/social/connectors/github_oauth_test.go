@@ -264,14 +264,26 @@ func TestSocialGitHub_UserInfo(t *testing.T) {
 			},
 		},
 		{
-			// see: https://github.com/grafana/grafana/issues/85916
-			name:                     "should check parent team id for team membership",
+			name:                     "should reject a parent team id for team membership by default",
 			roleAttributePath:        "",
 			userRawJSON:              testGHUserJSON,
 			settingAutoAssignOrgRole: "Editor",
 			userTeamsRawJSON:         testGHUserTeamsJSON,
 			oAuthExtraInfo: map[string]string{
 				"team_ids": "99",
+			},
+			wantErr: true,
+		},
+		{
+			// see: https://github.com/grafana/grafana/issues/85916
+			name:                     "should check parent team id for team membership when child team members are allowed",
+			roleAttributePath:        "",
+			userRawJSON:              testGHUserJSON,
+			settingAutoAssignOrgRole: "Editor",
+			userTeamsRawJSON:         testGHUserTeamsJSON,
+			oAuthExtraInfo: map[string]string{
+				"team_ids":                 "99",
+				"allow_child_team_members": "true",
 			},
 			want: &social.BasicUserInfo{
 				Id:       "1",
@@ -711,13 +723,14 @@ func TestSocialGitHub_Reload(t *testing.T) {
 
 func TestGitHub_Reload_ExtraFields(t *testing.T) {
 	testCases := []struct {
-		name                         string
-		settings                     ssoModels.SSOSettings
-		info                         *social.OAuthInfo
-		expectError                  bool
-		expectedInfo                 *social.OAuthInfo
-		expectedAllowedOrganizations []string
-		expectedTeamIds              []int
+		name                          string
+		settings                      ssoModels.SSOSettings
+		info                          *social.OAuthInfo
+		expectError                   bool
+		expectedInfo                  *social.OAuthInfo
+		expectedAllowedOrganizations  []string
+		expectedTeamIds               []int
+		expectedAllowChildTeamMembers bool
 	}{
 		{
 			name: "successfully reloads the settings",
@@ -731,8 +744,9 @@ func TestGitHub_Reload_ExtraFields(t *testing.T) {
 			},
 			settings: ssoModels.SSOSettings{
 				Settings: map[string]any{
-					"allowed_organizations": "uuid-1234,uuid-5678",
-					"team_ids":              "123,456",
+					"allowed_organizations":    "uuid-1234,uuid-5678",
+					"team_ids":                 "123,456",
+					"allow_child_team_members": true,
 				},
 			},
 			expectedInfo: &social.OAuthInfo{
@@ -745,8 +759,9 @@ func TestGitHub_Reload_ExtraFields(t *testing.T) {
 					"force_use_graph_api":   "false",
 				},
 			},
-			expectedAllowedOrganizations: []string{"uuid-1234", "uuid-5678"},
-			expectedTeamIds:              []int{123, 456},
+			expectedAllowedOrganizations:  []string{"uuid-1234", "uuid-5678"},
+			expectedTeamIds:               []int{123, 456},
+			expectedAllowChildTeamMembers: true,
 		},
 	}
 
@@ -759,6 +774,7 @@ func TestGitHub_Reload_ExtraFields(t *testing.T) {
 
 			require.EqualValues(t, tc.expectedAllowedOrganizations, s.allowedOrganizations)
 			require.EqualValues(t, tc.expectedTeamIds, s.teamIds)
+			require.Equal(t, tc.expectedAllowChildTeamMembers, s.allowChildTeamMembers)
 		})
 	}
 }

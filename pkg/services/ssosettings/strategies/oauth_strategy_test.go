@@ -224,6 +224,7 @@ func TestGetProviderConfig_ExtraFields(t *testing.T) {
 	[auth.github]
 	team_ids = first, second
 	allowed_organizations = org1, org2
+	allow_child_team_members = true
 
 	[auth.generic_oauth]
 	name_attribute_path = name
@@ -264,6 +265,7 @@ func TestGetProviderConfig_ExtraFields(t *testing.T) {
 
 		require.Equal(t, "first, second", result["team_ids"])
 		require.Equal(t, "org1, org2", result["allowed_organizations"])
+		require.Equal(t, true, result["allow_child_team_members"])
 	})
 
 	t.Run(social.GenericOAuthProviderName, func(t *testing.T) {
