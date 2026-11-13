@@ -26,6 +26,7 @@ import (
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/plugins/definition"
 	apiserverauthenticator "github.com/grafana/grafana/pkg/services/apiserver/auth/authenticator"
+	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginaccesscontrol"
 	"github.com/grafana/grafana/pkg/storage/unified/resource"
 	"github.com/grafana/grafana/pkg/storage/unified/resourcepb"
 )
@@ -474,7 +475,9 @@ func TestPluginManifestsTargetServesKindsWithoutBackendClient(t *testing.T) {
 	storage := &manifestKindResourceClient{}
 	target, err := newPluginManifestsTarget(srv.URL, nil, srv.Client(), PluginDependencies{Unified: storage},
 		manifestTokenAuthenticatorFunc(func(context.Context, string) (identity.Requester, error) {
-			return &identity.StaticRequester{Type: types.TypeUser, OrgID: 1, Namespace: "default"}, nil
+			return &identity.StaticRequester{Type: types.TypeUser, OrgID: 1, Namespace: "default", Permissions: map[int64]map[string][]string{
+				1: {pluginaccesscontrol.ActionAppAccess: {pluginaccesscontrol.ScopeProvider.GetResourceScope(entry.Definition.JSONData.ID)}},
+			}}, nil
 		}))
 	require.NoError(t, err)
 	target.poll(t.Context(), make(chan struct{}, 1))
