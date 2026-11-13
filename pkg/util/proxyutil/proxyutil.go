@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -21,11 +22,11 @@ const (
 
 // PrepareProxyRequest prepares a request for being proxied.
 // Removes X-Forwarded-Host, X-Forwarded-Port, X-Forwarded-Proto, Origin, Referer headers.
-// Set X-Grafana-Referer based on contents of Referer.
+// Set X-Grafana-Referer based on contents of Referer, without its query string.
 // Set X-Forwarded-For headers.
 func PrepareProxyRequest(req *http.Request) {
 	// Set X-Grafana-Referer to correlate access logs to dashboards
-	req.Header.Set("X-Grafana-Referer", req.Header.Get("Referer"))
+	req.Header.Set("X-Grafana-Referer", RefererWithoutQuery(req.Header.Get("Referer")))
 
 	// Clear Origin and Referer to avoid CORS issues
 	req.Header.Del("Origin")
@@ -46,6 +47,40 @@ func PrepareProxyRequest(req *http.Request) {
 			req.Header.Set("X-Forwarded-For", remoteAddr)
 		}
 	}
+}
+
+// RefererWithoutQuery reduces a Referer value to its scheme, host and path.
+// The page query string and fragment can hold dashboard variables or tokens
+// that were never meant for the upstream, so they are dropped together with
+// any user info. Values that do not parse as a URL are dropped entirely.
+func RefererWithoutQuery(referer string) string {
+	if referer == "" {
+		return ""
+	}
+
+	u, err := url.Parse(referer)
+	if err != nil || u.Opaque != "" {
+		return ""
+	}
+
+	stripped := url.URL{
+		Scheme:  u.Scheme,
+		Host:    u.Host,
+		Path:    u.Path,
+		RawPath: u.RawPath,
+	}
+	return stripped.String()
+}
+
+// SanitizeRefererHeader replaces the Referer header with RefererWithoutQuery of
+// its value, for requests whose headers are handed to a plugin as is.
+func SanitizeRefererHeader(header http.Header) {
+	referer := RefererWithoutQuery(header.Get("Referer"))
+	if referer == "" {
+		header.Del("Referer")
+		return
+	}
+	header.Set("Referer", referer)
 }
 
 // ClearCookieHeader clear cookie header, except for cookies specified to be kept (keepCookiesNames) if not in skipCookiesNames.

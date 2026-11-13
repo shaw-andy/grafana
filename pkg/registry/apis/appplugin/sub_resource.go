@@ -17,6 +17,7 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	apppluginV0 "github.com/grafana/grafana/pkg/apis/appplugin/v0alpha1"
 	"github.com/grafana/grafana/pkg/plugins/httpresponsesender"
+	"github.com/grafana/grafana/pkg/util/proxyutil"
 )
 
 type subResourceREST struct {
@@ -87,13 +88,16 @@ func (r *subResourceREST) Connect(ctx context.Context, name string, opts runtime
 
 		backend.Logger.Debug("[mt-debug] subResourceREST.Connect", "userIsNil", pluginCtx.User == nil, "path", clonedReq.URL.Path)
 
+		headers := req.Header.Clone()
+		proxyutil.SanitizeRefererHeader(headers)
+
 		err = r.client.CallResource(ctx, &backend.CallResourceRequest{
 			PluginContext: pluginCtx,
 			Path:          clonedReq.URL.Path,
 			Method:        req.Method,
 			URL:           clonedReq.URL.String(),
 			Body:          body,
-			Headers:       req.Header,
+			Headers:       headers,
 		}, httpresponsesender.New(w))
 
 		if err != nil {
