@@ -567,6 +567,7 @@ type dataSourcesServiceMock struct {
 
 	mockUpdateDataSource func(ctx context.Context, cmd *datasources.UpdateDataSourceCommand) (*datasources.DataSource, error)
 	mockDeleteDataSource func(ctx context.Context, cmd *datasources.DeleteDataSourceCommand) error
+	mockAddDataSource    func(ctx context.Context, cmd *datasources.AddDataSourceCommand) (*datasources.DataSource, error)
 }
 
 func (m *dataSourcesServiceMock) GetDataSource(ctx context.Context, query *datasources.GetDataSourceQuery) (*datasources.DataSource, error) {
@@ -589,6 +590,9 @@ func (m *dataSourcesServiceMock) DeleteDataSource(ctx context.Context, cmd *data
 }
 
 func (m *dataSourcesServiceMock) AddDataSource(ctx context.Context, cmd *datasources.AddDataSourceCommand) (*datasources.DataSource, error) {
+	if m.mockAddDataSource != nil {
+		return m.mockAddDataSource(ctx, cmd)
+	}
 	return m.expectedDatasource, m.expectedError
 }
 
