@@ -48,6 +48,13 @@ describe('geojsonLayer', () => {
     expect(replaceMock).toHaveBeenCalledWith('https://example.com/$region.geojson');
   });
 
+  it.each(['../logout', 'public/maps/../../logout', 'public/%2e%2e/logout', 'http://localhost:3000/logout'])(
+    'does not load %s from this server outside public/maps',
+    async (src) => {
+      expect(await layerUrl({ src })).toBeUndefined();
+    }
+  );
+
   it('falls back to an empty src rather than interpolating undefined', async () => {
     await layerUrl({ src: undefined });
     expect(replaceMock).toHaveBeenCalledWith('');

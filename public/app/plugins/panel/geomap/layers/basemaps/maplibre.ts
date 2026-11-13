@@ -3,9 +3,12 @@ import { apply } from 'ol-mapbox-style';
 
 import { type MapLayerRegistryItem } from '@grafana/data';
 
+import { mapResourceFetchOptions, resolveMapResourceUrl } from '../../utils/resourceUrl';
+
 // MapLibre Style Specification constants
 const LAYER_TYPE_BACKGROUND = 'background';
 const PAINT_BACKGROUND_OPACITY = 'background-opacity';
+const WEBFONTS_METADATA = 'ol:webfonts';
 
 export interface MaplibreConfig {
   url: string;
@@ -24,6 +27,47 @@ const defaultMaplibreConfig: MaplibreConfig = {
  */
 function resolveMaplibreConfig(config: Partial<MaplibreConfig> = {}): MaplibreConfig {
   return { ...config, url: config.url || defaultMaplibreConfig.url };
+}
+
+interface StyleWithMetadata {
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * ol-mapbox-style fills this template with font names from the style and adds it as a stylesheet link,
+ * which carries the viewer's cookies. Keep it only when the host is fixed before any placeholder and is
+ * not this Grafana server.
+ */
+function withSafeWebfonts<T extends StyleWithMetadata>(style: T): T {
+  const template = style?.metadata?.[WEBFONTS_METADATA];
+  if (template === undefined) {
+    return style;
+  }
+  const fixedOrigin = typeof template === 'string' ? /^https?:\/\/[^/\\?#{}]+\//i.exec(template)?.[0] : undefined;
+  if (fixedOrigin && resolveMapResourceUrl(fixedOrigin, document.baseURI, 'maps/')) {
+    return style;
+  }
+  const metadata = { ...style.metadata };
+  delete metadata[WEBFONTS_METADATA];
+  return { ...style, metadata };
+}
+
+/**
+ * Every style, source, sprite and tile request ol-mapbox-style makes goes through here, so URLs taken
+ * from a style document are held to the same rules as the configured style URL.
+ */
+function transformRequest(url: string, resourceType: string): Request | Promise<Response> {
+  const resolved = resolveMapResourceUrl(url, document.baseURI, 'maps/');
+  if (!resolved) {
+    return Promise.reject(new Error(`MapLibre layer: not loading ${resourceType} from "${url}"`));
+  }
+  const request = new Request(resolved.href, mapResourceFetchOptions);
+  if (resourceType !== 'Style') {
+    return request;
+  }
+  return fetch(request)
+    .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`Failed to load MapLibre style from ${url}`))))
+    .then((style) => new Response(JSON.stringify(withSafeWebfonts(style))));
 }
 
 const maplibreLayer: MapLayerRegistryItem<Partial<MaplibreConfig>> = {
@@ -59,7 +103,13 @@ const maplibreLayer: MapLayerRegistryItem<Partial<MaplibreConfig>> = {
       // Handle async operations in the background
       const loadStyle = async () => {
         try {
-          const res = await fetch(cfg.url);
+          const styleUrl = resolveMapResourceUrl(cfg.url, document.baseURI, 'maps/');
+          if (!styleUrl) {
+            // mapbox:// style URLs are resolved by ol-mapbox-style and checked again in transformRequest
+            await tryFallbackApply();
+            return;
+          }
+          const res = await fetch(styleUrl.href, mapResourceFetchOptions);
           if (!res.ok) {
             console.warn(`Failed to load MapLibre style from ${cfg.url}: ${res.status} ${res.statusText}`);
             // Try fallback approach
@@ -79,7 +129,11 @@ const maplibreLayer: MapLayerRegistryItem<Partial<MaplibreConfig>> = {
             }
           }
 
-          await apply(layer, style, { styleUrl: cfg.url, accessToken: cfg.accessToken });
+          await apply(layer, withSafeWebfonts(style), {
+            styleUrl: styleUrl.href,
+            accessToken: cfg.accessToken,
+            transformRequest,
+          });
           applyNoRepeat();
         } catch (error) {
           console.warn('Failed to parse or apply MapLibre style JSON:', error);
@@ -90,7 +144,7 @@ const maplibreLayer: MapLayerRegistryItem<Partial<MaplibreConfig>> = {
 
       const tryFallbackApply = async () => {
         try {
-          await apply(layer, cfg.url, { accessToken: cfg.accessToken });
+          await apply(layer, cfg.url, { accessToken: cfg.accessToken, transformRequest });
           applyNoRepeat();
         } catch (fallbackError) {
           console.warn('Failed to load MapLibre style from both JSON and direct URL approaches:', fallbackError);

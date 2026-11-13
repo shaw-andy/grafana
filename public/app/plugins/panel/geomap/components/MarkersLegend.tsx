@@ -13,6 +13,7 @@ import { SanitizedSVG } from 'app/core/components/SVG/SanitizedSVG';
 import { getThresholdItems } from 'app/core/components/TimelineChart/utils';
 
 import { type StyleConfigState } from '../style/types';
+import { mapResourceFetchOptions, resolveMapResourceUrl } from '../utils/resourceUrl';
 
 export interface MarkersLegendProps {
   layerName?: string;
@@ -32,16 +33,20 @@ export function MarkersLegend({ layerName, styleConfig }: MarkersLegendProps) {
   const symbol = styleConfig.config.symbol?.fixed;
 
   if (color && symbol && !colorField) {
+    const symbolUrl = resolveMapResourceUrl(`${window.__grafana_build_path__}${symbol}`, document.baseURI, '');
     return (
       <div className={style.infoWrap}>
         <div className={style.layerName}>{layerName}</div>
         <div className={cx(style.layerBody, style.fixedColorContainer)}>
-          <SanitizedSVG
-            src={`${window.__grafana_build_path__}${symbol}`}
-            className={style.legendSymbol}
-            title={t('geomap.markers-legend.title-symbol', 'Symbol')}
-            style={{ fill: color, opacity: opacity }}
-          />
+          {symbolUrl && (
+            <SanitizedSVG
+              src={symbolUrl.href}
+              fetchOptions={mapResourceFetchOptions}
+              className={style.legendSymbol}
+              title={t('geomap.markers-legend.title-symbol', 'Symbol')}
+              style={{ fill: color, opacity: opacity }}
+            />
+          )}
         </div>
       </div>
     );

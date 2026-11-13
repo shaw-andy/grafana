@@ -55,12 +55,41 @@ describe('maplibre basemap', () => {
 
   it('fetches the default style URL when no config url is set', async () => {
     await initLayer({ config: {} });
-    expect(fetch).toHaveBeenCalledWith(DEFAULT_STYLE_URL);
+    expect(fetch).toHaveBeenCalledWith(DEFAULT_STYLE_URL, { credentials: 'omit' });
   });
 
   it('fetches the configured style URL when one is provided', async () => {
     const url = 'https://tiles.example.com/style.json';
     await initLayer({ config: { url } });
-    expect(fetch).toHaveBeenCalledWith(url);
+    expect(fetch).toHaveBeenCalledWith(url, { credentials: 'omit' });
+  });
+
+  it('does not fetch a style URL on this server outside public/maps', async () => {
+    await initLayer({ config: { url: '/logout' } });
+    expect(fetch).not.toHaveBeenCalled();
+    const transformRequest = applyMock.mock.calls[0][2].transformRequest;
+    await expect(transformRequest('http://localhost/logout', 'Style')).rejects.toThrow();
+  });
+
+  it('loads resources referenced by the style without credentials and refuses ones on this server', async () => {
+    await initLayer({ config: { url: 'https://tiles.example.com/style.json' } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const transformRequest = applyMock.mock.calls[0][2].transformRequest;
+
+    const tile = transformRequest('https://tiles.example.com/1/2/3.pbf', 'Tiles');
+    expect(tile).toBeInstanceOf(Request);
+    expect(tile.credentials).toBe('omit');
+    await expect(transformRequest('/logout', 'Sprite')).rejects.toThrow();
+  });
+
+  it('drops a webfonts template that could point at this server', async () => {
+    jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ layers: [], metadata: { 'ol:webfonts': '{font-family}' } }), { status: 200 })
+      );
+    await initLayer({ config: { url: 'https://tiles.example.com/style.json' } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(applyMock.mock.calls[0][1].metadata).toEqual({});
   });
 });
