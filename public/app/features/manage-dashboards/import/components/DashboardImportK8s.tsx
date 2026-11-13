@@ -9,6 +9,7 @@ import { Page } from 'app/core/components/Page/Page';
 import { type GrafanaRouteComponentProps } from 'app/core/navigation/types';
 import { ExportFormat } from 'app/features/dashboard/api/types';
 import { isDashboardV1Resource, isDashboardV2Resource } from 'app/features/dashboard/api/utils';
+import { getGnetDashboardPath } from 'app/features/dashboard/dashgrid/DashboardLibrary/api/dashboardLibraryApi';
 
 import { type DashboardInputs, DashboardSource } from '../../types';
 import { detectExportFormat, extractV1Inputs, extractV2Inputs } from '../utils/inputs';
@@ -61,7 +62,7 @@ export function DashboardImportK8s({ queryParams }: Props) {
     setState((prev) => ({ ...prev, status: LoadingState.Loading }));
 
     try {
-      const response = await getBackendSrv().get(`/api/gnet/dashboards/${id}`);
+      const response = await getBackendSrv().get(getGnetDashboardPath(id));
       const dashboard = response.json;
       const format = detectExportFormat(dashboard);
       const inputs =

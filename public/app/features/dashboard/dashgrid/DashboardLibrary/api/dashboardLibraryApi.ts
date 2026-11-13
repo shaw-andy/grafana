@@ -111,10 +111,23 @@ export async function fetchCommunityDashboards(
 }
 
 /**
+ * Builds the proxy path for a single Grafana.com dashboard.
+ * The id often comes from the URL, and the request is resolved relative to the app root with the
+ * session cookie attached, so anything other than a decimal id (e.g. `../../logout`) must be rejected.
+ */
+export function getGnetDashboardPath(gnetId: number | string): string {
+  const id = String(gnetId);
+  if (!/^\d+$/.test(id)) {
+    throw new Error(`Invalid Grafana.com dashboard id: ${id}`);
+  }
+  return `/api/gnet/dashboards/${encodeURIComponent(id)}`;
+}
+
+/**
  * Fetch a single community dashboard's full JSON from Grafana.com
  */
-export async function fetchCommunityDashboard(gnetId: number): Promise<GnetDashboardResponse> {
-  return getBackendSrv().get(`/api/gnet/dashboards/${gnetId}`);
+export async function fetchCommunityDashboard(gnetId: number | string): Promise<GnetDashboardResponse> {
+  return getBackendSrv().get(getGnetDashboardPath(gnetId));
 }
 
 /**
