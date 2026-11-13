@@ -48,8 +48,13 @@ func (e *extra) Build(ctx context.Context, r *provisioning.Repository) (reposito
 	if r == nil || r.Spec.GitHub == nil {
 		return nil, fmt.Errorf("github configuration is required")
 	}
-	logger := logging.FromContext(ctx).With("url", r.Spec.GitHub.URL, "branch", r.Spec.GitHub.Branch, "path", r.Spec.GitHub.Path)
+	repoURL := r.Spec.GitHub.URL
+	logger := logging.FromContext(ctx).With("url", repoURL, "branch", r.Spec.GitHub.Branch, "path", r.Spec.GitHub.Path)
 	logger.Info("Instantiating Github repository")
+
+	if err := checkConnectionOrigin(r, repoURL); err != nil {
+		return nil, err
+	}
 
 	secure := e.decrypter(r)
 	token, err := secure.Token(ctx)
@@ -63,7 +68,7 @@ func (e *extra) Build(ctx context.Context, r *provisioning.Repository) (reposito
 	}
 
 	gitRepo, err := git.NewRepository(ctx, r, git.RepositoryConfig{
-		URL:              r.Spec.GitHub.URL,
+		URL:              repoURL,
 		Branch:           r.Spec.GitHub.Branch,
 		Path:             r.Spec.GitHub.Path,
 		Token:            token,
@@ -81,6 +86,21 @@ func (e *extra) Build(ctx context.Context, r *provisioning.Repository) (reposito
 	}
 
 	return MaybeWrapWithWebhook(ctx, r, ghRepo, secure, e.webhookBuilder)
+}
+
+// checkConnectionOrigin refuses a repository whose token was issued by a connection
+// unless repoURL is on the server that connection authorized for this object, or
+// on github.com when no authorization was recorded on it (e.g. a token loaded from
+// storage). The connection token must never be presented to any other host.
+func checkConnectionOrigin(r *provisioning.Repository, repoURL string) error {
+	if !r.HasConnection() {
+		return nil
+	}
+	bound, _ := repository.BoundConnectionOrigin(r)
+	if _, err := RepositoryOrigin(repoURL, bound); err != nil {
+		return fmt.Errorf("connection %q cannot be used for this repository URL: %w: %w", r.ConnectionName(), err, repository.ErrPermissionDenied)
+	}
+	return nil
 }
 
 // MaybeWrapWithWebhook wraps base as a webhook-capable repository when a webhook

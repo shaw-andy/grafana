@@ -14,6 +14,7 @@ import (
 
 	provisioning "github.com/grafana/grafana/apps/provisioning/pkg/apis/provisioning/v0alpha1"
 	"github.com/grafana/grafana/apps/provisioning/pkg/connection"
+	"github.com/grafana/grafana/apps/provisioning/pkg/repository"
 	common "github.com/grafana/grafana/pkg/apimachinery/apis/common/v0alpha1"
 )
 
@@ -24,6 +25,14 @@ import (
 type Provider interface {
 	Endpoint() oauth2.Endpoint
 	ListRepositories(ctx context.Context) ([]provisioning.ExternalRepository, error)
+}
+
+// RepositoryOriginVerifier is implemented by providers whose access token may only
+// be presented to repositories on the provider's own server. RepositoryOrigin
+// returns the repository URL's origin ("scheme://host"), or an error when the URL
+// is on another server.
+type RepositoryOriginVerifier interface {
+	RepositoryOrigin(repoURL string) (string, error)
 }
 
 type oauthConnection struct {
@@ -91,12 +100,25 @@ func (c *oauthConnection) GenerateRepositoryToken(_ context.Context, repo *provi
 		return nil, fmt.Errorf("repository type %q is not served by this connection (serves %q)", repo.Spec.Type, c.repoType)
 	}
 
+	var origin string
+	if v, ok := c.provider.(RepositoryOriginVerifier); ok {
+		o, err := v.RepositoryOrigin(repo.URL())
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", connection.ErrRepositoryAccess, err)
+		}
+		origin = o
+	}
+
 	token, err := parseToken(c.token)
 	if err != nil || token.AccessToken == "" {
 		return nil, fmt.Errorf("connection access token not available: %w", connection.ErrAuthentication)
 	}
 	if !token.Expiry.IsZero() && time.Now().After(token.Expiry) {
 		return nil, fmt.Errorf("connection access token expired: %w", connection.ErrAuthentication)
+	}
+
+	if origin != "" {
+		repository.BindConnectionOrigin(repo, origin)
 	}
 
 	return &connection.ExpirableSecureValue{

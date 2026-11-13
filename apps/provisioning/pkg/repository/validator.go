@@ -392,6 +392,14 @@ func (v *AdmissionValidator) Validate(ctx context.Context, a admission.Attribute
 					),
 				})
 			}
+			if a.GetOperation() == admission.Update && RequiresNewTokenForConnectionRemoval(r, oldRepo) {
+				return invalidRepositoryError(a.GetName(), field.ErrorList{
+					field.Forbidden(
+						field.NewPath("secure", "token"),
+						"a new token is required when removing the connection",
+					),
+				})
+			}
 			CopySecureValues(r, oldRepo)
 		}
 	}
