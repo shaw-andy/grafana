@@ -1,8 +1,6 @@
 import { type FeatureLike } from 'ol/Feature';
 import { unByKey } from 'ol/Observable';
-import GeoJSON from 'ol/format/GeoJSON';
 import VectorImage from 'ol/layer/VectorImage';
-import VectorSource from 'ol/source/Vector';
 import { type Style } from 'ol/style';
 import { ReplaySubject } from 'rxjs';
 import { map as rxjsmap, first } from 'rxjs/operators';
@@ -28,6 +26,8 @@ import { type FeatureRuleConfig, type FeatureStyleConfig } from '../../types';
 import { checkFeatureMatchesStyleRule } from '../../utils/checkFeatureMatchesStyleRule';
 import { getLayerPropertyInfo } from '../../utils/getFeatures';
 import { getPublicGeoJSONFiles } from '../../utils/utils';
+
+import { createGeoJSONSource, resolveGeoJSONUrl } from './geojsonSource';
 
 export interface GeoJSONMapperConfig {
   // URL for a geojson file
@@ -77,15 +77,7 @@ export const geojsonLayer: MapLayerRegistryItem<GeoJSONMapperConfig> = {
 
     // Interpolate variables in the URL
     const interpolatedUrl = getTemplateSrv().replace(config.src || '');
-    const isAbsoluteUrl = interpolatedUrl.startsWith('http');
-    const layerUrl = isAbsoluteUrl
-      ? interpolatedUrl
-      : `${window.__grafana_public_path__}${interpolatedUrl.replace(/^(public\/)/, '')}`;
-
-    const source = new VectorSource({
-      url: layerUrl,
-      format: new GeoJSON(),
-    });
+    const source = createGeoJSONSource(resolveGeoJSONUrl(interpolatedUrl));
 
     const features = new ReplaySubject<FeatureLike[]>();
 

@@ -1,8 +1,11 @@
 import TileLayer from 'ol/layer/Tile';
 import XYZ from 'ol/source/XYZ';
+import { expandUrl } from 'ol/uri';
 
 import { type MapLayerRegistryItem, textUtil } from '@grafana/data';
 import { getTemplateSrv } from '@grafana/runtime';
+
+import { resolveMapResourceUrl } from '../../utils/resourceUrl';
 
 export interface XYZConfig {
   url: string;
@@ -40,6 +43,42 @@ export function resolveXYZConfig<T extends XYZConfig = XYZConfig>(
   return { ...config, url: config.url, attribution: config.attribution ?? '' };
 }
 
+// Lowercase letters only: hostnames are lowercased when parsed, and the digits OpenLayers puts in their
+// place later cannot form a dot segment or an encoded separator.
+const TILE_PLACEHOLDERS: Array<[placeholder: string, token: string]> = [
+  ['{-y}', 'grafanatileminusy'],
+  ['{z}', 'grafanatilez'],
+  ['{x}', 'grafanatilex'],
+  ['{y}', 'grafanatiley'],
+];
+
+/**
+ * Expands and resolves a tile URL template. Tile images are plain image requests that carry the viewer's
+ * cookies, so a template that lands on this Grafana host outside `public/maps/`, or that puts a tile
+ * coordinate in the host name, yields no URLs.
+ */
+export function resolveTileUrls(template: string): string[] {
+  const urls: string[] = [];
+  for (const expanded of expandUrl(template)) {
+    const lower = expanded.toLowerCase();
+    if (TILE_PLACEHOLDERS.some(([, token]) => lower.includes(token))) {
+      return [];
+    }
+    const tokenized = TILE_PLACEHOLDERS.reduce(
+      (url, [placeholder, token]) => url.split(placeholder).join(token),
+      expanded
+    );
+    const resolved = resolveMapResourceUrl(tokenized, document.baseURI, 'maps/');
+    if (!resolved || TILE_PLACEHOLDERS.some(([, token]) => resolved.host.includes(token))) {
+      return [];
+    }
+    urls.push(
+      TILE_PLACEHOLDERS.reduce((url, [placeholder, token]) => url.split(token).join(placeholder), resolved.href)
+    );
+  }
+  return urls;
+}
+
 export const xyzTiles: MapLayerRegistryItem<UnresolvedXYZConfig<XYZConfig>> = {
   id: 'xyz',
   name: 'XYZ Tile layer',
@@ -52,10 +91,11 @@ export const xyzTiles: MapLayerRegistryItem<UnresolvedXYZConfig<XYZConfig>> = {
       const noRepeat = options.noRepeat ?? false;
       const interpolatedUrl = textUtil.sanitizeUrl(getTemplateSrv().replace(cfg.url));
       const interpolatedAttribution = textUtil.sanitizeTextPanelContent(getTemplateSrv().replace(cfg.attribution));
+      const urls = resolveTileUrls(interpolatedUrl);
 
       return new TileLayer({
         source: new XYZ({
-          url: interpolatedUrl,
+          urls: urls.length ? urls : undefined,
           // An empty string would add a blank entry to the attribution control
           attributions: interpolatedAttribution || undefined,
           wrapX: !noRepeat,

@@ -5,6 +5,7 @@ export default function ReactInlineSVG({
   innerRef,
   cacheRequests,
   preProcessor,
+  fetchOptions,
   onLoad,
   ...rest
 }: {
@@ -12,6 +13,7 @@ export default function ReactInlineSVG({
   innerRef: Ref<SVGSVGElement>;
   cacheRequests: boolean;
   preProcessor: () => string;
+  fetchOptions?: RequestInit;
   onLoad?: () => void;
 }) {
   // Simulate async loading behavior

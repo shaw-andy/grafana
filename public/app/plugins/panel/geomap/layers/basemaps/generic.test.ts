@@ -6,7 +6,7 @@ import { type EventBus, type GrafanaTheme2, type MapLayerOptions } from '@grafan
 
 import { getTileSource } from '../test-utils';
 
-import { xyzTiles, type XYZConfig } from './generic';
+import { resolveTileUrls, xyzTiles, type XYZConfig } from './generic';
 
 const replaceMock = jest.fn((text: string) => text);
 jest.mock('@grafana/runtime', () => ({
@@ -177,5 +177,41 @@ describe('XYZ tile layer', () => {
       expect(layer.getMaxZoom()).toBe(Infinity);
       expect(source.getTileGrid()?.getMinZoom()).toBe(0);
     });
+  });
+});
+
+describe('resolveTileUrls', () => {
+  it('expands subdomain ranges and keeps tile placeholders', () => {
+    expect(resolveTileUrls('https://{a-b}.tile.example.com/{z}/{x}/{-y}.png')).toEqual([
+      'https://a.tile.example.com/{z}/{x}/{-y}.png',
+      'https://b.tile.example.com/{z}/{x}/{-y}.png',
+    ]);
+  });
+
+  it('allows tiles served from public/maps on this server', () => {
+    expect(resolveTileUrls('/public/maps/tiles/{z}/{x}/{y}.webp')).toEqual([
+      'http://localhost/public/maps/tiles/{z}/{x}/{y}.webp',
+    ]);
+  });
+
+  it.each([
+    ['a route on this server', '/logout'],
+    ['parent segments from the dashboard', '../../logout?{z}'],
+    ['parent segments after public/maps', '/public/maps/{z}/../../../logout'],
+    ['a tile coordinate in the host', 'http://127.0.0.{z}/logout'],
+    ['a range that expands to this host', 'http://localhos{s-t}/logout'],
+  ])('yields no URLs for %s', (_label, template) => {
+    expect(resolveTileUrls(template)).toEqual([]);
+  });
+
+  it('leaves the source without URLs when the template is refused', async () => {
+    replaceMock.mockImplementation((text) => text);
+    const options: MapLayerOptions<XYZConfig> = {
+      name: 'Refused',
+      type: 'xyz',
+      config: { url: '/logout', attribution: '' },
+    };
+    const result = await xyzTiles.create({} as OpenLayersMap, options, {} as EventBus, {} as GrafanaTheme2);
+    expect(getTileSource(result.init(), XYZ).getUrls()).toBeNull();
   });
 });
