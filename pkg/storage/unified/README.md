@@ -333,7 +333,7 @@ The storage server doesn't support `sqlite` so we need to have a dedicated exter
 docker in case you don't have one:
 
 ```sh
-docker run -d --name db -e "MYSQL_DATABASE=grafana" -e "MYSQL_USER=grafana" -e "MYSQL_PASSWORD=grafana" -e "MYSQL_ROOT_PASSWORD=root" -p 3306:3306 docker.io/bitnami/mysql:8.0.31
+docker run -d --name db -e "MYSQL_DATABASE=grafana" -e "MYSQL_USER=grafana" -e "MYSQL_PASSWORD=grafana" -e "MYSQL_ROOT_PASSWORD=root" -p 3306:3306 docker.io/library/mysql:8.0.45
 ```
 
 or use our mysql docker block:
