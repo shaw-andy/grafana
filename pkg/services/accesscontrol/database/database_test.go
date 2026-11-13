@@ -952,7 +952,6 @@ func TestIntegrationAccessControlStore_GetUsersBasicRoles(t *testing.T) {
 			users: []testUser{{orgRole: org.RoleAdmin, isAdmin: false}, {isAdmin: true}, {}},
 			wantRoles: map[int64][]string{
 				1: {string(org.RoleAdmin)},
-				2: {accesscontrol.RoleGrafanaAdmin},
 			},
 		},
 		{

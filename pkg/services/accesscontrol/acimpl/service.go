@@ -2,6 +2,7 @@ package acimpl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -47,6 +48,8 @@ var _ pluginaccesscontrol.RoleRegistry = &Service{}
 const (
 	cacheTTL = 60 * time.Second
 )
+
+var errNoBasicRoles = errors.New("found no basic roles")
 
 var SharedWithMeFolderPermission = accesscontrol.Permission{
 	Action: folder.ActionFoldersRead,
@@ -739,13 +742,21 @@ func (s *Service) SearchUsersPermissions(ctx context.Context, usr identity.Reque
 	// Limit roles to available in OSS
 	options.RolePrefixes = OSSRolesPrefixes
 
+	canView := usersPermissionsReadFilter(usr)
+
 	var res map[int64][]accesscontrol.Permission
 
 	if options.UserID > 0 {
+		if !canView(options.UserID) {
+			return map[int64][]accesscontrol.Permission{}, nil
+		}
 		// Reroute to the user specific implementation of search permissions
 		// because it leverages the user permission cache.
 		userPerms, err := s.SearchUserPermissions(ctx, usr.GetOrgID(), options)
 		if err != nil {
+			if errors.Is(err, errNoBasicRoles) {
+				return map[int64][]accesscontrol.Permission{}, nil
+			}
 			return nil, err
 		}
 		res = map[int64][]accesscontrol.Permission{options.UserID: userPerms}
@@ -780,36 +791,6 @@ func (s *Service) SearchUsersPermissions(ctx context.Context, usr identity.Reque
 			return nil, err
 		}
 
-		// helper to filter out permissions the signed in users cannot see
-		canView := func() func(userID int64) bool {
-			siuPermissions := usr.GetPermissions()
-			if len(siuPermissions) == 0 {
-				return func(_ int64) bool { return false }
-			}
-			scopes, ok := siuPermissions[accesscontrol.ActionUsersPermissionsRead]
-			if !ok {
-				return func(_ int64) bool { return false }
-			}
-
-			ids := map[int64]bool{}
-			for i := range scopes {
-				if strings.HasSuffix(scopes[i], "*") {
-					return func(_ int64) bool { return true }
-				}
-				parts := strings.Split(scopes[i], ":")
-				if len(parts) != 3 {
-					continue
-				}
-				id, err := strconv.ParseInt(parts[2], 10, 64)
-				if err != nil {
-					continue
-				}
-				ids[id] = true
-			}
-
-			return func(userID int64) bool { return ids[userID] }
-		}()
-
 		// Merge stored (DB) and basic role permissions (RAM)
 		// Assumes that all users with stored permissions have org roles
 		res = map[int64][]accesscontrol.Permission{}
@@ -840,7 +821,29 @@ func (s *Service) SearchUsersPermissions(ctx context.Context, usr identity.Reque
 		}
 	}
 
-	return s.zanzanaResolver.MergeSearch(ctx, usr, usr.GetOrgID(), options, res, s.log), nil
+	merged := s.zanzanaResolver.MergeSearch(ctx, usr, usr.GetOrgID(), options, res, s.log)
+	maps.DeleteFunc(merged, func(userID int64, _ []accesscontrol.Permission) bool { return !canView(userID) })
+	return merged, nil
+}
+
+// usersPermissionsReadFilter returns a function reporting whether usr holds
+// users.permissions:read on the given user or service account id.
+func usersPermissionsReadFilter(usr identity.Requester) func(userID int64) bool {
+	permissions := usr.GetPermissions()
+	if len(permissions[accesscontrol.ActionUsersPermissionsRead]) == 0 {
+		return func(int64) bool { return false }
+	}
+	// A grant that matches the literal "users:id:*" target is that wildcard or a
+	// broader one, so it covers every user id.
+	if accesscontrol.EvalPermission(accesscontrol.ActionUsersPermissionsRead, accesscontrol.Scope("users", "id", "*")).Evaluate(permissions) {
+		return func(int64) bool { return true }
+	}
+	return func(userID int64) bool {
+		return accesscontrol.EvalPermission(
+			accesscontrol.ActionUsersPermissionsRead,
+			accesscontrol.Scope("users", "id", strconv.FormatInt(userID, 10)),
+		).Evaluate(permissions)
+	}
 }
 
 func (s *Service) SearchUserPermissions(ctx context.Context, orgID int64, searchOptions accesscontrol.SearchOptions) ([]accesscontrol.Permission, error) {
@@ -872,7 +875,7 @@ func (s *Service) searchUserPermissions(ctx context.Context, orgID int64, search
 	var roles []string
 	var ok bool
 	if roles, ok = roleList[searchOptions.UserID]; !ok {
-		return nil, fmt.Errorf("found no basic roles for user %d in organisation %d", searchOptions.UserID, orgID)
+		return nil, fmt.Errorf("%w for user %d in organisation %d", errNoBasicRoles, searchOptions.UserID, orgID)
 	}
 	permissions := make([]accesscontrol.Permission, 0)
 	s.rolesMu.RLock()
