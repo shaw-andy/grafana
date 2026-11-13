@@ -15,15 +15,165 @@ XSSWL.iframe = ['src', 'width', 'height'];
 // Event handlers (onclick etc.) are stripped by the xss library automatically.
 XSSWL.button = ['class', 'style', 'type', 'disabled'];
 
+// GET routes that end or change the viewer's session. Markup that makes the browser fetch one of them
+// (a media source, a poster, a CSS url()) sends that request with the viewer's cookies as soon as it
+// renders, and links are excluded because they only navigate when clicked. Matched as a suffix so a
+// server under a sub path is covered too.
+const SESSION_ROUTE = /(?:^|\/)(?:logout(?:\/[^/]*)?|profile\/switch-org(?:\/[^/]*)?|user\/auth-tokens\/rotate)$/;
+
+const RESOURCE_URL_ATTRS = new Set([
+  'src',
+  'poster',
+  'background',
+  'data',
+  'href',
+  'xlink:href',
+  'action',
+  'formaction',
+]);
+const NAVIGATION_TAGS = new Set(['a', 'area']);
+
+// The server percent-decodes the path before routing. Decoding fully and dropping empty and dot
+// segments yields a path that matches whenever the server's would.
+function normalizeRequestPath(pathname: string): string {
+  let path = pathname;
+  for (let i = 0; i < 10; i++) {
+    const decoded = path.replace(/%([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+    if (decoded === path) {
+      break;
+    }
+    path = decoded;
+  }
+  const segments: string[] = [];
+  for (const segment of path.replace(/\\/g, '/').toLowerCase().split('/')) {
+    if (segment === '' || segment === '.') {
+      continue;
+    }
+    if (segment === '..') {
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  return '/' + segments.join('/');
+}
+
+function requestBaseUrl(): string {
+  if (typeof window !== 'undefined' && /^https?:$/.test(window.location?.protocol ?? '')) {
+    return window.location.href;
+  }
+  return 'http://localhost/';
+}
+
+// The host is ignored: the same server can be reachable under several names, and a page served over
+// https still upgrades an http media URL to the same origin.
+function isSessionRouteUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value.trim(), requestBaseUrl());
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return false;
+  }
+  return SESSION_ROUTE.test(normalizeRequestPath(url.pathname));
+}
+
+function isSessionRouteSrcset(value: string): boolean {
+  const candidates = value.split(/\s+/).flatMap((token) => [token.replace(/^,+|,+$/g, ''), ...token.split(',')]);
+  return candidates.some((candidate) => candidate !== '' && isSessionRouteUrl(candidate));
+}
+
+function unescapeCss(value: string): string {
+  return value.replace(/\\(?:([0-9a-f]{1,6})[ \t\n\r\f]?|\r\n|[\n\r\f]|([\s\S]))/gi, (_, hex, char) => {
+    if (hex === undefined) {
+      return char ?? '';
+    }
+    const codePoint = parseInt(hex, 16);
+    return codePoint > 0 && codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : '\ufffd';
+  });
+}
+
+// CSS reaches a URL through url() and through the plain strings image-set() accepts.
+function hasSessionRouteCssUrl(value: string): boolean {
+  if (!/url|image-set|["'\\]/i.test(value)) {
+    return false;
+  }
+  for (const css of [unescapeCss(value), unescapeCss(value.replace(/\/\*[\s\S]*?\*\//g, ''))]) {
+    for (const match of css.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))|"([^"]*)"|'([^']*)'/gi)) {
+      const url = match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? '';
+      if (isSessionRouteUrl(url)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Reports whether the browser would request a session route for this decoded attribute value. */
+function requestsSessionRoute(tag: string, name: string, value: string): boolean {
+  if (name === 'srcset' || name === 'imagesrcset') {
+    if (isSessionRouteSrcset(value)) {
+      return true;
+    }
+  } else if (RESOURCE_URL_ATTRS.has(name) && !(name === 'href' && NAVIGATION_TAGS.has(tag))) {
+    if (isSessionRouteUrl(value)) {
+      return true;
+    }
+  }
+  return hasSessionRouteCssUrl(value);
+}
+
+// The browser decodes character references in an attribute before using it, so check the value the
+// HTML parser produces from the escaped output rather than the escaped text.
+function parsedAttributeValue(escaped: string): string {
+  if (!escaped.includes('&') || typeof DOMParser === 'undefined') {
+    return escaped;
+  }
+  const doc = new DOMParser().parseFromString(`<i title="${escaped}"></i>`, 'text/html');
+  return doc.body.firstElementChild?.getAttribute('title') ?? escaped;
+}
+
+function dropSessionRequestAttributes(node: Element) {
+  const tag = node.nodeName.toLowerCase();
+  if (tag === 'style' && hasSessionRouteCssUrl(node.textContent ?? '')) {
+    node.textContent = '';
+  }
+  for (const attr of Array.from(node.attributes)) {
+    if (requestsSessionRoute(tag, attr.name.toLowerCase(), attr.value)) {
+      node.removeAttribute(attr.name);
+    }
+  }
+}
+
+function withSessionRequestFilter<T>(run: () => T): T {
+  DOMPurify.addHook('afterSanitizeAttributes', dropSessionRequestAttributes);
+  try {
+    return run();
+  } finally {
+    DOMPurify.removeHook('afterSanitizeAttributes', dropSessionRequestAttributes);
+  }
+}
+
 const sanitizeTextPanelWhitelist = new xss.FilterXSS({
   // Add sandbox attribute to iframe tags if an attribute is allowed.
   onTagAttr(tag, name, value, isWhiteAttr) {
     if (tag === 'iframe') {
-      return isWhiteAttr
-        ? ` ${name}="${xss.escapeAttrValue(sanitizeUrl(value))}" sandbox credentialless referrerpolicy=no-referrer`
-        : '';
+      if (!isWhiteAttr) {
+        return '';
+      }
+      const escaped = xss.escapeAttrValue(sanitizeUrl(value));
+      if (requestsSessionRoute(tag, name, parsedAttributeValue(escaped))) {
+        return '';
+      }
+      return ` ${name}="${escaped}" sandbox credentialless referrerpolicy=no-referrer`;
     }
     return;
+  },
+  safeAttrValue(tag, name, value, cssFilter) {
+    const escaped = xss.safeAttrValue(tag, name, value, cssFilter);
+    return requestsSessionRoute(tag, name, parsedAttributeValue(escaped)) ? '' : escaped;
   },
   onTag(tag, html, options) {
     if (html === '<input disabled="" type="checkbox">' || html === '<input checked="" disabled="" type="checkbox">') {
@@ -59,23 +209,26 @@ const sanitizeTextPanelWhitelist = new xss.FilterXSS({
  * We don't allow form or input elements.
  */
 export function sanitize(unsanitizedString: string): string {
+  const addNoopener = (node: Element) => {
+    if (node.tagName === 'A' && node.getAttribute('target') === '_blank') {
+      node.setAttribute('rel', 'noopener noreferrer');
+    }
+  };
   try {
-    DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-      if (node.tagName === 'A' && node.getAttribute('target') === '_blank') {
-        node.setAttribute('rel', 'noopener noreferrer');
-      }
-    });
+    DOMPurify.addHook('afterSanitizeAttributes', addNoopener);
 
-    return DOMPurify.sanitize(unsanitizedString, {
-      USE_PROFILES: { html: true },
-      FORBID_TAGS: ['form', 'input'],
-      ADD_ATTR: ['target'],
-    });
+    return withSessionRequestFilter(() =>
+      DOMPurify.sanitize(unsanitizedString, {
+        USE_PROFILES: { html: true },
+        FORBID_TAGS: ['form', 'input'],
+        ADD_ATTR: ['target'],
+      })
+    );
   } catch (error) {
     console.error('String could not be sanitized', unsanitizedString);
     return escapeHtml(unsanitizedString);
   } finally {
-    DOMPurify.removeHook('afterSanitizeAttributes');
+    DOMPurify.removeHook('afterSanitizeAttributes', addNoopener);
   }
 }
 
@@ -89,7 +242,7 @@ function sanitizeTrustedTypesRSS(unsanitizedString: string): TrustedHTML {
 }
 
 function sanitizeTrustedTypes(unsanitizedString: string): TrustedHTML {
-  return DOMPurify.sanitize(unsanitizedString, { RETURN_TRUSTED_TYPE: true });
+  return withSessionRequestFilter(() => DOMPurify.sanitize(unsanitizedString, { RETURN_TRUSTED_TYPE: true }));
 }
 
 /**
@@ -110,7 +263,9 @@ export function sanitizeTextPanelContent(unsanitizedString: string): string {
 
 // Returns sanitized SVG, free from XSS attacks to be used when rendering SVG content.
 function sanitizeSVGContent(unsanitizedString: string): string {
-  return DOMPurify.sanitize(unsanitizedString, { USE_PROFILES: { svg: true, svgFilters: true } });
+  return withSessionRequestFilter(() =>
+    DOMPurify.sanitize(unsanitizedString, { USE_PROFILES: { svg: true, svgFilters: true } })
+  );
 }
 
 // Return a sanitized URL, free from XSS attacks, such as javascript:alert(1)
