@@ -111,15 +111,20 @@ func (c *filesConnector) handleRequest(ctx context.Context, name string, r *http
 		}
 	}
 
-	dualReadWriter, authorizer, err := c.createDualReadWriter(ctx, repo, readWriter)
-	if err != nil {
-		responder.Error(err)
-		return
-	}
-
 	opts, err := c.parseRequestOptions(r, name, repo)
 	if err != nil {
 		responder.Error(apierrors.NewBadRequest(err.Error()))
+		return
+	}
+
+	if err := c.authorizeRef(ctx, repo.Config(), opts.Ref); err != nil {
+		respondWithError(responder, err)
+		return
+	}
+
+	dualReadWriter, authorizer, err := c.createDualReadWriter(ctx, repo, readWriter)
+	if err != nil {
+		responder.Error(err)
 		return
 	}
 
@@ -397,6 +402,40 @@ func (c *filesConnector) authorizeListFiles(ctx context.Context, repoName string
 		Group:    provisioning.GROUP,
 		Resource: provisioning.RepositoryResourceInfo.GetName(),
 		Name:     repoName,
+	}, "")
+}
+
+// authorizeRef restricts which ref a caller may read from or write to. Any
+// caller may target the configured branch (an empty ref defaults to it).
+// Every other branch or commit is fetched with the repository's stored
+// credential, so it is limited to the callers allowed to list the repository's
+// refs: those who can update the repository or create jobs, mirroring the
+// "refs" case in authorizeRepositorySubresource.
+func (c *filesConnector) authorizeRef(ctx context.Context, cfg *provisioning.Repository, ref string) error {
+	if ref == "" {
+		return nil
+	}
+	if !cfg.Spec.Type.IsGit() {
+		return apierrors.NewBadRequest(fmt.Sprintf("%s repository does not support ref", cfg.Spec.Type))
+	}
+	if ref == cfg.Branch() {
+		return nil
+	}
+
+	if err := c.access.Check(ctx, authlib.CheckRequest{
+		Verb:      utils.VerbUpdate,
+		Group:     provisioning.GROUP,
+		Resource:  provisioning.RepositoryResourceInfo.GetName(),
+		Name:      cfg.Name,
+		Namespace: cfg.Namespace,
+	}, ""); err == nil {
+		return nil
+	}
+	return c.access.Check(ctx, authlib.CheckRequest{
+		Verb:      utils.VerbCreate,
+		Group:     provisioning.GROUP,
+		Resource:  provisioning.JobResourceInfo.GetName(),
+		Namespace: cfg.Namespace,
 	}, "")
 }
 
