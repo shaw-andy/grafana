@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"path"
@@ -22,6 +21,7 @@ import (
 	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/loganalytics"
 	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/macros"
 	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/types"
+	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/utils"
 )
 
 // AzureResourceGraphResponse is the json response object from the Azure Resource Graph Analytics API.
@@ -212,7 +212,7 @@ func (e *AzureResourceGraphDatasource) unmarshalResponse(res *http.Response) (Az
 	}()
 
 	if res.StatusCode/100 != 2 {
-		body, readErr := io.ReadAll(res.Body)
+		body, readErr := utils.ReadAllLimited(res.Body)
 		if readErr != nil {
 			return AzureResourceGraphResponse{}, fmt.Errorf("non-2xx response %s and failed to read body: %w", res.Status, readErr)
 		}
