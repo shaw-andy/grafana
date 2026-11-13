@@ -4,12 +4,15 @@ import {
   type DataSourceInstanceSettings,
   dateMath,
   FieldType,
+  getLinksSupplier,
 } from '@grafana/data';
 import { config } from '@grafana/runtime';
 import { getDataSourceInstanceSettings } from '@grafana/runtime/unstable';
 
+import { setupMockedDataSource } from '../mocks/CloudWatchDataSource';
 import { type CloudWatchQuery } from '../types';
 
+import { expectSafeConsoleHref, hostileRegions } from './consoleLinkSafety.test-utils';
 import { addDataLinksToLogsResponse } from './datalinks';
 
 jest.mock('@grafana/runtime/unstable', () => ({
@@ -347,4 +350,67 @@ describe('addDataLinksToLogsResponse', () => {
     expect(mockResponse.data[0].fields).toHaveLength(1);
     expect(mockResponse.data[0].fields[0].name).toBe('@message');
   });
+
+  it.each(hostileRegions)(
+    'does not attach a console data link whose host is taken from the region (%s)',
+    async (region) => {
+      // @ts-ignore ignore feature toggle type error
+      config.featureToggles.cloudWatchLogsInsightsDataLinks = true;
+      const { datasource } = setupMockedDataSource();
+
+      const mockResponse: DataQueryResponse = {
+        data: [
+          {
+            fields: [
+              {
+                name: '@message',
+                config: {},
+                values: ['log message one'],
+              },
+            ],
+            length: 1,
+            refId: 'A',
+          },
+        ],
+      };
+
+      const mockOptions = {
+        targets: [
+          {
+            refId: 'A',
+            expression: 'fields @timestamp | filter secretlogtext',
+            logGroupNames: ['secretloggroup'],
+            logGroups: [],
+            region,
+          },
+        ],
+        range: { ...time, raw: time },
+        scopedVars: {},
+      } as DataQueryRequest<CloudWatchQuery>;
+
+      await addDataLinksToLogsResponse(
+        mockResponse,
+        mockOptions,
+        datasource.resources.replaceVariableAndDisplayWarningIfMulti.bind(datasource.resources),
+        datasource.resources.expandVariableToArray.bind(datasource.resources),
+        datasource.resources.getActualRegion.bind(datasource.resources)
+      );
+
+      const linkField = mockResponse.data[0].fields.find((field) => field.config.links?.length);
+      if (!linkField?.config.links?.length) {
+        return;
+      }
+
+      const rawUrl = linkField.config.links[0].url;
+      expectSafeConsoleHref(rawUrl, 'secretloggroup');
+
+      const [link] = getLinksSupplier(
+        mockResponse.data[0],
+        linkField,
+        {},
+        (target) => target ?? ''
+      )({ valueRowIndex: 0 });
+      expectSafeConsoleHref(link?.href, 'secretloggroup');
+    }
+  );
 });

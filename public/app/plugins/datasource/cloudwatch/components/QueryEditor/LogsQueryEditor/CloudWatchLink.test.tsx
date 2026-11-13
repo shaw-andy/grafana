@@ -7,6 +7,8 @@ import { setupMockedDataSource } from '../../../mocks/CloudWatchDataSource';
 import { RequestMock } from '../../../mocks/Request';
 import { validLogsQuery } from '../../../mocks/queries';
 
+import { expectSafeConsoleHref, hostileRegions } from '../../../utils/consoleLinkSafety.test-utils';
+
 import { CloudWatchLink } from './CloudWatchLink';
 
 describe('CloudWatchLink', () => {
@@ -83,4 +85,42 @@ describe('CloudWatchLink', () => {
       );
     });
   });
+
+  it.each(hostileRegions)(
+    'does not point the Logs Insights button at a host taken from the region (%s)',
+    async (region) => {
+      const ds = setupMockedDataSource();
+      const query: CloudWatchLogsQuery = {
+        ...validLogsQuery,
+        region,
+        expression: 'fields @timestamp | filter secretlogtext',
+        logGroupNames: ['secretloggroup'],
+        logGroups: [{ name: 'secretloggroup', arn: 'secretloggroup' }],
+      };
+
+      const { rerender } = render(<CloudWatchLink query={query} datasource={ds.datasource} panelData={undefined} />);
+
+      await act(async () => {
+        rerender(
+          <CloudWatchLink
+            query={query}
+            datasource={ds.datasource}
+            panelData={{
+              timeRange: RequestMock.range,
+              request: RequestMock,
+              state: LoadingState.Done,
+              series: [],
+            }}
+          />
+        );
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      const href = screen.getByRole('link', { name: /CloudWatch Logs Insights/ }).getAttribute('href');
+      expectSafeConsoleHref(href, 'secretloggroup');
+    }
+  );
 });

@@ -3,6 +3,8 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"regexp"
 	"sort"
 	"testing"
 	"time"
@@ -1339,6 +1341,77 @@ func Test_ParseMetricDataQueries_ApplyMacros(t *testing.T) {
 			}, time.Now(), time.Now(), "us-east-1", logger, false)
 		assert.NoError(t, err)
 		assert.Equal(t, "SEARCH('{AWS/EC2,InstanceId}', 'Average', $__period_auto)", actual[0].Expression)
+	})
+}
+
+func TestBuildDeepLinkRegionCannotChooseConsoleHost(t *testing.T) {
+	start := time.Date(2016, 12, 31, 15, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	consoleHost := regexp.MustCompile(`^[a-z0-9-]+\.(console\.aws\.amazon\.com|console\.amazonaws-us-gov\.com|console\.amazonaws\.cn)$`)
+	regions := []string{
+		"attacker.example#",
+		"attacker.example?",
+		"attacker.example/",
+		"attacker.example\\",
+		"attacker.example@",
+		"attacker.example ",
+		"attacker.example",
+	}
+
+	for _, region := range regions {
+		t.Run(region, func(t *testing.T) {
+			queries, err := ParseMetricDataQueries([]backend.DataQuery{{
+				RefID: "A",
+				JSON: []byte(fmt.Sprintf(`{
+					"refId":"A",
+					"region":%q,
+					"namespace":"AWS/EC2",
+					"metricName":"CPUUtilization",
+					"dimensions":{"InstanceId":["i-12345678"]},
+					"statistic":"Average",
+					"period":"300",
+					"metricQueryType":0,
+					"metricEditorMode":0
+				}`, region)),
+			}}, start, end, "us-east-1", logger, false)
+			if err != nil {
+				return
+			}
+			require.NotEmpty(t, queries)
+
+			link, err := queries[0].BuildDeepLink(start, end)
+			if err != nil || link == "" {
+				return
+			}
+
+			parsed, parseErr := url.Parse(link)
+			require.NoError(t, parseErr)
+			require.Empty(t, parsed.User.String())
+			require.Regexp(t, consoleHost, parsed.Hostname())
+		})
+	}
+
+	t.Run("us-east-1 stays on the commercial console", func(t *testing.T) {
+		queries, err := ParseMetricDataQueries([]backend.DataQuery{{
+			RefID: "A",
+			JSON: []byte(`{
+				"refId":"A",
+				"region":"us-east-1",
+				"namespace":"AWS/EC2",
+				"metricName":"CPUUtilization",
+				"dimensions":{"InstanceId":["i-12345678"]},
+				"statistic":"Average",
+				"period":"300",
+				"metricQueryType":0,
+				"metricEditorMode":0
+			}`),
+		}}, start, end, "us-east-1", logger, false)
+		require.NoError(t, err)
+		link, err := queries[0].BuildDeepLink(start, end)
+		require.NoError(t, err)
+		parsed, err := url.Parse(link)
+		require.NoError(t, err)
+		require.Equal(t, "us-east-1.console.aws.amazon.com", parsed.Hostname())
 	})
 }
 

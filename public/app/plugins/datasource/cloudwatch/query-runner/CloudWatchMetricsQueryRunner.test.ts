@@ -3,6 +3,8 @@ import { of } from 'rxjs';
 import { dateTime, type CustomVariableModel, getFrameDisplayName, VariableHide } from '@grafana/data';
 import { toDataQueryResponse } from '@grafana/runtime';
 
+import { expectSafeConsoleHref, hostileRegions } from '../utils/consoleLinkSafety.test-utils';
+
 import { MetricQueryType, MetricEditorMode, type CloudWatchMetricsQuery } from '../dataquery.gen';
 import {
   namespaceVariable,
@@ -158,6 +160,37 @@ describe('CloudWatchMetricsQueryRunner', () => {
         expect(received[0]?.errors?.[1].message).toEqual(expectedUsEast2Message);
       });
     });
+
+    it.each(hostileRegions)(
+      'does not put a quotas console host taken from the region into the throttling error (%s)',
+      (region) => {
+        const { runner } = setupMockedMetricsQueryRunner();
+        const partialQuery: CloudWatchMetricsQuery = {
+          metricQueryType: MetricQueryType.Search,
+          metricEditorMode: MetricEditorMode.Builder,
+          queryMode: 'Metrics',
+          namespace: 'AWS/EC2',
+          metricName: 'CPUUtilization',
+          statistic: 'Average',
+          period: '300',
+          expression: '',
+          id: '',
+          region,
+          refId: 'A',
+        };
+        const errors = runner.enrichThrottlingErrorMessages(
+          { ...setupMockedMetricsQueryRunner().request, targets: [partialQuery] },
+          [{ message: 'Throttling: exception', refId: 'A' }]
+        );
+
+        const message = errors?.[0]?.message ?? '';
+        const consoleUrl = message.split(' at ')[1]?.split(' to request ')[0];
+        if (message === 'Throttling: exception' || !consoleUrl) {
+          return;
+        }
+        expectSafeConsoleHref(consoleUrl);
+      }
+    );
 
     describe('When performing CloudWatch metrics query', () => {
       const queries: CloudWatchMetricsQuery[] = [
