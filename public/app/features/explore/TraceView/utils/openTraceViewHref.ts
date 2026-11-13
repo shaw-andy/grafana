@@ -38,20 +38,21 @@ export function getTraceViewLinkAttrs(href: string): TraceViewLinkAttrs | undefi
 }
 
 function resolveTraceViewHref(href: string): ResolvedTraceViewHref | undefined {
-  const sanitized = textUtil.sanitizeUrl(href).trim();
+  // The sanitizer blanks protocol-relative URLs (`//…`), so give them this page's protocol and open them in a new tab.
+  const trimmed = href.trim();
+  const withProtocol = trimmed.startsWith('//') ? `${window.location.protocol}${trimmed}` : trimmed;
+  const sanitized = textUtil.sanitizeUrl(withProtocol).trim();
   if (!sanitized || sanitized === 'about:blank') {
     return undefined;
   }
 
-  // Same-tab only for Grafana paths. Reject protocol-relative URLs (`//…`).
-  if (sanitized.startsWith('/') && !sanitized.startsWith('//')) {
+  // Same-tab only for Grafana paths.
+  if (sanitized.startsWith('/')) {
     return { href: sanitized, sameTab: true };
   }
 
-  const absolute = sanitized.startsWith('//') ? `${window.location.protocol}${sanitized}` : sanitized;
-
   try {
-    const url = new URL(absolute);
+    const url = new URL(sanitized);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       return undefined;
     }
