@@ -1,10 +1,12 @@
+import DOMPurify from 'dompurify';
 import type BaseLayer from 'ol/layer/Base';
 import LayerGroup from 'ol/layer/Group';
 import Layer from 'ol/layer/Layer';
 import type Source from 'ol/source/Source';
 import type { Attribution, AttributionLike } from 'ol/source/Source';
 
-import { type MapLayerOptions, type MapLayerRegistryItem, textUtil } from '@grafana/data';
+import { type MapLayerOptions, type MapLayerRegistryItem } from '@grafana/data';
+import { config } from '@grafana/runtime';
 
 import { geomapLayerRegistry } from '../layers/registry';
 import { type ControlsOptions, type MapLayerState } from '../types';
@@ -34,6 +36,70 @@ const sanitizedAttributions = new WeakSet<Attribution>();
 const guardedSources = new WeakSet<Source>();
 const observedLayers = new WeakSet<BaseLayer>();
 
+/**
+ * Attribution is a credit line: text and links. Anything that makes the browser fetch an address on
+ * its own (an image, media, a background, a stylesheet) would be requested with the viewer's
+ * session, so only inline text markup is kept. Content of a dropped element stays as text.
+ */
+const ATTRIBUTION_TAGS = ['a', 'abbr', 'b', 'br', 'em', 'i', 's', 'small', 'span', 'strong', 'sub', 'sup', 'u'];
+const ATTRIBUTION_ATTRS = ['href', 'target', 'title'];
+
+const attributionPurifier = DOMPurify(window);
+attributionPurifier.addHook('afterSanitizeAttributes', (node) => {
+  if (node.nodeName !== 'A') {
+    return;
+  }
+  const href = node.getAttribute('href');
+  if (href !== null && !isExternalHttpUrl(href)) {
+    node.removeAttribute('href');
+  }
+  if (node.hasAttribute('target')) {
+    if (node.getAttribute('target') === '_blank') {
+      node.setAttribute('rel', 'noopener noreferrer');
+    } else {
+      node.removeAttribute('target');
+    }
+  }
+});
+
+function originOf(url: string | undefined): string | undefined {
+  if (!url) {
+    return undefined;
+  }
+  try {
+    return new URL(url, window.location.href).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A link may only point at another http(s) host. A link into this Grafana server would act with the
+ * viewer's session when followed, and a relative address always resolves to it.
+ */
+function isExternalHttpUrl(href: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(href, window.location.href);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return false;
+  }
+  const grafanaOrigins = [window.location.origin, originOf(config.appUrl)];
+  return !grafanaOrigins.includes(url.origin);
+}
+
+export function sanitizeAttribution(attribution: string): string {
+  return attributionPurifier.sanitize(attribution, {
+    ALLOWED_TAGS: ATTRIBUTION_TAGS,
+    ALLOWED_ATTR: ATTRIBUTION_ATTRS,
+    ALLOW_DATA_ATTR: false,
+    ALLOW_ARIA_ATTR: false,
+  });
+}
+
 function sanitizeAttributions(attributions: AttributionLike | undefined): AttributionLike | undefined {
   if (!attributions) {
     return undefined;
@@ -45,10 +111,8 @@ function sanitizeAttributions(attributions: AttributionLike | undefined): Attrib
   const sanitized: Attribution = (viewState) => {
     const value = resolve(viewState);
     const entries = Array.isArray(value) ? value : [value];
-    // Attribution is a credit line — a link, a small logo, some text. The text panel sanitizer keeps
-    // more than that (a sandboxed iframe, for one), so use the stricter one and drop an entry that
-    // came back empty rather than render a blank bullet for it
-    return entries.map((entry) => textUtil.sanitize(entry)).filter((entry) => entry.trim() !== '');
+    // Drop an entry that came back empty rather than render a blank bullet for it
+    return entries.map((entry) => sanitizeAttribution(entry)).filter((entry) => entry.trim() !== '');
   };
   sanitizedAttributions.add(sanitized);
   return sanitized;

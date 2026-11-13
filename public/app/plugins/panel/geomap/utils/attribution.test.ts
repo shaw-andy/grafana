@@ -13,7 +13,12 @@ import { type MapLayerHandler, type MapLayerOptions } from '@grafana/data';
 import { geomapLayerRegistry } from '../layers/registry';
 import { type MapLayerState } from '../types';
 
-import { captureLayerAttribution, guardLayerAttribution, updateAttributionVisibility } from './attribution';
+import {
+  captureLayerAttribution,
+  guardLayerAttribution,
+  sanitizeAttribution,
+  updateAttributionVisibility,
+} from './attribution';
 
 const getIfExists = jest.spyOn(geomapLayerRegistry, 'getIfExists');
 
@@ -35,8 +40,8 @@ const attributionsOf = (layer: TileLayer<XYZ>) => {
   return Array.isArray(attribution) ? attribution : [attribution];
 };
 
-const XSS_ATTRIBUTION = '<img src="x" onerror="window.__pwned = 1">';
-const SAFE_ATTRIBUTION = '<img src="x">';
+const XSS_ATTRIBUTION = '© Tiles<img src="x" onerror="window.__pwned = 1">';
+const SAFE_ATTRIBUTION = '© Tiles';
 const LEGITIMATE_ATTRIBUTION = '<a href="https://carto.com/attribution/">©CARTO</a>';
 
 const layerState = (layer: MapLayerState['layer'], options: Partial<MapLayerOptions> = {}): MapLayerState => ({
@@ -52,6 +57,46 @@ const required = { id: 'carto', name: 'CARTO', create: jest.fn(), requiresAttrib
 
 beforeEach(() => {
   jest.clearAllMocks();
+});
+
+describe('sanitizeAttribution', () => {
+  it.each([
+    ['an image', '© Tiles<img src="/logout">'],
+    ['a responsive image', '© Tiles<picture><source srcset="/logout"><img src="/logout"></picture>'],
+    ['an image input', '© Tiles<input type="image" src="/logout">'],
+    ['media', '© Tiles<video poster="/logout"><source src="/logout"></video><audio src="/logout"></audio>'],
+    ['an embedded object', '© Tiles<object data="/logout"></object><embed src="/logout">'],
+    ['an svg image', '© Tiles<svg><image href="/logout"></image></svg>'],
+    ['a stylesheet', '© Tiles<link rel="stylesheet" href="/logout"><style>@import "/logout";</style>'],
+    ['a background', '© Tiles<div style="background:url(/logout)"></div><table background="/logout"></table>'],
+    ['a styled inline element', '© <span style="background:url(/logout)">Tiles</span>'],
+  ])('drops markup that loads an address on its own: %s', (_label, attribution) => {
+    const container = document.createElement('div');
+    container.innerHTML = sanitizeAttribution(attribution);
+
+    expect(container.textContent).toBe('© Tiles');
+    expect(container.querySelector('[src], [srcset], [poster], [data], [background], [style], [href]')).toBeNull();
+  });
+
+  it('keeps the text of a dropped element', () => {
+    expect(sanitizeAttribution('<div>© <u>Tiles</u></div>')).toBe('© <u>Tiles</u>');
+  });
+
+  it.each([
+    ['a relative link', '/profile/switch-org/2'],
+    ['a link to this server', `${window.location.origin}/logout`],
+    ['a protocol relative link to this server', `//${window.location.host}/logout`],
+    ['a script link', 'javascript:alert(1)'],
+    ['a data link', 'data:text/html,hi'],
+  ])('removes the address of %s', (_label, href) => {
+    expect(sanitizeAttribution(`<a href="${href}">© Tiles</a>`)).toBe('<a>© Tiles</a>');
+  });
+
+  it('drops a target other than a new tab', () => {
+    expect(sanitizeAttribution('<a href="https://tiles.example/" target="grafana">© Tiles</a>')).toBe(
+      '<a href="https://tiles.example/">© Tiles</a>'
+    );
+  });
 });
 
 describe('guardLayerAttribution', () => {
