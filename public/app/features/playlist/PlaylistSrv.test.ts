@@ -171,4 +171,106 @@ describe('PlaylistSrv', () => {
     const hasStartPage = entries.some((entry: { pathname: string }) => entry.pathname === '/playlists/play/foo');
     expect(hasStartPage).toBe(false);
   });
+
+  // describeInterval parses the count with parseInt, so fractional intervals such as
+  // "0.5s" and "0.0s" are 0ms. Negative units and a bare "-1" are negative milliseconds.
+  // A non-positive delay is what makes the play page rotate and then reload immediately.
+  const nonPositiveIntervals = ['0s', '-1s', '0ms', '-1', '0.5s', '00s', '0.0s', '-0.1s'];
+  const minimumNonPositiveDelayMs = 5000;
+
+  function playlistWithInterval(interval: string): Playlist {
+    return {
+      ...mockPlaylist,
+      spec: {
+        title: 'The display',
+        interval,
+        items: [{ type: 'dashboard_by_uid', value: 'aaa' }],
+      },
+    };
+  }
+
+  function captureScheduledTimers() {
+    const scheduled: Array<{ callback: () => void; delay: number }> = [];
+    const spy = jest.spyOn(global, 'setTimeout').mockImplementation(((callback: TimerHandler, delay?: number) => {
+      const numericDelay = typeof delay === 'number' ? delay : 0;
+      scheduled.push({
+        callback: () => {
+          if (typeof callback === 'function') {
+            callback();
+          }
+        },
+        delay: numericDelay,
+      });
+      return scheduled.length as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout);
+    return { scheduled, restore: () => spy.mockRestore() };
+  }
+
+  // jsdom clamps a negative timeout to 0 and Node then runs a sub-1ms timeout on the next tick,
+  // so a delay that is not positive fires before any later timer. Run only those callbacks.
+  function runNonPositiveTimers(scheduled: Array<{ callback: () => void; delay: number }>) {
+    let ran = 0;
+    while (ran < 30) {
+      const index = scheduled.findIndex((timer) => timer.delay <= 0);
+      if (index < 0) {
+        return;
+      }
+      const [timer] = scheduled.splice(index, 1);
+      timer.callback();
+      ran += 1;
+    }
+  }
+
+  describe('when the stored interval is non-positive', () => {
+    it.each(nonPositiveIntervals)('schedules %s at least 5 seconds later', async (interval) => {
+      const { scheduled, restore } = captureScheduledTimers();
+      try {
+        await srv.start(playlistWithInterval(interval));
+
+        expect(scheduled.length).toBeGreaterThan(0);
+        for (const timer of scheduled) {
+          expect(timer.delay).toBeGreaterThanOrEqual(minimumNonPositiveDelayMs);
+        }
+      } finally {
+        restore();
+        srv.stop();
+      }
+    });
+
+    it.each(nonPositiveIntervals)(
+      'does not assign the play URL back to the window when %s would fire immediately',
+      async (interval) => {
+        const { scheduled, restore } = captureScheduledTimers();
+        try {
+          await srv.start(playlistWithInterval(interval));
+          runNonPositiveTimers(scheduled);
+
+          expect(hrefMock).not.toHaveBeenCalledWith(initialUrl);
+        } finally {
+          restore();
+          srv.stop();
+        }
+      }
+    );
+  });
+
+  describe('when the stored interval is already a positive duration', () => {
+    it.each([
+      ['1s', 1000],
+      ['5s', 5000],
+      ['10s', 10000],
+      ['5m', 300000],
+    ])('schedules %s as %d milliseconds', async (interval, delay) => {
+      const { scheduled, restore } = captureScheduledTimers();
+      try {
+        await srv.start(playlistWithInterval(interval));
+
+        expect(scheduled).toHaveLength(1);
+        expect(scheduled[0].delay).toBe(delay);
+      } finally {
+        restore();
+        srv.stop();
+      }
+    });
+  });
 });
