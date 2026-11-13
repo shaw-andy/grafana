@@ -203,19 +203,19 @@ func (q *CloudWatchQuery) BuildDeepLink(startTime time.Time, endTime time.Time) 
 		return "", fmt.Errorf("could not marshal link: %w", err)
 	}
 
+	if !isConsoleRegion(q.Region) {
+		return "", nil
+	}
 	endpoint, err := getEndpoint(q.Region)
 	if err != nil {
 		return "", err
 	}
-	consoleURL, err := url.Parse(fmt.Sprintf(`https://%s/cloudwatch/deeplink.js`, endpoint))
-	if err != nil {
-		return "", fmt.Errorf("unable to parse CloudWatch console deep link")
-	}
+	consoleURL := &url.URL{Scheme: "https", Host: endpoint, Path: "/cloudwatch/deeplink.js"}
 
-	fragment := consoleURL.Query()
+	fragment := url.Values{}
 	fragment.Set("graph", string(linkProps))
 
-	query := consoleURL.Query()
+	query := url.Values{}
 	query.Set("region", q.Region)
 	consoleURL.RawQuery = query.Encode()
 
@@ -513,7 +513,18 @@ func parseDimensions(dimensions dataquery.Dimensions) (map[string][]string, erro
 	return parsedDimensions, nil
 }
 
+// The region becomes the leftmost label of the console host, so anything other than a
+// single DNS label would let it change which host the link points to.
+var consoleRegionLabel = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+func isConsoleRegion(region string) bool {
+	return len(region) <= 63 && consoleRegionLabel.MatchString(region)
+}
+
 func getEndpoint(region string) (string, error) {
+	if !isConsoleRegion(region) {
+		return "", fmt.Errorf("invalid region for CloudWatch console link: %q", region)
+	}
 	resolver := cloudwatch.NewDefaultEndpointResolver()
 	endpoint, err := resolver.ResolveEndpoint(region, cloudwatch.EndpointResolverOptions{})
 	if err != nil {
