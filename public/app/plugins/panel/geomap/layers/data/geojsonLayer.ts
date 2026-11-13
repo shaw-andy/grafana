@@ -1,8 +1,6 @@
 import { type FeatureLike } from 'ol/Feature';
 import { unByKey } from 'ol/Observable';
-import GeoJSON from 'ol/format/GeoJSON';
 import VectorImage from 'ol/layer/VectorImage';
-import VectorSource from 'ol/source/Vector';
 import { type Style } from 'ol/style';
 import { ReplaySubject } from 'rxjs';
 import { map as rxjsmap, first } from 'rxjs/operators';
@@ -26,6 +24,7 @@ import {
 import { getStyleConfigState } from '../../style/utils';
 import { type FeatureRuleConfig, type FeatureStyleConfig } from '../../types';
 import { checkFeatureMatchesStyleRule } from '../../utils/checkFeatureMatchesStyleRule';
+import { createGeoJSONSource } from '../../utils/geojsonSource';
 import { getLayerPropertyInfo } from '../../utils/getFeatures';
 import { getPublicGeoJSONFiles } from '../../utils/utils';
 
@@ -82,10 +81,7 @@ export const geojsonLayer: MapLayerRegistryItem<GeoJSONMapperConfig> = {
       ? interpolatedUrl
       : `${window.__grafana_public_path__}${interpolatedUrl.replace(/^(public\/)/, '')}`;
 
-    const source = new VectorSource({
-      url: layerUrl,
-      format: new GeoJSON(),
-    });
+    const source = createGeoJSONSource(layerUrl);
 
     const features = new ReplaySubject<FeatureLike[]>();
 

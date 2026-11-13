@@ -1,8 +1,7 @@
 import { type FeatureLike } from 'ol/Feature';
 import { unByKey } from 'ol/Observable';
-import GeoJSON from 'ol/format/GeoJSON';
 import VectorImage from 'ol/layer/VectorImage';
-import VectorSource from 'ol/source/Vector';
+import type VectorSource from 'ol/source/Vector';
 import { Fill, Stroke, Style } from 'ol/style';
 import { ReplaySubject } from 'rxjs';
 import { map as rxjsmap, first } from 'rxjs/operators';
@@ -16,6 +15,7 @@ import { defaultStyleConfig, type StyleConfig, type StyleConfigState } from '../
 import { getStyleConfigState } from '../../style/utils';
 import { type FeatureRuleConfig, type FeatureStyleConfig } from '../../types';
 import { checkFeatureMatchesStyleRule } from '../../utils/checkFeatureMatchesStyleRule';
+import { createGeoJSONSource } from '../../utils/geojsonSource';
 import { getLayerPropertyInfo } from '../../utils/getFeatures';
 import { getStyleDimension, getPublicGeoJSONFiles } from '../../utils/utils';
 
@@ -62,10 +62,7 @@ export const dynamicGeoJSONLayer: MapLayerRegistryItem<DynamicGeoJSONMapperConfi
   create: async (_map, options, _eventBus, theme) => {
     const config = { ...defaultOptions, ...options.config };
 
-    const source = new VectorSource({
-      url: config.src,
-      format: new GeoJSON(),
-    });
+    const source = createGeoJSONSource(config.src);
 
     const features = new ReplaySubject<FeatureLike[]>();
 
