@@ -325,7 +325,8 @@ func (s *AccessControlStore) SearchUsersPermissions(ctx context.Context, orgID i
 	return mapped, nil
 }
 
-// GetUsersBasicRoles returns the list of user basic roles (Admin, Editor, Viewer, Grafana Admin) indexed by UserID
+// GetUsersBasicRoles returns the list of user basic roles (Admin, Editor, Viewer, Grafana Admin) indexed by UserID.
+// Only members of the organization are returned; Grafana Admin is added to a member's org role.
 func (s *AccessControlStore) GetUsersBasicRoles(ctx context.Context, userFilter []int64, orgID int64) (map[int64][]string, error) {
 	ctx, span := tracer.Start(ctx, "accesscontrol.database.GetUsersBasicRoles")
 	defer span.End()
@@ -341,8 +342,8 @@ func (s *AccessControlStore) GetUsersBasicRoles(ctx context.Context, userFilter 
 		q := `
 		SELECT u.id, ou.role, u.is_admin
 		FROM ` + s.sql.GetDialect().Quote("user") + ` AS u
-		LEFT JOIN org_user AS ou ON u.id = ou.user_id
-		WHERE (u.is_admin OR ou.org_id = ?)
+		INNER JOIN org_user AS ou ON u.id = ou.user_id
+		WHERE ou.org_id = ?
 		`
 		params := []any{orgID}
 		if len(userFilter) > 0 {

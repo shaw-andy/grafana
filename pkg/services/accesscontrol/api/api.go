@@ -107,6 +107,15 @@ func (api *AccessControlAPI) searchUsersPermissions(c *contextmodel.ReqContext) 
 			return response.JSON(http.StatusInternalServerError, err.Error())
 		}
 
+		evaluator := ac.EvalPermission(ac.ActionUsersPermissionsRead, ac.Scope("users", "id", strconv.FormatInt(userID, 10)))
+		hasAccess, err := api.AccessControl.Evaluate(ctx, c.SignedInUser, evaluator)
+		if err != nil {
+			return response.Error(http.StatusInternalServerError, "failed to evaluate permissions", err)
+		}
+		if !hasAccess {
+			return response.Error(http.StatusForbidden, "not allowed to read this identity's permissions", nil)
+		}
+
 		searchOptions.UserID = userID
 	}
 
