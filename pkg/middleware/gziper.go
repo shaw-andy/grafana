@@ -12,6 +12,7 @@ import (
 	gzip "github.com/klauspost/pgzip"
 
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/util"
 	"github.com/grafana/grafana/pkg/web"
 )
 
@@ -195,11 +196,12 @@ func Gziper() func(http.Handler) http.Handler {
 			}
 			if err != nil {
 				logger := gzipLogger.FromContext(req.Context())
+				path, _ := util.SanitizePath(req.URL.Path)
 				if req.Context().Err() != nil {
 					// The client hung up. Expected traffic, not a server problem.
-					logger.Debug("Failed to write gzipped response", "path", req.URL.Path, "error", err)
+					logger.Debug("Failed to write gzipped response", "path", path, "error", err)
 				} else {
-					logger.Warn("Failed to write gzipped response", "path", req.URL.Path, "error", err)
+					logger.Warn("Failed to write gzipped response", "path", path, "error", err)
 				}
 			}
 		})

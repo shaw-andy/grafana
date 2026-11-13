@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/grafana/grafana/pkg/middleware"
@@ -102,9 +103,11 @@ func (l *loggerImpl) prepareLogParams(c *contextmodel.ReqContext, duration time.
 		lvl = errutil.LevelError
 	}
 
+	path, maskedValues := util.SanitizePath(r.URL.Path)
+
 	logParams := []any{
 		"method", r.Method,
-		"path", r.URL.Path,
+		"path", path,
 		"status", status,
 		"remote_addr", c.RemoteAddr(),
 		"time_ms", int64(duration / time.Millisecond),
@@ -132,24 +135,33 @@ func (l *loggerImpl) prepareLogParams(c *contextmodel.ReqContext, duration time.
 	rmd := requestmeta.GetRequestMetaData(c.Req.Context())
 	logParams = append(logParams, "status_source", rmd.StatusSource)
 
-	logParams = append(logParams, errorLogParams(c.Error)...)
+	logParams = append(logParams, errorLogParams(c.Error, maskedValues)...)
 
 	return logParams, lvl
 }
 
-func errorLogParams(err error) []any {
+func errorLogParams(err error, maskedValues []string) []any {
 	if err == nil {
 		return nil
 	}
 
 	var gfErr errutil.Error
 	if !errors.As(err, &gfErr) {
-		return []any{"error", err.Error()}
+		return []any{"error", maskValues(err.Error(), maskedValues)}
 	}
 
 	return []any{
 		"errorReason", gfErr.Reason,
 		"errorMessageID", gfErr.MessageID,
-		"error", gfErr.LogMessage,
+		"error", maskValues(gfErr.LogMessage, maskedValues),
 	}
+}
+
+// maskValues removes credentials that were masked in the request path from
+// other log fields, so that a handler error cannot reintroduce them.
+func maskValues(s string, values []string) string {
+	for _, v := range values {
+		s = strings.ReplaceAll(s, v, "hidden")
+	}
+	return s
 }

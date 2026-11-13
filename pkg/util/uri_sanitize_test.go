@@ -55,6 +55,11 @@ func Test_sanitizeURI(t *testing.T) {
 			want:  "https://grafana.com/?sig=testing-a-generic-parameter",
 		},
 		{
+			name:  "Receiving public dashboard URL under a sub path should remove the access token",
+			input: "https://grafana.com/grafana/public-dashboards/00000000000000000000000000000000?orgId=1",
+			want:  "https://grafana.com/grafana/public-dashboards/hidden?orgId=1",
+		},
+		{
 			name:        "Receiving invalid URL string should return empty string",
 			input:       "this is not a valid URL",
 			want:        "",
@@ -70,6 +75,60 @@ func Test_sanitizeURI(t *testing.T) {
 				assert.NoError(t, err)
 			}
 			assert.Equalf(t, tt.want, url, "SanitizeURI(%v)", tt.input)
+		})
+	}
+}
+
+func TestSanitizePath(t *testing.T) {
+	const placeholder = "00000000000000000000000000000000"
+	const dashedPlaceholder = "00000000-0000-0000-0000-000000000000"
+
+	tests := []struct {
+		name       string
+		input      string
+		want       string
+		wantMasked []string
+	}{
+		{
+			name:       "public dashboard api",
+			input:      "/api/public/dashboards/" + placeholder + "/panels/2/query",
+			want:       "/api/public/dashboards/hidden/panels/2/query",
+			wantMasked: []string{placeholder},
+		},
+		{
+			name:       "public dashboard view",
+			input:      "/public-dashboards/" + dashedPlaceholder,
+			want:       "/public-dashboards/hidden",
+			wantMasked: []string{dashedPlaceholder},
+		},
+		{
+			name:       "public dashboard bootdata",
+			input:      "/bootdata/" + placeholder,
+			want:       "/bootdata/hidden",
+			wantMasked: []string{placeholder},
+		},
+		{
+			name:       "empty segments and mixed case",
+			input:      "/API/Public//Dashboards//" + placeholder,
+			want:       "/API/Public//Dashboards//hidden",
+			wantMasked: []string{placeholder},
+		},
+		{
+			name:  "public dashboard list",
+			input: "/public-dashboards/list",
+			want:  "/public-dashboards/list",
+		},
+		{
+			name:  "unrelated path",
+			input: "/api/dashboards/uid/abc",
+			want:  "/api/dashboards/uid/abc",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, masked := SanitizePath(tt.input)
+			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.wantMasked, masked)
 		})
 	}
 }
