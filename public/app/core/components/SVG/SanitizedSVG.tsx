@@ -8,7 +8,15 @@ type SanitizedSVGProps = Props & { cleanStyle?: boolean };
 
 export const SanitizedSVG = (props: SanitizedSVGProps) => {
   const { cleanStyle, ...inlineSvgProps } = props;
-  return <SVG {...inlineSvgProps} cacheRequests={true} preProcessor={cleanStyle ? getCleanSVGAndStyle : getCleanSVG} />;
+  // The src is often saved with a dashboard, so the request must not carry the viewer's cookies
+  return (
+    <SVG
+      {...inlineSvgProps}
+      fetchOptions={{ ...inlineSvgProps.fetchOptions, credentials: 'omit' }}
+      cacheRequests={true}
+      preProcessor={cleanStyle ? getCleanSVGAndStyle : getCleanSVG}
+    />
+  );
 };
 
 let cache = new Map<string, string>();
