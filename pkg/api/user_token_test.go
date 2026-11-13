@@ -206,6 +206,8 @@ func TestHTTPServer_RotateUserAuthTokenRedirect(t *testing.T) {
 					}
 
 					req := server.NewGetRequest(urlString)
+					req.Header.Set("Sec-Fetch-Mode", "navigate")
+					req.Header.Set("Sec-Fetch-Dest", "document")
 					req.AddCookie(&http.Cookie{Name: "grafana_session", Value: "123", Path: "/"})
 
 					if sessionCase.useSessionStorageRedirect {
