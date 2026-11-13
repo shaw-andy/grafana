@@ -214,6 +214,17 @@ describe('PlaylistPage', () => {
     });
 
     it('shows the PR banner with source and target branches when redirected with PR params', async () => {
+      jest
+        .spyOn(backendSrv, 'fetch')
+        .mockImplementation((options) =>
+          of(
+            createFetchResponse(
+              options.url.endsWith('/settings')
+                ? { items: [{ name: 'repo', type: 'github', target: 'folder', url: 'https://github.com/org/repo' }] }
+                : {}
+            )
+          )
+        );
       locationService.push(
         '/playlists?new_pull_request_url=https%3A%2F%2Fgithub.com%2Forg%2Frepo%2Fpull%2F1' +
           '&repo_type=github&action=create&ref=feature-branch&repo_branch=main&repo_url=https%3A%2F%2Fgithub.com%2Forg%2Frepo'
