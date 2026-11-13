@@ -39,8 +39,9 @@ function removeSameOriginResources(node: Element) {
 }
 
 /**
- * Sanitizes HTML that comes from the plugin catalog. Besides removing scripts, it drops every resource the page
- * would load from this Grafana server, because those requests carry the viewer's session.
+ * Sanitizes plugin-authored HTML (catalog or installed plugin readme, changelog, and notes). Besides removing
+ * scripts, it drops every resource the page would load from this Grafana server, because those requests carry the
+ * viewer's session.
  */
 export function sanitizeCatalogHtml(html: string): string {
   DOMPurify.addHook('afterSanitizeAttributes', removeSameOriginResources);

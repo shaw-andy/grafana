@@ -172,7 +172,7 @@ async function getPluginVersions(id: string, isPublished: boolean): Promise<Vers
 async function getLocalPluginReadme(id: string): Promise<string> {
   try {
     const markdown: string = await getBackendSrv().get(`${API_ROOT}/${id}/markdown/README`);
-    const markdownAsHtml = markdown ? renderMarkdown(markdown) : '';
+    const markdownAsHtml = markdown ? sanitizeCatalogHtml(renderMarkdown(markdown)) : '';
 
     return markdownAsHtml;
   } catch (error) {
@@ -186,7 +186,7 @@ async function getLocalPluginReadme(id: string): Promise<string> {
 async function getLocalPluginChangelog(id: string): Promise<string> {
   try {
     const markdown: string = await getBackendSrv().get(`${API_ROOT}/${id}/markdown/CHANGELOG`);
-    const markdownAsHtml = markdown ? renderMarkdown(markdown) : '';
+    const markdownAsHtml = markdown ? sanitizeCatalogHtml(renderMarkdown(markdown)) : '';
     return markdownAsHtml;
   } catch (error) {
     if (isFetchError(error)) {
