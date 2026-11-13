@@ -17,8 +17,13 @@ export function AnnotationTooltipBody({
   const styles = useStyles2(getStyles);
   return (
     <div className={styles.body}>
-      {title && <div dangerouslySetInnerHTML={{ __html: textUtil.sanitize(title) }}></div>}
-      {text && <div className={styles.text} dangerouslySetInnerHTML={{ __html: textUtil.sanitize(text) }} />}
+      {title && <div dangerouslySetInnerHTML={{ __html: textUtil.sanitizeWithoutResourceLoading(title) }}></div>}
+      {text && (
+        <div
+          className={styles.text}
+          dangerouslySetInnerHTML={{ __html: textUtil.sanitizeWithoutResourceLoading(text) }}
+        />
+      )}
       {alertText}
       <div>
         <Stack gap={0.5} wrap={true}>
