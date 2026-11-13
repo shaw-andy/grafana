@@ -13,6 +13,7 @@ import (
 	"github.com/grafana/grafana-app-sdk/logging"
 	provisioning "github.com/grafana/grafana/apps/provisioning/pkg/apis/provisioning/v0alpha1"
 	"github.com/grafana/grafana/apps/provisioning/pkg/connection"
+	"github.com/grafana/grafana/apps/provisioning/pkg/repository"
 	"github.com/grafana/grafana/apps/provisioning/pkg/repository/github"
 	common "github.com/grafana/grafana/pkg/apimachinery/apis/common/v0alpha1"
 )
@@ -325,9 +326,15 @@ func (c *Connection) GenerateRepositoryToken(ctx context.Context, repo *provisio
 		return nil, errors.New("repository is not a GitHub-based repo")
 	}
 
-	_, repoName, err := github.ParseOwnerRepoGithub(repo.URL())
+	repoURL := repo.URL()
+	_, repoName, err := github.ParseOwnerRepoGithub(repoURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse repo URL: %w", err)
+	}
+
+	origin, err := github.RepositoryOrigin(repoURL, c.cfg.CustomServerURL())
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", connection.ErrRepositoryAccess, err)
 	}
 
 	// Create the GitHub client with the JWT token
@@ -350,6 +357,8 @@ func (c *Connection) GenerateRepositoryToken(ctx context.Context, repo *provisio
 
 		return nil, fmt.Errorf("failed to create installation access token: %w", err)
 	}
+
+	repository.BindConnectionOrigin(repo, origin)
 
 	return &connection.ExpirableSecureValue{
 		Token:     common.RawSecureValue(installationToken.Token),

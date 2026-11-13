@@ -44,6 +44,13 @@ func Validate(_ context.Context, obj runtime.Object, allowInsecure bool) field.E
 		if !strings.HasPrefix(gh.URL, "https://") && !strings.HasPrefix(gh.URL, "http://") {
 			list = append(list, field.Invalid(field.NewPath("spec", "github", "url"), gh.URL, "URL must start with https:// or http://"))
 		}
+		// A connection issues credentials for its own GitHub server, and a github
+		// repository's connection is a github.com one.
+		if repo.HasConnection() {
+			if _, err := RepositoryOrigin(gh.URL, ""); err != nil {
+				list = append(list, field.Invalid(field.NewPath("spec", "github", "url"), gh.URL, "a repository that uses a connection must be hosted on https://github.com"))
+			}
+		}
 	}
 
 	if len(list) > 0 {

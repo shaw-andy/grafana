@@ -34,4 +34,13 @@ func (p *provider) ListRepositories(ctx context.Context) ([]provisioning.Externa
 	return repos, nil
 }
 
-var _ oauth.Provider = (*provider)(nil)
+// RepositoryOrigin binds the OAuth access token to github.com, the only server
+// this connection's OAuth app authenticates against.
+func (p *provider) RepositoryOrigin(repoURL string) (string, error) {
+	return github.RepositoryOrigin(repoURL, "")
+}
+
+var (
+	_ oauth.Provider                 = (*provider)(nil)
+	_ oauth.RepositoryOriginVerifier = (*provider)(nil)
+)
