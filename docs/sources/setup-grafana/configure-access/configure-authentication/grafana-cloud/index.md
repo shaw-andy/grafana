@@ -41,6 +41,10 @@ allowed_organizations = sampleorganization
 enabled = true
 ```
 
+### Restrict sign-in to organizations
+
+The `allowed_organizations` option is required. Set it to a comma or space separated list of Grafana Cloud organization slugs. Only users who belong to at least one of these organizations can sign in. If `allowed_organizations` is empty, Grafana refuses every sign-in attempt through Grafana Cloud.
+
 ### Configure automatic login
 
 Set `auto_login` option to true to attempt login automatically, skipping the login screen.
