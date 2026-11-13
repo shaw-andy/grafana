@@ -596,7 +596,7 @@ If enabled and user is not anonymous, data proxy adds the `X-Grafana-User` heade
 
 #### `response_limit`
 
-Limits the amount of bytes that Grafana reads from responses of outgoing HTTP requests. Default is `0` which means disabled.
+Limits the amount of bytes that Grafana reads from responses of outgoing HTTP requests. Default is `33554432` (32 MiB). Set to `0` to disable the limit.
 
 #### `row_limit`
 
