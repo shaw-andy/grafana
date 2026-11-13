@@ -111,6 +111,24 @@ func Test_prepareLog(t *testing.T) {
 			},
 			expectedLevel: errutil.LevelInfo,
 		},
+		{
+			name: "public dashboard access token",
+			req: func() *http.Request {
+				r := mustRequest(http.NewRequest(http.MethodGet, "/api/public/dashboards/00000000000000000000000000000000", nil))
+				r.Header.Set("Referer", "https://grafana.com/public-dashboards/00000000000000000000000000000000")
+				return r
+			}(),
+			response: mockResponseWriter{
+				status: http.StatusNotFound,
+			},
+			error: errutil.NotFound("test.notFound").Errorf("not found: %s", "00000000000000000000000000000000"),
+			expectFields: map[string]any{
+				"path":    "/api/public/dashboards/hidden",
+				"referer": "https://grafana.com/public-dashboards/hidden",
+				"error":   "not found: hidden",
+			},
+			expectedLevel: errutil.LevelInfo,
+		},
 	}
 
 	for _, tc := range tests {
