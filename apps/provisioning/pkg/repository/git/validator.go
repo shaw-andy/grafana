@@ -66,14 +66,14 @@ func ValidateGitConfigFields(repo *provisioning.Repository, url, branch, path st
 			list = append(list, field.Required(field.NewPath("spec", t, "url"), "a git url is required"))
 		} else {
 			if !isValidGitURL(url) {
-				list = append(list, field.Invalid(field.NewPath("spec", t, "url"), url, "invalid git URL format"))
+				list = append(list, field.Invalid(field.NewPath("spec", t, "url"), provisioning.RemoveURLUserinfo(url), "invalid git URL format"))
 			}
 		}
 	}
 
 	// Reject http:// together with a token: the token would travel in cleartext on every git operation.
 	if !allowInsecure && IsInsecureURLWithToken(url, !repo.Secure.Token.IsZero() || repo.HasConnection()) {
-		list = append(list, field.Invalid(field.NewPath("spec", t, "url"), url,
+		list = append(list, field.Invalid(field.NewPath("spec", t, "url"), provisioning.RemoveURLUserinfo(url),
 			"http:// is not allowed when a token is configured; use https:// to avoid sending credentials in cleartext"))
 	}
 

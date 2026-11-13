@@ -93,6 +93,10 @@ func CopySecureValues(new, old *provisioning.Repository) {
 	}
 }
 
+// RequiresNewTokenForURLChange compares URLs without userinfo, so dropping credentials that an
+// older object embedded in its URL keeps the existing token bound to the same host and path.
 func RequiresNewTokenForURLChange(new, old *provisioning.Repository) bool {
-	return old != nil && new.URL() != old.URL() && new.Secure.Token.IsZero()
+	return old != nil &&
+		provisioning.RemoveURLUserinfo(new.URL()) != provisioning.RemoveURLUserinfo(old.URL()) &&
+		new.Secure.Token.IsZero()
 }

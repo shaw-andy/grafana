@@ -79,7 +79,7 @@ func (v *VerifyAgainstExistingRepositoriesValidator) Validate(ctx context.Contex
 			if cfg.Name == v.Name {
 				continue
 			}
-			if v.URL() == cfg.URL() && v.Branch() == cfg.Branch() {
+			if provisioning.RemoveURLUserinfo(v.URL()) == provisioning.RemoveURLUserinfo(cfg.URL()) && v.Branch() == cfg.Branch() {
 				if v.Path() == cfg.Path() {
 					return field.ErrorList{field.Invalid(field.NewPath("spec", string(cfg.Spec.Type), "path"),
 						cfg.Path(),
