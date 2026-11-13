@@ -37,7 +37,17 @@ export function useReturnTo(fallback?: string): { returnTo: string | undefined }
     return emptyResult;
   }
 
+  // A same-origin URL can still carry a pathname such as "//evil.com", which a browser treats as a protocol-relative URL when used as an href
+  if (!isSingleSlashRelativePath(pathname)) {
+    logWarning('Malformed returnTo parameter', { returnTo });
+    return emptyResult;
+  }
+
   return { returnTo: `${pathname}${search}` };
+}
+
+function isSingleSlashRelativePath(path: string): boolean {
+  return path.startsWith('/') && !path.startsWith('//') && !path.includes('\\');
 }
 
 /* Create a "returnTo" URL */
