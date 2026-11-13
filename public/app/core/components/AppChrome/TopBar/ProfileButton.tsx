@@ -8,6 +8,7 @@ import { config, renderLimitedComponents } from '@grafana/runtime';
 import { Dropdown, Menu, MenuItem, ToolbarButton, useStyles2 } from '@grafana/ui';
 import { SETUPGUIDE_PLUGIN_ID } from 'app/core/constants';
 import { contextSrv } from 'app/core/services/context_srv';
+import { signOut } from 'app/core/utils/auth';
 import { usePluginComponents } from 'app/features/plugins/extensions/usePluginComponents';
 
 import { ThemeSelectorDrawer } from '../../ThemeSelector/ThemeSelectorDrawer';
@@ -59,12 +60,7 @@ export function ProfileButton({ profileNode, onToggleKioskMode }: Props) {
         {!config.auth.disableSignoutMenu && (
           <>
             <Menu.Divider />
-            <MenuItem
-              url={`${config.appSubUrl}/logout`}
-              label={t('nav.sign-out.title', 'Sign out')}
-              icon="arrow-from-right"
-              target={'_self'}
-            />
+            <MenuItem onClick={signOut} label={t('nav.sign-out.title', 'Sign out')} icon="arrow-from-right" />
           </>
         )}
       </>
