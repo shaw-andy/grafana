@@ -133,19 +133,23 @@ func (hs *HTTPServer) SignUpStep2(c *contextmodel.ReqContext) response.Response 
 		return rsp
 	}
 
-	// check for pending invites
-	invitesQuery := tempuser.GetTempUsersQuery{Email: form.Email, Status: tempuser.TmpUserInvitePending}
-	invitesQueryResult, err := hs.tempUserService.GetTempUsersQuery(c.Req.Context(), &invitesQuery)
-	if err != nil {
-		return response.Error(http.StatusInternalServerError, "Failed to query database for invites", err)
-	}
-
 	apiResponse := util.DynMap{"message": "User sign up completed successfully", "code": "redirect-to-landing-page"}
-	for _, invite := range invitesQueryResult {
-		if ok, rsp := hs.applyUserInvite(c.Req.Context(), usr, invite, false); !ok {
-			return rsp
+
+	// Pending invites are only granted to an address the signup code proved; otherwise
+	// anyone could claim them by typing the invited address or login.
+	if createUserCmd.EmailVerified {
+		invitesQuery := tempuser.GetTempUsersQuery{Email: form.Email, Status: tempuser.TmpUserInvitePending}
+		invitesQueryResult, err := hs.tempUserService.GetTempUsersQuery(c.Req.Context(), &invitesQuery)
+		if err != nil {
+			return response.Error(http.StatusInternalServerError, "Failed to query database for invites", err)
 		}
-		apiResponse["code"] = "redirect-to-select-org"
+
+		for _, invite := range invitesQueryResult {
+			if ok, rsp := hs.applyUserInvite(c.Req.Context(), usr, invite, false); !ok {
+				return rsp
+			}
+			apiResponse["code"] = "redirect-to-select-org"
+		}
 	}
 
 	err = hs.loginUserWithUser(usr, c)
@@ -170,6 +174,9 @@ func (hs *HTTPServer) verifyUserSignUpEmail(ctx context.Context, email string, c
 	}
 
 	tempUser := queryResult
+	if tempUser.Status != tempuser.TmpUserSignUpStarted {
+		return false, response.Error(http.StatusNotFound, "Invalid email verification code", nil)
+	}
 	if tempUser.Email != email {
 		return false, response.Error(http.StatusNotFound, "Email verification code does not match email", nil)
 	}
