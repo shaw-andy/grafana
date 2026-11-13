@@ -326,7 +326,19 @@ function runFetchStream(
       throw new Error('query.url is not defined');
     }
 
-    fetch(new Request(query.url)).then((response) => {
+    // Relative URLs resolve against Grafana itself, so only absolute http(s) URLs are fetched, and never with the
+    // viewer's cookies.
+    let url: URL;
+    try {
+      url = new URL(query.url);
+    } catch {
+      throw new Error('query.url must be an absolute http or https URL');
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new Error('query.url must be an absolute http or https URL');
+    }
+
+    fetch(new Request(url.href, { credentials: 'omit' })).then((response) => {
       if (response.body) {
         reader = response.body.getReader();
         reader.read().then(processChunk);

@@ -485,11 +485,26 @@ export class TestDataDataSource
   }
 }
 
+// The request carries the viewer's session, so only fixed read-only endpoints may be called.
+const grafanaApiEndpoints = new Map([
+  ['datasources', '/api/datasources'],
+  ['search', '/api/search'],
+  ['annotations', '/api/annotations'],
+]);
+
 function runGrafanaAPI(
   target: TestDataDataQuery,
   req: DataQueryRequest<TestDataDataQuery>
 ): Observable<DataQueryResponse> {
-  const url = `/api/${target.stringInput}`;
+  const endpoint = target.stringInput ?? '';
+  const url = grafanaApiEndpoints.get(endpoint);
+  if (!url) {
+    return of({
+      data: [],
+      state: LoadingState.Error,
+      error: { message: `Unsupported Grafana API endpoint: ${endpoint}` },
+    });
+  }
   return from(
     getBackendSrv()
       .get(url)
