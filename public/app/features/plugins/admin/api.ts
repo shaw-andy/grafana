@@ -6,6 +6,7 @@ import { isVersionGtOrEq } from 'app/core/utils/version';
 
 import { API_ROOT, GCOM_API_ROOT, INSTANCE_API_ROOT } from './constants';
 import { isLocalPluginVisibleByConfig, isRemotePluginVisibleByConfig } from './helpers';
+import { sanitizeCatalogHtml } from './sanitizeCatalogHtml';
 import {
   type LocalPlugin,
   type RemotePlugin,
@@ -48,11 +49,11 @@ export async function getPluginDetails(id: string): Promise<CatalogPluginDetails
     grafanaDependency: dependencies?.grafanaDependency ?? dependencies?.grafanaVersion ?? '',
     pluginDependencies: dependencies?.plugins || [],
     links: local?.info.links || remote?.json?.info.links || [],
-    readme: localReadme || remote?.readme,
+    readme: localReadme || (remote?.readme && sanitizeCatalogHtml(remote.readme)),
     versions,
     statusContext: remote?.statusContext ?? '',
     iam: remote?.json?.iam,
-    changelog: remote?.changelog || localChangelog,
+    changelog: (remote?.changelog && sanitizeCatalogHtml(remote.changelog)) || localChangelog,
     licenseUrl: remote?.licenseUrl,
     documentationUrl: remote?.documentationUrl,
     sponsorshipUrl: remote?.sponsorshipUrl,
