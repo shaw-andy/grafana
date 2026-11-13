@@ -140,7 +140,9 @@ basic_auth_password =
 
 ### Enforce domain verification
 
-If set to `true`, the Grafana server redirects requests that have a Host-header value that is mismatched to the actual domain. This might help to mitigate some DNS rebinding attacks.
+If set to `true`, the Grafana server redirects requests that have a Host-header value that is mismatched to the actual domain. This might help to mitigate some DNS rebinding attacks. This is the default.
+
+If a reverse proxy reaches Grafana under a host name other than `domain` or the host of `root_url`, list that name in `enforce_domain_allowed_hosts` rather than turning off `enforce_domain`.
 
 Example:
 
