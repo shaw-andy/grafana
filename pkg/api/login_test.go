@@ -711,8 +711,8 @@ func TestLogoutSaml(t *testing.T) {
 		hs.Logout(c)
 		return response.Empty(http.StatusOK)
 	})
-	sc.m.Get(sc.url, sc.defaultHandler)
-	sc.fakeReqNoAssertions("GET", sc.url).exec()
+	sc.m.Post(sc.url, sc.defaultHandler)
+	sc.fakeReqNoAssertions("POST", sc.url).exec()
 	require.Equal(t, 302, sc.resp.Code)
 }
 

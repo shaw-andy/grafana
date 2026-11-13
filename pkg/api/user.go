@@ -466,22 +466,26 @@ func (hs *HTTPServer) getUserOrgList(ctx context.Context, userID int64) response
 }
 
 func (hs *HTTPServer) validateUsingOrg(ctx context.Context, userID int64, orgID int64) bool {
+	_, ok := hs.findUsingOrg(ctx, userID, orgID)
+	return ok
+}
+
+// findUsingOrg returns the user's membership in orgID, if any.
+func (hs *HTTPServer) findUsingOrg(ctx context.Context, userID int64, orgID int64) (*org.UserOrgDTO, bool) {
 	query := org.GetUserOrgListQuery{UserID: userID}
 
 	result, err := hs.orgService.GetUserOrgList(ctx, &query)
 	if err != nil {
-		return false
+		return nil, false
 	}
 
-	// validate that the org id in the list
-	valid := false
 	for _, other := range result {
-		if other.OrgID == orgID {
-			valid = true
+		if other != nil && other.OrgID == orgID {
+			return other, true
 		}
 	}
 
-	return valid
+	return nil, false
 }
 
 // swagger:route POST /user/using/{org_id} signed_in_user userSetUsingOrg
@@ -518,7 +522,10 @@ func (hs *HTTPServer) UserSetUsingOrg(c *contextmodel.ReqContext) response.Respo
 	return response.Success("Active organization changed")
 }
 
-// GET /profile/switch-org/:id
+// POST /profile/switch-org/:id
+//
+// Any other method only shows a page that asks for confirmation, so following
+// a link cannot change the user's active organization.
 func (hs *HTTPServer) ChangeActiveOrgAndRedirectToHome(c *contextmodel.ReqContext) {
 	orgID, err := strconv.ParseInt(web.Params(c.Req)[":id"], 10, 64)
 	if err != nil {
@@ -538,8 +545,24 @@ func (hs *HTTPServer) ChangeActiveOrgAndRedirectToHome(c *contextmodel.ReqContex
 		return
 	}
 
-	if !hs.validateUsingOrg(c.Req.Context(), userID, orgID) {
+	targetOrg, ok := hs.findUsingOrg(c.Req.Context(), userID, orgID)
+	if !ok {
 		hs.NotFoundHandler(c)
+		return
+	}
+
+	if c.Req.Method != http.MethodPost {
+		message := "Do you want to switch your active organization? This changes which dashboards and permissions you see."
+		if targetOrg.Name != "" {
+			message = "Do you want to switch your active organization to " + targetOrg.Name + "? This changes which dashboards and permissions you see."
+		}
+		hs.renderSessionActionPage(c, sessionActionPage{
+			Title:     "Switch organization",
+			Message:   message,
+			Confirm:   "Switch organization",
+			Action:    hs.Cfg.AppSubURL + "/profile/switch-org/" + strconv.FormatInt(orgID, 10),
+			CancelURL: hs.Cfg.AppSubURL + "/",
+		})
 		return
 	}
 
