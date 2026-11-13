@@ -15,6 +15,7 @@ import { type Playlist, type PlaylistSpec } from '../../api/clients/playlist/v1'
 import { getGrafanaSearcher } from '../search/service/searcher';
 
 import { PlaylistTable } from './PlaylistTable';
+import { DEFAULT_PLAYLIST_INTERVAL, isValidPlaylistInterval } from './interval';
 import { usePlaylistItems } from './usePlaylistItems';
 
 interface Props {
@@ -72,7 +73,7 @@ export const PlaylistForm = ({
         ...playlist,
         spec: {
           ...specUpdates,
-          interval: specUpdates?.interval ?? '5m',
+          interval: specUpdates?.interval ?? DEFAULT_PLAYLIST_INTERVAL,
           title: specUpdates?.title ?? '',
           items: apiItems,
         },
@@ -111,9 +112,15 @@ export const PlaylistForm = ({
                 type="text"
                 {...register('interval', {
                   required: t('playlist-edit.form.interval-required', 'Interval is required'),
+                  validate: (value) =>
+                    isValidPlaylistInterval(value) ||
+                    t(
+                      'playlist-edit.form.interval-invalid',
+                      'Interval must be a duration such as 30s or 5m, between 1s and 24d'
+                    ),
                 })}
                 placeholder={t('playlist-edit.form.interval-placeholder', '5m')}
-                defaultValue={interval ?? '5m'}
+                defaultValue={interval ?? DEFAULT_PLAYLIST_INTERVAL}
                 data-testid={selectors.pages.PlaylistForm.interval}
                 id={playlistIntervalId}
               />
