@@ -19,6 +19,7 @@ import (
 	"github.com/grafana/grafana/pkg/infra/tracing"
 	"github.com/grafana/grafana/pkg/plugins/httpresponsesender"
 	"github.com/grafana/grafana/pkg/services/datasources"
+	"github.com/grafana/grafana/pkg/util/proxyutil"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -116,6 +117,9 @@ func (r *subResourceREST) Connect(ctx context.Context, name string, opts runtime
 			return
 		}
 
+		headers := req.Header.Clone()
+		proxyutil.SanitizeRefererHeader(headers)
+
 		resourceCtx, resourceSpan := tracing.Start(callCtx, "datasource.resource.pluginClient.CallResource",
 			attribute.String("plugin_resource_path", clonedReq.URL.Path),
 		)
@@ -125,7 +129,7 @@ func (r *subResourceREST) Connect(ctx context.Context, name string, opts runtime
 			Method:        req.Method,
 			URL:           clonedReq.URL.String(),
 			Body:          body,
-			Headers:       req.Header,
+			Headers:       headers,
 		}, httpresponsesender.New(w))
 		resourceSpan.End()
 

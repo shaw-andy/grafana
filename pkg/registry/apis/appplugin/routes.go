@@ -300,6 +300,7 @@ func (b *AppPluginAPIBuilder) routeHandler(gv schema.GroupVersion, resource, pat
 		}
 		req := r.Clone(httpadapter.WithRouteInfo(ctx, info))
 		req.Header.Del(proxyutil.IDHeaderName)
+		proxyutil.SanitizeRefererHeader(req.Header)
 		if requester, err := identity.GetRequester(ctx); err == nil {
 			proxyutil.ApplyForwardIDHeader(req, requester)
 		}
