@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/grafana/dskit/services"
+	"github.com/grafana/grafana/pkg/api"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/util"
@@ -111,7 +112,19 @@ func (s *instrumentationService) stop(failureReason error) error {
 
 func (s *instrumentationService) newInstrumentationServer() (*http.Server, *mux.Router) {
 	router := mux.NewRouter()
-	router.Handle("/metrics", promhttp.HandlerFor(s.promGatherer, promhttp.HandlerOpts{EnableOpenMetrics: true}))
+	var metricsHandler http.Handler = promhttp.HandlerFor(s.promGatherer, promhttp.HandlerOpts{EnableOpenMetrics: true})
+	if user, pass := s.cfg.MetricsEndpointBasicAuthUsername, s.cfg.MetricsEndpointBasicAuthPassword; user != "" && pass != "" {
+		next := metricsHandler
+		metricsHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !api.BasicAuthenticatedRequest(r, user, pass) {
+				w.Header().Set("WWW-Authenticate", `Basic realm="Grafana"`)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+	router.Handle("/metrics", metricsHandler)
 
 	RegisterHealthEndpoints(router, s.healthNotifier)
 

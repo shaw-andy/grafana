@@ -12,6 +12,7 @@ import (
 
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/setting"
+	"github.com/grafana/grafana/pkg/storage/unified/resource"
 )
 
 func (ms *ModuleServer) initMemberlistKV() (services.Service, error) {
@@ -35,7 +36,7 @@ func (ms *ModuleServer) initMemberlistKV() (services.Service, error) {
 
 	ms.MemberlistKVConfig = KVStore
 
-	ms.httpServerRouter.Path("/memberlist").Methods("GET", "POST").Handler(memberlistKVsvc)
+	ms.httpServerRouter.Path("/memberlist").Methods("GET", "POST").Handler(resource.RequireRingAdminToken(ms.cfg.RingAdminToken, memberlistKVsvc))
 
 	return memberlistKVsvc, nil
 }

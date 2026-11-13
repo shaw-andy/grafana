@@ -302,7 +302,7 @@ func (s *service) withRingLifecycle(memberlistKVConfig kv.Config, httpServerRout
 
 	s.ringLifecycler.SetKeepInstanceInTheRingOnShutdown(true)
 	if httpServerRouter != nil {
-		httpServerRouter.Path("/prepare-downscale").Methods("GET", "POST", "DELETE").Handler(http.HandlerFunc(s.PrepareDownscale))
+		httpServerRouter.Path("/prepare-downscale").Methods("GET", "POST", "DELETE").Handler(resource.RequireRingAdminToken(s.cfg.RingAdminToken, http.HandlerFunc(s.PrepareDownscale)))
 	}
 	s.subservices = append(s.subservices, s.ringLifecycler)
 	return nil

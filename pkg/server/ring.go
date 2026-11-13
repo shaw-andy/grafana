@@ -87,7 +87,7 @@ func (ms *ModuleServer) initSearchServerRing() (services.Service, error) {
 	ms.searchServerRing = searchServerRing
 	ms.searchServerRingClientPool = pool
 
-	ms.httpServerRouter.Path("/ring").Methods("GET", "POST").Handler(searchServerRing)
+	ms.httpServerRouter.Path("/ring").Methods("GET", "POST").Handler(resource.RequireRingAdminToken(ms.cfg.RingAdminToken, searchServerRing))
 
 	svc := services.NewIdleService(startFn, nil)
 
