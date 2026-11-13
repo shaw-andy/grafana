@@ -68,7 +68,7 @@ describe('Legacy path rewriting', () => {
     ['public/gazetteer/custom.json', `${buildPath}gazetteer/custom.json`],
   ])('rewrites "%s" to "%s"', async (legacyPath, expectedUrl) => {
     const gaz = await getGazetteer(legacyPath);
-    expect(fetch).toHaveBeenCalledWith(expectedUrl);
+    expect(fetch).toHaveBeenCalledWith(expectedUrl, { credentials: 'omit' });
     expect(gaz.path).toBe(expectedUrl);
   });
 
@@ -81,7 +81,7 @@ describe('Legacy path rewriting', () => {
   it('does not rewrite absolute http URLs', async () => {
     const url = 'https://example.com/my-gazetteer.json';
     await getGazetteer(url);
-    expect(fetch).toHaveBeenCalledWith(url);
+    expect(fetch).toHaveBeenCalledWith(url, { credentials: 'omit' });
   });
 });
 
@@ -95,7 +95,7 @@ describe('Placename lookup from geojson format', () => {
   });
 
   it('can lookup by id', async () => {
-    const gaz = await getGazetteer('local');
+    const gaz = await getGazetteer(GAZETTEER_OPTIONS.countries.path);
     expect(gaz.error).toBeUndefined();
     expect(getCenterPointWGS84(gaz.find('A')?.geometry())).toMatchInlineSnapshot(`
       [
@@ -105,7 +105,7 @@ describe('Placename lookup from geojson format', () => {
     `);
   });
   it('can look up by a code', async () => {
-    const gaz = await getGazetteer('airports');
+    const gaz = await getGazetteer(GAZETTEER_OPTIONS.airports.path);
     expect(gaz.error).toBeUndefined();
     expect(getCenterPointWGS84(gaz.find('B')?.geometry())).toMatchInlineSnapshot(`
       [
@@ -116,7 +116,7 @@ describe('Placename lookup from geojson format', () => {
   });
 
   it('can look up by an id property', async () => {
-    const gaz = await getGazetteer('airports');
+    const gaz = await getGazetteer(GAZETTEER_OPTIONS.airports.path);
     expect(gaz.error).toBeUndefined();
     expect(getCenterPointWGS84(gaz.find('C')?.geometry())).toMatchInlineSnapshot(`
       [

@@ -204,6 +204,37 @@ export const GAZETTEER_OPTIONS = {
   },
 };
 
+const builtinGazetteerFile = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$/;
+
+/**
+ * Gazetteer paths are saved with the dashboard, so they must not reach application routes on the
+ * Grafana origin. Only the bundled gazetteer files and http(s) URLs on other origins are allowed.
+ */
+export function resolveGazetteerUrl(path: string): URL | undefined {
+  let url: URL;
+  let builtinDirectory: URL;
+  try {
+    url = new URL(path, document.baseURI);
+    builtinDirectory = new URL(`${window.__grafana_build_path__}gazetteer/`, document.baseURI);
+  } catch {
+    return undefined;
+  }
+
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    return undefined;
+  }
+
+  if (url.origin === builtinDirectory.origin && url.pathname.startsWith(builtinDirectory.pathname)) {
+    const file = url.pathname.slice(builtinDirectory.pathname.length);
+    return builtinGazetteerFile.test(file) && !url.search ? url : undefined;
+  }
+
+  if (url.origin === window.location.origin) {
+    return undefined;
+  }
+  return url;
+}
+
 /**
  * Given a path to a file return a cached lookup function
  */
@@ -221,9 +252,18 @@ export async function getGazetteer(path?: string): Promise<Gazetteer> {
 
   let lookup = registry[path];
   if (!lookup) {
+    const url = resolveGazetteerUrl(path);
+    if (!url) {
+      return {
+        path,
+        error: 'URL is not allowed for placename lookup',
+        find: (k) => undefined,
+        examples: (v) => [],
+      };
+    }
     try {
-      // block the async function
-      const response = await fetch(path);
+      // The gazetteer is public data, so the viewer's cookies must never be sent or replaced by this request
+      const response = await fetch(url.href, { credentials: 'omit' });
       const data = await response.json();
       lookup = loadGazetteer(path, data);
     } catch (err) {
