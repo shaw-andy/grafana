@@ -325,6 +325,8 @@ func createStorageServerApi(t *testing.T, instanceId int, dbType, dbConnStr stri
 	require.NoError(t, err)
 	_, err = section.NewKey("connection_string", dbConnStr)
 	require.NoError(t, err)
+	_, err = section.NewKey("insecure_allow_cleartext", "true")
+	require.NoError(t, err)
 
 	cfg.HTTPPort = strconv.Itoa(getRandomPort())
 	cfg.GRPCServer.Network = "tcp"
@@ -386,6 +388,8 @@ func createBaselineServer(t *testing.T, dbType, dbConnStr string, testNamespaces
 	_, err = section.NewKey("type", dbType)
 	require.NoError(t, err)
 	_, err = section.NewKey("connection_string", dbConnStr)
+	require.NoError(t, err)
+	_, err = section.NewKey("insecure_allow_cleartext", "true")
 	require.NoError(t, err)
 	cfg.IndexPath = t.TempDir()
 	cfg.IndexFileThreshold = testIndexFileThreshold

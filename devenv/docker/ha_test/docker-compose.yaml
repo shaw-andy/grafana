@@ -65,6 +65,8 @@ services:
       - GF_DATABASE_PASSWORD=password
       - GF_DATABASE_TYPE=mysql
       - GF_DATABASE_HOST=db:3306
+      - GF_DATABASE_SSL_MODE=false
+      - GF_DATABASE_INSECURE_ALLOW_CLEARTEXT=true
       - GF_DATABASE_MAX_OPEN_CONN=300
       # - GF_DATABASE_TYPE=postgres
       # - GF_DATABASE_HOST=db:5432

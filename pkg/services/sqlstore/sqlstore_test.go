@@ -85,25 +85,25 @@ func TestInitEngine_ParseTimeInConnectionString(t *testing.T) {
 			name:               "MySQL with parseTime already present",
 			connectionString:   "mysql://user:password@localhost:3306/alreadypresent?parseTime=false",
 			dbType:             "mysql",
-			expectedConnection: "user:password@tcp(localhost:3306)/alreadypresent?collation=utf8mb4_unicode_ci&allowNativePasswords=true&clientFoundRows=true&parseTime=true&sql_mode=ANSI_QUOTES&parseTime=false",
+			expectedConnection: "user:password@tcp(localhost:3306)/alreadypresent?collation=utf8mb4_unicode_ci&allowNativePasswords=true&clientFoundRows=true&parseTime=true&tls=custom&sql_mode=ANSI_QUOTES&parseTime=false",
 		},
 		{
 			name:               "MySQL with feature enabled",
 			connectionString:   "mysql://user:password@localhost:3306/existingparams?charset=utf8",
 			dbType:             "mysql",
-			expectedConnection: "user:password@tcp(localhost:3306)/existingparams?collation=utf8mb4_unicode_ci&allowNativePasswords=true&clientFoundRows=true&parseTime=true&sql_mode=ANSI_QUOTES&charset=utf8",
+			expectedConnection: "user:password@tcp(localhost:3306)/existingparams?collation=utf8mb4_unicode_ci&allowNativePasswords=true&clientFoundRows=true&parseTime=true&tls=custom&sql_mode=ANSI_QUOTES&charset=utf8",
 		},
 		{
 			name:               "MySQL with feature enabled",
 			connectionString:   "mysql://user:password@localhost:3306/existingparams?charset=utf8",
 			dbType:             "mysqlWithHooks",
-			expectedConnection: "user:password@tcp(localhost:3306)/existingparams?collation=utf8mb4_unicode_ci&allowNativePasswords=true&clientFoundRows=true&parseTime=true&sql_mode=ANSI_QUOTES&charset=utf8",
+			expectedConnection: "user:password@tcp(localhost:3306)/existingparams?collation=utf8mb4_unicode_ci&allowNativePasswords=true&clientFoundRows=true&parseTime=true&tls=custom&sql_mode=ANSI_QUOTES&charset=utf8",
 		},
 		{
 			name:               "Postgres",
 			connectionString:   "postgres://username:password@localhost:5432/mydatabase",
 			dbType:             "postgres",
-			expectedConnection: "user=username host=localhost port=5432 dbname=mydatabase sslmode='' sslcert='' sslkey='' sslrootcert='' password=password",
+			expectedConnection: "user=username host=localhost port=5432 dbname=mydatabase sslmode=verify-full sslcert='' sslkey='' sslrootcert='' password=password",
 		},
 	}
 

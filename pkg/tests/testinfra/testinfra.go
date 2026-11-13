@@ -140,6 +140,10 @@ func StartGrafanaEnvWithManualCleanup(t *testing.T, grafDir, cfgPath string) (st
 	dbCfg.Key("user").SetValue(testDB.User)
 	dbCfg.Key("password").SetValue(testDB.Password)
 	dbCfg.Key("name").SetValue(testDB.Database)
+	if testDB.SSLMode != "" {
+		dbCfg.Key("ssl_mode").SetValue(testDB.SSLMode)
+		dbCfg.Key("insecure_allow_cleartext").SetValue("true")
+	}
 	if testDB.Path != "" {
 		dbCfg.Key("path").SetValue(testDB.Path)
 	}

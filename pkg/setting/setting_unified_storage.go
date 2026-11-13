@@ -334,7 +334,8 @@ func (cfg *Cfg) setUnifiedStorageConfig() {
 	cfg.VectorDBName = vectorSection.Key("db_name").String()
 	cfg.VectorDBUser = vectorSection.Key("db_user").String()
 	cfg.VectorDBPassword = vectorSection.Key("db_password").String()
-	cfg.VectorDBSSLMode = vectorSection.Key("db_sslmode").MustString("disable")
+	cfg.VectorDBSSLMode = vectorSection.Key("db_sslmode").MustString("verify-full")
+	cfg.VectorDBAllowCleartext = vectorSection.Key("insecure_allow_cleartext").MustBool(false)
 	cfg.VectorPromotionThreshold = vectorSection.Key("promotion_threshold").MustInt(10000)
 	cfg.VectorPromoterInterval = vectorSection.Key("promoter_interval").MustDuration(0) // zero means disabled
 

@@ -27,7 +27,9 @@ type TestDB struct {
 	User       string
 	Password   string
 	Database   string
-	Cleanup    func()
+	// SSLMode is the [database] ssl_mode for the local test servers, which do not serve TLS.
+	SSLMode string
+	Cleanup func()
 }
 
 func GetTestDBType() string {
@@ -142,6 +144,7 @@ func mySQLTestDB() (*TestDB, error) {
 		User:       "grafana",
 		Password:   "password",
 		Database:   "grafana_tests",
+		SSLMode:    "false",
 		Cleanup:    func() {},
 	}, nil
 }
@@ -164,6 +167,7 @@ func postgresTestDB() (*TestDB, error) {
 		User:       "grafanatest",
 		Password:   "grafanatest",
 		Database:   "grafanatest",
+		SSLMode:    "disable",
 		Cleanup:    func() {},
 	}, nil
 }

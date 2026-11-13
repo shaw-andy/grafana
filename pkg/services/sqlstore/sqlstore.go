@@ -600,6 +600,9 @@ func TestMain(m *testing.M) {
 
 		cfgDBSec.Key("connection_string").SetValue(testDB.ConnStr)
 		cfgDBSec.Key("path").SetValue(testDB.Path)
+		if testDB.SSLMode != "" {
+			cfgDBSec.Key("insecure_allow_cleartext").SetValue("true")
+		}
 
 		testSQLStoreCleanup = append(testSQLStoreCleanup, testDB.Cleanup)
 

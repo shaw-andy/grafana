@@ -389,6 +389,10 @@ func newTestCfg(
 	if _, err := sec.NewKey("connection_string", testDB.Conn); err != nil {
 		return nil, fmt.Errorf("failed to set database.connection_string: %w", err)
 	}
+	// The MySQL and Postgres test servers do not serve TLS.
+	if _, err := sec.NewKey("insecure_allow_cleartext", "true"); err != nil {
+		return nil, fmt.Errorf("failed to set database.insecure_allow_cleartext: %w", err)
+	}
 	if _, err := sec.NewKey("path", testDB.Path); err != nil {
 		return nil, fmt.Errorf("failed to set database.path: %w", err)
 	}

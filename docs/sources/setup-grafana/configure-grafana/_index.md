@@ -448,7 +448,20 @@ Set to `true` to log the SQL calls and execution times.
 #### `ssl_mode`
 
 For Postgres, use any [valid `libpq` `sslmode`](https://www.postgresql.org/docs/current/libpq-ssl.html#LIBPQ-SSL-SSLMODE-STATEMENTS), for example, `disable`, `require`, `verify-full`, etc.
+Default is `verify-full`.
+
 For MySQL, use either `true`, `false`, or `skip-verify`.
+Default is `true`, which verifies the server certificate against `ca_cert_path`, or the system roots if `ca_cert_path` is empty, and against `server_cert_name`, or the host name if `server_cert_name` is empty.
+
+Grafana doesn't start if the connection to a network host wouldn't be encrypted, unless you set `insecure_allow_cleartext` to `true`.
+
+#### `insecure_allow_cleartext`
+
+For `mysql` and `postgres` only.
+Set to `true` to allow a connection to a network host that isn't encrypted, for example with `ssl_mode` set to `disable`, `allow`, or `prefer` for Postgres, or `false` for MySQL.
+Anyone on the network path can then read the database password and queries.
+Connections over Unix sockets don't need this setting.
+Default is `false`.
 
 #### `ssl_sni`
 
@@ -473,7 +486,7 @@ The path to the client cert. Only if server requires client authentication.
 
 #### `server_cert_name`
 
-The common name field of the certificate used by the `mysql` or `postgres` server. Not necessary if `ssl_mode` is set to `skip-verify`.
+The common name field of the certificate used by the `mysql` server. If empty, the host name is used. Not necessary if `ssl_mode` is set to `skip-verify`.
 
 #### `path`
 

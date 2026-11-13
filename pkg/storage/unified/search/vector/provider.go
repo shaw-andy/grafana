@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/services/sqlstore"
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/storage/unified/sql/db/dbimpl"
 	"github.com/grafana/grafana/pkg/util/xorm"
@@ -27,6 +28,11 @@ func InitVectorBackend(ctx context.Context, cfg *setting.Cfg, ownsSchema bool) (
 	connStr := fmt.Sprintf("host=%s port=%s dbname=%s user=%s password=%s sslmode=%s",
 		cfg.VectorDBHost, cfg.VectorDBPort, cfg.VectorDBName, cfg.VectorDBUser, cfg.VectorDBPassword, cfg.VectorDBSSLMode,
 	)
+	if !cfg.VectorDBAllowCleartext {
+		if err := sqlstore.RequirePostgresTLS(connStr); err != nil {
+			return nil, fmt.Errorf("[database_vector]: %w", err)
+		}
+	}
 
 	engine, err := xorm.NewEngine("postgres", connStr)
 	if err != nil {
