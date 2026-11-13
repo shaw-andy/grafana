@@ -39,8 +39,19 @@ export function isDataQuery(url: string): boolean {
   return false;
 }
 
+// Two placeholder origins so that no absolute URL can resolve to both of them.
+const LOCAL_URL_PROBE_ORIGINS = ['http://local-url-probe-a.invalid', 'http://local-url-probe-b.invalid'];
+
+// Resolve the URL the way the browser will, so scheme casing, leading whitespace, embedded tabs and
+// scheme-relative forms such as //host cannot make another origin look like Grafana.
+// BackendSrv drops one leading slash from local URLs before sending them, so judge the URL it sends.
 export function isLocalUrl(url: string) {
-  return !url.match(/^http/);
+  const requestUrl = url.startsWith('/') ? url.substring(1) : url;
+  try {
+    return LOCAL_URL_PROBE_ORIGINS.every((origin) => new URL(requestUrl, `${origin}/`).origin === origin);
+  } catch {
+    return false;
+  }
 }
 
 /**
