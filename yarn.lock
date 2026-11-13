@@ -2456,7 +2456,7 @@ __metadata:
     marked-mangle: "npm:^1.1.12"
     moment-timezone: "npm:^0.5.47"
     ol: "npm:^10.7.0"
-    papaparse: "npm:^5.5.3"
+    papaparse: "npm:^5.7.1"
     react: "npm:19.2.8"
     react-dom: "npm:19.2.8"
     react-use: "npm:^17.6.1"
@@ -20282,7 +20282,7 @@ __metadata:
     ol-mapbox-style: "npm:^13.0.1"
     open: "npm:^10.2.0"
     ora: "npm:^9.0.0"
-    papaparse: "npm:5.5.3"
+    papaparse: "npm:5.7.1"
     pdf-parse: "npm:^1.1.1"
     pluralize: "npm:^8.0.0"
     postcss: "npm:8.5.23"
@@ -27604,17 +27604,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"papaparse@npm:5.5.3":
-  version: 5.5.3
-  resolution: "papaparse@npm:5.5.3"
-  checksum: 10/383e38f8ff910be48b684e7f47b84dbe5e67708669c13bb21f316a0591ef183ff670dfc7eb9f6d0a8b67e21a5b0e8934712cda96ff8fb678d6591e597d108bd1
-  languageName: node
-  linkType: hard
-
-"papaparse@npm:^5.5.3":
-  version: 5.7.0
-  resolution: "papaparse@npm:5.7.0"
-  checksum: 10/ce787e38d109c75b261bf2e0ea724fe655430554f7dfec98c82b8e95c18d7b3005db25f3d290847383e8debb0c0774c518ea3439e6a22cc864dd0b8df7db0f20
+"papaparse@npm:5.7.1, papaparse@npm:^5.7.1":
+  version: 5.7.1
+  resolution: "papaparse@npm:5.7.1"
+  checksum: 10/308f26a55fd965289fffe7ac278723df3a328aec1efeed6cc0f9b69da5f7b4edc82eeb1e3347c1b161d8c4c81f9bc614ba579118636e957d2f5ccdcadc2de8cb
   languageName: node
   linkType: hard
 
