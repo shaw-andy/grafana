@@ -1151,6 +1151,10 @@ func (rc *RepositoryController) process(key string) (repoType string, err error)
 				return repoType, fmt.Errorf("retrieving connection to regenerate token: %w", cerr)
 			}
 
+			// Work on a copy so we don't mutate the shared informer-cache object. Copy
+			// before generating: the connection binds its authorization to the object
+			// it was given, and a later copy would not carry that binding.
+			obj = obj.DeepCopy()
 			token, tokenOps, gerr := rc.generateRepositoryToken(ctx, obj, c)
 			if gerr != nil {
 				if rc.isUserCaused(gerr) {
@@ -1166,9 +1170,7 @@ func (rc *RepositoryController) process(key string) (repoType string, err error)
 			if len(tokenOps) > 0 {
 				patchOperations = append(patchOperations, tokenOps...)
 			}
-			// Work on a copy so we don't mutate the shared informer-cache object, and
-			// overwrite the whole value so the stale reference name is cleared too.
-			obj = obj.DeepCopy()
+			// Overwrite the whole value so the stale reference name is cleared too.
 			obj.Secure.Token = common.InlineSecureValue{Create: token}
 
 			repo, err = rc.repoFactory.Build(ctx, obj)
