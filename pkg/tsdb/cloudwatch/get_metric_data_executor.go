@@ -13,18 +13,27 @@ import (
 	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/utils"
 )
 
+const defaultGetMetricDataPageLimit = 500
+
 func (ds *DataSource) executeRequest(ctx context.Context, client models.CWClient,
 	metricDataInput *cloudwatch.GetMetricDataInput) ([]*cloudwatch.GetMetricDataOutput, error) {
 	mdo := make([]*cloudwatch.GetMetricDataOutput, 0)
 
+	// GetMetricData EndTime is exclusive, so we round up to the next minute to get the last data point.
+	// Every page of a paginated request must use the same time range as the first page.
+	if metricDataInput.EndTime != nil && features.IsEnabled(ctx, features.FlagCloudWatchRoundUpEndTime) {
+		metricDataInput.EndTime = aws.Time(metricDataInput.EndTime.Truncate(time.Minute).Add(time.Minute))
+	}
+
+	pageLimit := ds.Settings.GrafanaSettings.ListMetricsPageLimit
+	if pageLimit <= 0 {
+		pageLimit = defaultGetMetricDataPageLimit
+	}
+
 	nextToken := ""
-	for {
+	for pages := 0; pages < pageLimit; pages++ {
 		if nextToken != "" {
 			metricDataInput.NextToken = aws.String(nextToken)
-		}
-		// GetMetricData EndTime is exclusive, so we round up to the next minute to get the last data point
-		if features.IsEnabled(ctx, features.FlagCloudWatchRoundUpEndTime) {
-			*metricDataInput.EndTime = metricDataInput.EndTime.Truncate(time.Minute).Add(time.Minute)
 		}
 
 		resp, err := client.GetMetricData(ctx, metricDataInput)
@@ -35,10 +44,13 @@ func (ds *DataSource) executeRequest(ctx context.Context, client models.CWClient
 		mdo = append(mdo, resp)
 		utils.QueriesTotalCounter.WithLabelValues(utils.GetMetricDataLabel).Add(float64(len(metricDataInput.MetricDataQueries)))
 		if resp.NextToken == nil || *resp.NextToken == "" {
-			break
+			return mdo, nil
 		}
 		nextToken = *resp.NextToken
 	}
 
+	if ds.logger != nil {
+		ds.logger.FromContext(ctx).Warn("GetMetricData page limit reached, returning partial results", "pageLimit", pageLimit)
+	}
 	return mdo, nil
 }
