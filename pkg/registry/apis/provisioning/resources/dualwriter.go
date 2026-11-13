@@ -63,6 +63,27 @@ func (r *DualReadWriter) Read(ctx context.Context, path string, ref string) (*Pa
 		return nil, fmt.Errorf("folder read not supported")
 	}
 
+	// A caller who cannot read the file's directory may still read the file if
+	// its resource grants more than the folder does, which is only known after
+	// parsing. Until then, read and parse errors must not reach that caller:
+	// they would reveal whether the file exists, or parts of its content.
+	dirErr := r.authorizer.AuthorizeReadRawFile(ctx, path)
+	parsed, err := r.readAndDryRun(ctx, path, ref)
+	if err != nil {
+		if dirErr != nil {
+			return nil, fmt.Errorf("authorize read resource: %w", dirErr)
+		}
+		return nil, err
+	}
+
+	if err = r.authorizer.AuthorizeResource(ctx, parsed, utils.VerbGet); err != nil {
+		return nil, fmt.Errorf("authorize read resource: %w", err)
+	}
+
+	return parsed, nil
+}
+
+func (r *DualReadWriter) readAndDryRun(ctx context.Context, path string, ref string) (*ParsedResource, error) {
 	info, err := r.repo.Read(ctx, path, ref)
 	if err != nil {
 		_, ok := utils.ExtractApiErrorStatus(err)
@@ -81,11 +102,6 @@ func (r *DualReadWriter) Read(ctx context.Context, path string, ref string) (*Pa
 	if err := parsed.DryRun(ctx); err != nil {
 		return nil, fmt.Errorf("error running dryRun: %w", err)
 	}
-
-	if err = r.authorizer.AuthorizeResource(ctx, parsed, utils.VerbGet); err != nil {
-		return nil, fmt.Errorf("authorize read resource: %w", err)
-	}
-
 	return parsed, nil
 }
 

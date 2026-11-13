@@ -3,14 +3,18 @@ package resources
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	authlib "github.com/grafana/authlib/types"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/grafana/grafana/apps/provisioning/pkg/apis/auth"
 	provisioning "github.com/grafana/grafana/apps/provisioning/pkg/apis/provisioning/v0alpha1"
 	"github.com/grafana/grafana/apps/provisioning/pkg/repository"
 	"github.com/grafana/grafana/apps/provisioning/pkg/safepath"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
 )
 
@@ -131,8 +135,16 @@ type Authorizer interface {
 	//
 	// Permissions on a parent folder grant at least that level of access to
 	// all children, so a user who can read the parent folder can read raw
-	// files inside it.
+	// files inside it. When the containing directory was never synced into a
+	// Grafana folder, the nearest ancestor that was synced decides instead.
 	AuthorizeReadRawFile(ctx context.Context, path string) error
+
+	// AuthorizeReadManagedResource checks if the user can read a resource that
+	// this repository already manages, as listed by the repository resource
+	// index. The check runs against the resource and its current Grafana
+	// folder, the same check the resource's own API applies. If the file's
+	// directory maps to a different folder, that directory must be readable too.
+	AuthorizeReadManagedResource(ctx context.Context, item provisioning.ResourceListItem) error
 }
 
 // ProvisioningAuthorizer implements Authorizer for provisioning operations.
@@ -140,20 +152,46 @@ type ProvisioningAuthorizer struct {
 	repo                  *provisioning.Repository
 	reader                repository.Reader
 	access                auth.AccessChecker
+	readFallbackAccess    auth.AccessChecker
 	clients               ResourceClients
 	folderMetadataEnabled bool
+
+	// Read checks resolve each directory's folder, and whether that folder
+	// exists, once per authorizer so every path under it gets the same answer.
+	readCacheMu     sync.Mutex
+	dirFolderIDs    map[string]string
+	existingFolders map[string]bool
+}
+
+// AuthorizerOption configures optional ProvisioningAuthorizer behavior.
+type AuthorizerOption func(*ProvisioningAuthorizer)
+
+// WithReadFallbackAccess sets the checker, which may apply a role fallback, for
+// reads that no folder permission governs: reads of resources whose kind does
+// not live in folders, and reads under a directory where neither the directory
+// nor any of its ancestors exists as a Grafana folder. Reads governed by a
+// folder always use the main access checker.
+func WithReadFallbackAccess(access auth.AccessChecker) AuthorizerOption {
+	return func(a *ProvisioningAuthorizer) {
+		a.readFallbackAccess = access
+	}
 }
 
 // NewAuthorizer creates a new ProvisioningAuthorizer. The clients provide the set of
 // supported resources to authorize against.
-func NewAuthorizer(repo *provisioning.Repository, reader repository.Reader, access auth.AccessChecker, clients ResourceClients, folderMetadataEnabled bool) Authorizer {
-	return &ProvisioningAuthorizer{
+func NewAuthorizer(repo *provisioning.Repository, reader repository.Reader, access auth.AccessChecker, clients ResourceClients, folderMetadataEnabled bool, opts ...AuthorizerOption) Authorizer {
+	a := &ProvisioningAuthorizer{
 		repo:                  repo,
 		reader:                reader,
 		access:                access,
+		readFallbackAccess:    access,
 		clients:               clients,
 		folderMetadataEnabled: folderMetadataEnabled,
 	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
 
 // AuthorizeResource checks if the current user has permission to perform the specified
@@ -191,6 +229,10 @@ func (a *ProvisioningAuthorizer) AuthorizeResource(ctx context.Context, parsed *
 		name = parsed.Obj.GetName()
 	}
 
+	if verb == utils.VerbGet {
+		return a.authorizeReadResource(ctx, parsed, name)
+	}
+
 	// metaFolder is the destination folder derived from the file path (not from
 	// user-controlled JSON content — see parser.go:222-236). It is always checked.
 	metaFolder := parsed.Meta.GetFolder()
@@ -221,6 +263,182 @@ func (a *ProvisioningAuthorizer) AuthorizeResource(ctx context.Context, parsed *
 		Name:     name,
 		Verb:     verb,
 	}, metaFolder)
+}
+
+// authorizeReadResource checks read access to a parsed resource file.
+//
+// A file that is not yet a Grafana resource is read as content of its
+// directory, like a raw file. A file whose resource already exists is read
+// under that resource's permissions in its current Grafana folder, as the
+// resource's own API would require.
+func (a *ProvisioningAuthorizer) authorizeReadResource(ctx context.Context, parsed *ParsedResource, name string) error {
+	if parsed.Info == nil {
+		return fmt.Errorf("missing file info for %s", name)
+	}
+	if parsed.Existing == nil {
+		return a.authorizeReadDir(ctx, safepath.Dir(parsed.Info.Path))
+	}
+
+	meta, err := utils.MetaAccessor(parsed.Existing)
+	if err != nil {
+		return fmt.Errorf("read existing resource metadata: %w", err)
+	}
+	return a.authorizeReadExisting(ctx, parsed.Info.Path, authlib.CheckRequest{
+		Group:    parsed.GVR.Group,
+		Resource: parsed.GVR.Resource,
+		Name:     name,
+		Verb:     utils.VerbGet,
+	}, meta.GetFolder(), a.inFolders(parsed.GVK))
+}
+
+// inFolders reports whether resources of this kind live in folders, so that
+// folder permissions govern reading them.
+func (a *ProvisioningAuthorizer) inFolders(gvk schema.GroupVersionKind) bool {
+	return gvk.GroupKind() == FolderKind.GroupKind() || supportsFolderAnnotation(a.clients.SupportedResources(), gvk)
+}
+
+// authorizeReadExisting checks read access to the file at path for a resource
+// that exists in Grafana in existingFolder. The resource's own permissions
+// decide when the file sits in that same folder, so a resource with a grant
+// above its folder's stays readable. Otherwise the file's directory, which is
+// resolved from the configured branch, must be readable as well.
+//
+// Only kinds that live in folders have permissions a role fallback could
+// override; other kinds are checked with readFallbackAccess.
+func (a *ProvisioningAuthorizer) authorizeReadExisting(ctx context.Context, path string, request authlib.CheckRequest, existingFolder string, inFolders bool) error {
+	access := a.readFallbackAccess
+	if inFolders {
+		access = a.access
+	}
+	if err := access.Check(ctx, request, existingFolder); err != nil {
+		return err
+	}
+
+	dir := safepath.Dir(path)
+	dirFolderID, err := a.dirFolderID(ctx, dir)
+	if err != nil {
+		return err
+	}
+	if dirFolderID == existingFolder {
+		return nil
+	}
+	return a.authorizeReadDir(ctx, dir)
+}
+
+// authorizeReadDir checks read access to content stored in dir.
+//
+// The nearest directory, starting at dir and walking up, that exists as a
+// Grafana folder decides with the main access checker. A role fallback on
+// readFallbackAccess must never override the permissions of a folder that
+// exists, so readFallbackAccess is consulted only when no folder governs dir.
+// The root of an instance-targeted repository maps to the root folder, which
+// has no permissions of its own to enforce.
+func (a *ProvisioningAuthorizer) authorizeReadDir(ctx context.Context, dir string) error {
+	dirFolderID, err := a.dirFolderID(ctx, dir)
+	if err != nil {
+		return err
+	}
+
+	current, folderID := dir, dirFolderID
+	for folderID != "" {
+		checkErr := a.access.Check(ctx, folderReadRequest(folderID), folderID)
+		if checkErr == nil {
+			return nil
+		}
+		exists, err := a.folderExists(ctx, folderID)
+		if err != nil || exists {
+			return checkErr
+		}
+		if current == "" {
+			break
+		}
+		current = safepath.Dir(current)
+		if folderID, err = a.dirFolderID(ctx, current); err != nil {
+			return err
+		}
+	}
+
+	return a.readFallbackAccess.Check(ctx, folderReadRequest(dirFolderID), dirFolderID)
+}
+
+func folderReadRequest(folderID string) authlib.CheckRequest {
+	return authlib.CheckRequest{
+		Group:    FolderResource.Group,
+		Resource: FolderResource.Resource,
+		Name:     folderID,
+		Verb:     utils.VerbGet,
+	}
+}
+
+// dirFolderID resolves the folder ID for a directory on the configured branch,
+// mapping the repository root to RootFolder.
+func (a *ProvisioningAuthorizer) dirFolderID(ctx context.Context, dir string) (string, error) {
+	if dir == "" {
+		return RootFolder(a.repo), nil
+	}
+
+	a.readCacheMu.Lock()
+	id, ok := a.dirFolderIDs[dir]
+	a.readCacheMu.Unlock()
+	if ok {
+		return id, nil
+	}
+
+	id, err := a.getFolderID(ctx, dir)
+	if err != nil {
+		return "", fmt.Errorf("get folder ID for %q: %w", dir, err)
+	}
+
+	a.readCacheMu.Lock()
+	if a.dirFolderIDs == nil {
+		a.dirFolderIDs = make(map[string]string)
+	}
+	a.dirFolderIDs[dir] = id
+	a.readCacheMu.Unlock()
+	return id, nil
+}
+
+// folderExists reports whether a Grafana folder with the given ID exists. The
+// lookup runs as the provisioning identity so that the caller's own permissions
+// cannot make a restricted folder look missing.
+func (a *ProvisioningAuthorizer) folderExists(ctx context.Context, folderID string) (bool, error) {
+	a.readCacheMu.Lock()
+	exists, ok := a.existingFolders[folderID]
+	a.readCacheMu.Unlock()
+	if ok {
+		return exists, nil
+	}
+
+	exists, err := a.lookupFolder(ctx, folderID)
+	if err != nil {
+		return false, err
+	}
+
+	a.readCacheMu.Lock()
+	if a.existingFolders == nil {
+		a.existingFolders = make(map[string]bool)
+	}
+	a.existingFolders[folderID] = exists
+	a.readCacheMu.Unlock()
+	return exists, nil
+}
+
+func (a *ProvisioningAuthorizer) lookupFolder(ctx context.Context, folderID string) (bool, error) {
+	client, _, err := a.clients.Folder(ctx)
+	if err != nil {
+		return false, fmt.Errorf("get folder client: %w", err)
+	}
+	ctx, _, err = identity.WithProvisioningIdentity(ctx, a.repo.Namespace)
+	if err != nil {
+		return false, err
+	}
+	if _, err := client.Get(ctx, folderID, metav1.GetOptions{}); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("get folder %q: %w", folderID, err)
+	}
+	return true, nil
 }
 
 // getFolderID resolves the folder ID for the given path, always reading
@@ -577,23 +795,20 @@ func (a *ProvisioningAuthorizer) AuthorizeWrite(ctx context.Context, ref string)
 // reasons documented on the Authorizer interface — caller-supplied refs can
 // be used to spoof folder UIDs.
 func (a *ProvisioningAuthorizer) AuthorizeReadRawFile(ctx context.Context, path string) error {
-	parentPath := safepath.Dir(path)
+	return a.authorizeReadDir(ctx, safepath.Dir(path))
+}
 
-	var folderID string
-	if parentPath == "" {
-		folderID = RootFolder(a.repo)
-	} else {
-		id, err := a.getFolderID(ctx, parentPath)
-		if err != nil {
-			return fmt.Errorf("get parent folder ID for %q: %w", path, err)
-		}
-		folderID = id
+// AuthorizeReadManagedResource checks read permission on a resource managed by
+// this repository, in the folder where it currently lives in Grafana.
+func (a *ProvisioningAuthorizer) AuthorizeReadManagedResource(ctx context.Context, item provisioning.ResourceListItem) error {
+	_, gvk, err := a.clients.ForResource(ctx, schema.GroupVersionResource{Group: item.Group, Resource: item.Resource})
+	if err != nil {
+		return fmt.Errorf("resolve kind for %s/%s: %w", item.Group, item.Resource, err)
 	}
-
-	return a.access.Check(ctx, authlib.CheckRequest{
-		Group:    FolderResource.Group,
-		Resource: FolderResource.Resource,
-		Name:     folderID,
+	return a.authorizeReadExisting(ctx, item.Path, authlib.CheckRequest{
+		Group:    item.Group,
+		Resource: item.Resource,
+		Name:     item.Name,
 		Verb:     utils.VerbGet,
-	}, folderID)
+	}, item.Folder, a.inFolders(gvk))
 }

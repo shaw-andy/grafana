@@ -932,15 +932,17 @@ func (b *APIBuilder) UpdateAPIGroupInfo(apiGroupInfo *genericapiserver.APIGroupI
 	// We should use fieldErrors from status instead.
 	storage[provisioning.RepositoryResourceInfo.StoragePath("test")] = WithTimeout(NewTestConnector(b, testTester), 30*time.Second)
 	// The files subresource handles GET/POST/PUT/DELETE in a single connector
-	// and the appropriate role fallback differs per verb: reads should fall
-	// back to Viewer, writes to Editor. A static accessWithEditor would over-
-	// restrict reads when the inner authz denies; a static accessWithViewer
-	// would over-permit writes. Compose a verb-aware checker so each operation
-	// gets the right fallback. Per-resource authz still happens inside the
-	// connector via ProvisioningAuthorizer.AuthorizeResource, and repository-
-	// level operations remain Admin-gated by authorizeRepositorySubresource.
-	filesAccess := auth.NewVerbAwareAccessChecker(b.accessWithViewer, b.accessWithEditor)
-	storage[provisioning.RepositoryResourceInfo.StoragePath("files")] = WithTimeout(NewFilesConnector(b, b.parsers, b.clients, filesAccess, b.folderMetadataEnabled, b.maxFileSize), 30*time.Second)
+	// and the appropriate role fallback differs per verb. Folder- and
+	// resource-scoped reads use no fallback: a Viewer fallback would let every
+	// Viewer read files in folders whose permissions exclude them. The Viewer
+	// fallback is kept for the repository-level read, for kinds that do not
+	// live in folders, and for reads under directories no Grafana folder
+	// governs. Writes fall back to Editor.
+	// Per-resource authz still happens inside the connector via
+	// ProvisioningAuthorizer, and repository-level operations remain
+	// Admin-gated by authorizeRepositorySubresource.
+	filesAccess := auth.NewVerbAwareAccessChecker(b.access, b.accessWithEditor)
+	storage[provisioning.RepositoryResourceInfo.StoragePath("files")] = WithTimeout(NewFilesConnector(b, b.parsers, b.clients, b.resourceLister, filesAccess, b.accessWithViewer, b.folderMetadataEnabled, b.maxFileSize), 30*time.Second)
 	storage[provisioning.RepositoryResourceInfo.StoragePath("refs")] = WithTimeout(NewRefsConnector(b), 30*time.Second)
 	storage[provisioning.RepositoryResourceInfo.StoragePath("resources")] = WithTimeout(NewListConnector(b, b.resourceLister), 30*time.Second)
 	storage[provisioning.RepositoryResourceInfo.StoragePath("history")] = WithTimeout(NewHistorySubresource(b), 30*time.Second)

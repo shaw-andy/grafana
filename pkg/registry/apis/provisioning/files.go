@@ -24,8 +24,17 @@ import (
 )
 
 type filesConnector struct {
-	getter                RepoGetter
-	access                auth.AccessChecker
+	getter RepoGetter
+	// access authorizes folder- and resource-scoped checks. Its read checks
+	// must not apply a role fallback, or a role would override folder
+	// permissions.
+	access auth.AccessChecker
+	// readFallbackAccess may apply a role fallback. It authorizes the
+	// repository-level read for directory listings, reads of resources that
+	// do not live in folders, and reads under directories that no Grafana
+	// folder governs.
+	readFallbackAccess    auth.AccessChecker
+	lister                resources.ResourceLister
 	parsers               resources.ParserFactory
 	clients               resources.ClientFactory
 	folderMetadataEnabled bool
@@ -34,12 +43,14 @@ type filesConnector struct {
 	maxFileSize int64
 }
 
-func NewFilesConnector(getter RepoGetter, parsers resources.ParserFactory, clients resources.ClientFactory, access auth.AccessChecker, folderMetadataEnabled bool, maxFileSize int64) *filesConnector {
+func NewFilesConnector(getter RepoGetter, parsers resources.ParserFactory, clients resources.ClientFactory, lister resources.ResourceLister, access, readFallbackAccess auth.AccessChecker, folderMetadataEnabled bool, maxFileSize int64) *filesConnector {
 	return &filesConnector{
 		getter:                getter,
 		parsers:               parsers,
 		clients:               clients,
+		lister:                lister,
 		access:                access,
+		readFallbackAccess:    readFallbackAccess,
 		folderMetadataEnabled: folderMetadataEnabled,
 		maxFileSize:           maxFileSize,
 	}
@@ -129,7 +140,7 @@ func (c *filesConnector) handleRequest(ctx context.Context, name string, r *http
 	// Handle directory listing separately
 	isDir := safepath.IsDir(opts.Path)
 	if r.Method == http.MethodGet && isDir {
-		c.handleDirectoryListing(ctx, name, opts, readWriter, responder)
+		c.handleDirectoryListing(ctx, name, opts, readWriter, authorizer, responder)
 		return
 	}
 
@@ -184,7 +195,7 @@ func (c *filesConnector) createDualReadWriter(ctx context.Context, repo reposito
 	}
 
 	folders := resources.NewFolderManager(readWriter, folderClient, resources.NewEmptyFolderTree(), folderGVK, resources.WithFolderMetadataEnabled(c.folderMetadataEnabled))
-	authorizer := resources.NewAuthorizer(repo.Config(), readWriter, c.access, clients, c.folderMetadataEnabled)
+	authorizer := resources.NewAuthorizer(repo.Config(), readWriter, c.access, clients, c.folderMetadataEnabled, resources.WithReadFallbackAccess(c.readFallbackAccess))
 	return resources.NewDualReadWriter(readWriter, parser, folders, authorizer, c.folderMetadataEnabled), authorizer, nil
 }
 
@@ -227,7 +238,7 @@ func (c *filesConnector) parseRequestOptions(r *http.Request, name string, repo 
 }
 
 // handleDirectoryListing handles GET requests for directory listing.
-func (c *filesConnector) handleDirectoryListing(ctx context.Context, name string, opts resources.DualWriteOptions, readWriter repository.ReaderWriter, responder rest.Responder) {
+func (c *filesConnector) handleDirectoryListing(ctx context.Context, name string, opts resources.DualWriteOptions, readWriter repository.ReaderWriter, authorizer resources.Authorizer, responder rest.Responder) {
 	if err := c.authorizeListFiles(ctx, name); err != nil {
 		respondWithError(responder, err)
 		return
@@ -239,7 +250,52 @@ func (c *filesConnector) handleDirectoryListing(ctx context.Context, name string
 		return
 	}
 
+	files.Items, err = c.filterReadableFiles(ctx, readWriter.Config(), files.Items, authorizer)
+	if err != nil {
+		respondWithError(responder, err)
+		return
+	}
+
 	responder.Object(http.StatusOK, files)
+}
+
+// filterReadableFiles keeps only the files the caller could read with a
+// single-file GET. A file the repository already manages is checked against
+// its Grafana resource; any other file is checked against its directory, as a
+// raw file read is. The tree can come from any ref, but folder identities are
+// always resolved from the configured branch.
+func (c *filesConnector) filterReadableFiles(ctx context.Context, cfg *provisioning.Repository, items []provisioning.FileItem, authorizer resources.Authorizer) ([]provisioning.FileItem, error) {
+	managed, err := c.lister.List(ctx, cfg.Namespace, cfg.Name)
+	if err != nil {
+		return nil, fmt.Errorf("list managed resources: %w", err)
+	}
+	managedByPath := make(map[string]provisioning.ResourceListItem, len(managed.Items))
+	for _, item := range managed.Items {
+		managedByPath[item.Path] = item
+	}
+
+	logger := logging.FromContext(ctx)
+	dirDecisions := make(map[string]error)
+	readable := make([]provisioning.FileItem, 0, len(items))
+	for _, item := range items {
+		var authErr error
+		if resource, ok := managedByPath[item.Path]; ok {
+			authErr = authorizer.AuthorizeReadManagedResource(ctx, resource)
+		} else {
+			dir := safepath.Dir(item.Path)
+			var decided bool
+			if authErr, decided = dirDecisions[dir]; !decided {
+				authErr = authorizer.AuthorizeReadRawFile(ctx, item.Path)
+				dirDecisions[dir] = authErr
+			}
+		}
+		if authErr != nil {
+			logger.Debug("omitting unreadable file from listing", "path", item.Path, "error", authErr)
+			continue
+		}
+		readable = append(readable, item)
+	}
+	return readable, nil
 }
 
 // handleMethodRequest routes the request to the appropriate handler based on HTTP method.
@@ -391,8 +447,9 @@ func (c *filesConnector) handleDelete(ctx context.Context, opts resources.DualWr
 
 // authorizeListFiles checks if the user has repositories:read permission for listing files.
 // The access checker handles AccessPolicy identities, namespace resolution, and role-based fallback internally.
+// Each listed file is then filtered by filterReadableFiles.
 func (c *filesConnector) authorizeListFiles(ctx context.Context, repoName string) error {
-	return c.access.Check(ctx, authlib.CheckRequest{
+	return c.readFallbackAccess.Check(ctx, authlib.CheckRequest{
 		Verb:     utils.VerbGet,
 		Group:    provisioning.GROUP,
 		Resource: provisioning.RepositoryResourceInfo.GetName(),
@@ -401,7 +458,7 @@ func (c *filesConnector) authorizeListFiles(ctx context.Context, repoName string
 }
 
 // listFolderFiles returns a list of files in a folder.
-// Authorization is checked via authorizeListFiles before calling this function.
+// The result is unfiltered: callers must pass it through filterReadableFiles.
 func (c *filesConnector) listFolderFiles(ctx context.Context, filePath string, ref string, readWriter repository.ReaderWriter) (*provisioning.FileList, error) {
 	// TODO: Implement folder navigation
 	if len(filePath) > 0 {
