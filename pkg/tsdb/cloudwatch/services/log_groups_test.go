@@ -167,7 +167,7 @@ func TestGetLogGroups(t *testing.T) {
 		assert.Equal(t, aws.String("another_token"), nextToken)
 	})
 
-	t.Run("Should keep on calling the api until NextToken is empty in case ListAllLogGroups is set to true", func(t *testing.T) {
+	t.Run("Should only call the api once and return the next token even if ListAllLogGroups is set to true", func(t *testing.T) {
 		mockLogsAPI := &mocks.LogsAPI{}
 		req := resources.LogGroupsRequest{
 			Limit:              2,
@@ -175,7 +175,6 @@ func TestGetLogGroups(t *testing.T) {
 			ListAllLogGroups:   true,
 		}
 
-		// first call
 		mockLogsAPI.On("DescribeLogGroups", &cloudwatchlogs.DescribeLogGroupsInput{
 			Limit:              aws.Int32(req.Limit),
 			LogGroupNamePrefix: req.LogGroupNamePrefix,
@@ -186,31 +185,17 @@ func TestGetLogGroups(t *testing.T) {
 			NextToken: new("token"),
 		}, nil)
 
-		// second call
-		mockLogsAPI.On("DescribeLogGroups", &cloudwatchlogs.DescribeLogGroupsInput{
-			Limit:              aws.Int32(req.Limit),
-			LogGroupNamePrefix: req.LogGroupNamePrefix,
-			NextToken:          new("token"),
-		}).Return(&cloudwatchlogs.DescribeLogGroupsOutput{
-			LogGroups: []cloudwatchlogstypes.LogGroup{
-				{Arn: new("arn:aws:logs:us-east-1:222:log-group:group_b"), LogGroupName: new("group_b")},
-			},
-		}, nil)
 		service := NewLogGroupsService(mockLogsAPI, false)
 		results, nextToken, err := service.GetLogGroups(context.Background(), req)
 		assert.NoError(t, err)
-		mockLogsAPI.AssertNumberOfCalls(t, "DescribeLogGroups", 2)
+		mockLogsAPI.AssertNumberOfCalls(t, "DescribeLogGroups", 1)
 		assert.Equal(t, []resources.ResourceResponse[resources.LogGroup]{
 			{
 				AccountId: new("111"),
 				Value:     resources.LogGroup{Arn: "arn:aws:logs:us-east-1:111:log-group:group_a", Name: "group_a"},
 			},
-			{
-				AccountId: new("222"),
-				Value:     resources.LogGroup{Arn: "arn:aws:logs:us-east-1:222:log-group:group_b", Name: "group_b"},
-			},
 		}, results)
-		assert.Nil(t, nextToken)
+		assert.Equal(t, new("token"), nextToken)
 	})
 }
 
