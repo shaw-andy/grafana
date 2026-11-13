@@ -190,14 +190,10 @@ func (proxy PluginProxy) director(req *http.Request) {
 	req.Header.Del("Cookie")
 	req.Header.Del("Set-Cookie")
 
-	// Create a HTTP header with the context in it.
-	ctxJSON, err := json.Marshal(proxy.signedInUser)
-	if err != nil {
-		writeJSONErr(proxy.resp, proxy.req, 500, "failed to marshal context to json.", err)
-		return
-	}
-
-	req.Header.Set("X-Grafana-Context", string(ctxJSON))
+	// Route hosts are plugin-controlled, so the caller's identity is never serialized
+	// into this header. A client-supplied value is removed so it cannot be mistaken
+	// for one set by Grafana.
+	req.Header.Del("X-Grafana-Context")
 
 	proxyutil.ApplyUserHeader(proxy.sendUserHeader, req, proxy.signedInUser)
 	proxyutil.ApplyForwardIDHeader(req, proxy.signedInUser)
