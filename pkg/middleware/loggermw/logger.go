@@ -102,9 +102,10 @@ func (l *loggerImpl) prepareLogParams(c *contextmodel.ReqContext, duration time.
 		lvl = errutil.LevelError
 	}
 
+	credentials := util.PathCredentials(r.URL.Path)
 	logParams := []any{
 		"method", r.Method,
-		"path", r.URL.Path,
+		"path", util.RedactPathCredentials(r.URL.Path),
 		"status", status,
 		"remote_addr", c.RemoteAddr(),
 		"time_ms", int64(duration / time.Millisecond),
@@ -132,24 +133,24 @@ func (l *loggerImpl) prepareLogParams(c *contextmodel.ReqContext, duration time.
 	rmd := requestmeta.GetRequestMetaData(c.Req.Context())
 	logParams = append(logParams, "status_source", rmd.StatusSource)
 
-	logParams = append(logParams, errorLogParams(c.Error)...)
+	logParams = append(logParams, errorLogParams(c.Error, credentials)...)
 
 	return logParams, lvl
 }
 
-func errorLogParams(err error) []any {
+func errorLogParams(err error, credentials []string) []any {
 	if err == nil {
 		return nil
 	}
 
 	var gfErr errutil.Error
 	if !errors.As(err, &gfErr) {
-		return []any{"error", err.Error()}
+		return []any{"error", util.RedactCredentials(err.Error(), credentials)}
 	}
 
 	return []any{
 		"errorReason", gfErr.Reason,
 		"errorMessageID", gfErr.MessageID,
-		"error", gfErr.LogMessage,
+		"error", util.RedactCredentials(gfErr.LogMessage, credentials),
 	}
 }

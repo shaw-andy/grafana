@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/grafana/grafana/pkg/infra/tracing"
+	"github.com/grafana/grafana/pkg/util"
 	"github.com/grafana/grafana/pkg/web"
 )
 
@@ -106,12 +107,17 @@ func RequestTracing(tracer trace.Tracer, shouldTrace func(*http.Request) bool) w
 			// generic span name for requests where there's no route operation name
 			spanName := fmt.Sprintf("HTTP %s <unknown>", req.Method)
 
+			requestURI, urlPath := req.RequestURI, util.RedactPathCredentials(req.URL.Path)
+			if urlPath != req.URL.Path {
+				requestURI, _ = util.SanitizeURI(req.RequestURI)
+			}
+
 			ctx, span := tracer.Start(ctx, spanName, trace.WithAttributes(
-				semconv.HTTPURLKey.String(req.RequestURI),
+				semconv.HTTPURLKey.String(requestURI),
 				// url.path is the routed path with any serve_from_sub_path prefix
 				// already trimmed (unlike RequestURI), so downstream consumers such
 				// as the tracing endpoint filter can match on a stable value.
-				attribute.String("url.path", req.URL.Path),
+				attribute.String("url.path", urlPath),
 				semconv.HTTPMethodKey.String(req.Method),
 			), trace.WithSpanKind(trace.SpanKindServer))
 			defer span.End()
