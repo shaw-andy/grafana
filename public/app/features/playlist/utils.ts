@@ -4,55 +4,73 @@ import { AccessControlAction } from 'app/types/accessControl';
 import { type Playlist } from '../../api/clients/playlist/v1';
 import { contextSrv } from '../../core/services/context_srv';
 import { getGrafanaSearcher } from '../search/service/searcher';
-import { type SearchQuery } from '../search/service/types';
+import { type DashboardQueryResult, type SearchQuery } from '../search/service/types';
 
 import { type PlaylistItemUI } from './types';
+
+/** Matches MaxPlaylistItems enforced by the playlist API on create and update. */
+export const MAX_PLAYLIST_ITEMS = 100;
+const MAX_CONCURRENT_SEARCHES = 4;
+const MAX_DASHBOARDS_PER_TAG = 50;
 
 export function useCanWritePlaylists(): boolean {
   const enabled = useFlagPlaylistsRBAC();
   return enabled ? contextSrv.hasPermission(AccessControlAction.PlaylistsWrite) : contextSrv.isEditor;
 }
 
-/** Returns a copy with the dashboards loaded */
+function toSearchQuery(item: PlaylistItemUI): SearchQuery | undefined {
+  switch (item.type) {
+    case 'dashboard_by_id':
+      throw new Error('invalid item (with id)');
+
+    case 'dashboard_by_uid':
+      return item.value ? { query: '*', kind: ['dashboard'], uid: [item.value], limit: 1 } : undefined;
+
+    case 'dashboard_by_tag':
+      return item.value
+        ? { query: '*', kind: ['dashboard'], tags: [item.value], limit: MAX_DASHBOARDS_PER_TAG }
+        : undefined;
+
+    default:
+      // Anything else would be an unfiltered search over every dashboard.
+      return undefined;
+  }
+}
+
+/**
+ * Returns a copy with the dashboards loaded.
+ *
+ * Playlists saved before the item cap existed can be longer than MAX_PLAYLIST_ITEMS, so only that many
+ * items are searched, a few at a time; the rest get no dashboards.
+ */
 export async function loadDashboards(items: PlaylistItemUI[]): Promise<PlaylistItemUI[]> {
   if (!items?.length) {
     return [];
   }
 
-  const targets: SearchQuery[] = [];
-  for (const item of items) {
-    const query: SearchQuery = {
-      query: '*',
-      kind: ['dashboard'],
-      limit: 1000,
-    };
-
-    switch (item.type) {
-      case 'dashboard_by_id':
-        throw new Error('invalid item (with id)');
-
-      case 'dashboard_by_uid':
-        query.uid = [item.value];
-        break;
-
-      case 'dashboard_by_tag':
-        query.tags = [item.value];
-        break;
-    }
-    targets.push(query);
-  }
+  const queries = items.slice(0, MAX_PLAYLIST_ITEMS).map(toSearchQuery);
+  const dashboards: DashboardQueryResult[][] = items.map(() => []);
 
   const searcher = getGrafanaSearcher();
-  const results = await Promise.allSettled(targets.map((target) => searcher.search(target)));
+  let next = 0;
+  const worker = async () => {
+    while (next < queries.length) {
+      const index = next++;
+      const query = queries[index];
+      if (!query) {
+        continue;
+      }
+      try {
+        const result = await searcher.search(query);
+        dashboards[index] = result.view.map((v) => ({ ...v }));
+      } catch {
+        // A failed search leaves the item without dashboards, same as an empty result.
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_SEARCHES, queries.length) }, worker));
 
-  const res: PlaylistItemUI[] = [];
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i];
-    const dashboards = result.status === 'fulfilled' ? result.value.view.map((v) => ({ ...v })) : [];
-    res.push({ ...items[i], dashboards });
-  }
-
-  return res;
+  return items.map((item, index) => ({ ...item, dashboards: dashboards[index] }));
 }
 
 export function getDefaultPlaylist(): Playlist {
