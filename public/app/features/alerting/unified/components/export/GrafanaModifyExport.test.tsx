@@ -46,13 +46,13 @@ const dataSources = {
   default: mockDataSource({ type: 'prometheus', name: 'Prom', isDefault: true }, { alerting: true }),
 };
 
-function renderModifyExport(ruleId: string) {
+function renderModifyExport(ruleId: string, search = '') {
   render(
     <Routes>
       <Route path="/alerting/:id/modify-export" element={<GrafanaModifyExport />} />
     </Routes>,
     {
-      historyOptions: { initialEntries: [`/alerting/${ruleId}/modify-export`] },
+      historyOptions: { initialEntries: [`/alerting/${ruleId}/modify-export${search}`] },
     }
   );
 }
@@ -89,5 +89,22 @@ describe('GrafanaModifyExport', () => {
     await waitFor(() => {
       expect(ui.exportDrawer.editor.get(drawer)).toHaveTextContent('Yaml Export Content');
     });
+  });
+
+  it('keeps cancel on this server when returnTo is a same-origin double-slash path', async () => {
+    mockExportApi(server).modifiedExport(grafanaRulerRule.grafana_alert.namespace_uid, {
+      yaml: 'Yaml Export Content',
+      json: 'Json Export Content',
+    });
+
+    const attack = `${window.location.origin}//attacker.example/login?next=1`;
+    renderModifyExport(grafanaRulerRule.grafana_alert.uid, `?returnTo=${encodeURIComponent(attack)}`);
+
+    const cancel = await byRole('link', { name: 'Cancel' }).find();
+    cancel.addEventListener('click', (event) => event.preventDefault());
+    cancel.click();
+
+    expect((cancel as HTMLAnchorElement).href).toBe('http://localhost/alerting/list');
+    expect(cancel).toHaveAttribute('href', '/alerting/list');
   });
 });

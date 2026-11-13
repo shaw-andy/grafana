@@ -87,6 +87,23 @@ describe('GroupEditPage', () => {
       setFolderResponse({ uid: 'test-folder-uid', canSave: true });
     });
 
+    it('keeps cancel on this server when returnTo is a same-origin double-slash path', async () => {
+      const attack = `${window.location.origin}//attacker.example`;
+      renderGroupEditPage('grafana', 'test-folder-uid', 'test-group-cpu', `?returnTo=${encodeURIComponent(attack)}`);
+
+      const cancelButton = await ui.cancelButton.find();
+      cancelButton.addEventListener('click', (event) => event.preventDefault());
+      cancelButton.click();
+
+      expect((cancelButton as HTMLAnchorElement).href).toBe(
+        'http://localhost/alerting/grafana/namespaces/test-folder-uid/groups/test-group-cpu/view'
+      );
+      expect(cancelButton).toHaveAttribute(
+        'href',
+        '/alerting/grafana/namespaces/test-folder-uid/groups/test-group-cpu/view'
+      );
+    });
+
     it('should render grafana rules group with form fields', async () => {
       renderGroupEditPage('grafana', 'test-folder-uid', 'test-group-cpu');
 
@@ -343,7 +360,7 @@ describe('GroupEditPage', () => {
   });
 });
 
-function renderGroupEditPage(dsUid: string, namespaceId: string, groupName: string) {
+function renderGroupEditPage(dsUid: string, namespaceId: string, groupName: string, search = '') {
   return render(
     <>
       <AppNotificationList />
@@ -355,7 +372,9 @@ function renderGroupEditPage(dsUid: string, namespaceId: string, groupName: stri
       </Routes>
     </>,
     {
-      historyOptions: { initialEntries: [`/alerting/${dsUid}/namespaces/${namespaceId}/groups/${groupName}/edit`] },
+      historyOptions: {
+        initialEntries: [`/alerting/${dsUid}/namespaces/${namespaceId}/groups/${groupName}/edit${search}`],
+      },
     }
   );
 }
