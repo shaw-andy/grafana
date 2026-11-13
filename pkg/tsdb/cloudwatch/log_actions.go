@@ -51,6 +51,23 @@ var sourceCommandRegex = regexp.MustCompile(`(?i)^\s*source\s+`)
 var pplSourceCommandRegex = regexp.MustCompile(`(?im)(^|\|)\s*(--[^\n]*(\n|$)\s*)*(search\s+)?source\s*=`)
 var dataSourceIdentifierPartRegex = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
+// The Logs SQL and PPL grammars treat a backslash inside quoted text as an escape, so it has to be escaped
+// together with the quote character or a trailing backslash would re-open the literal. Backticks are doubled
+// in string literals too because $__logGroups and $__source are usually expanded inside a backtick-quoted
+// identifier.
+var (
+	logsStringLiteralEscaper      = strings.NewReplacer(`\`, `\\`, `'`, `''`, "`", "``")
+	logsBacktickIdentifierEscaper = strings.NewReplacer(`\`, `\\`, "`", "``")
+)
+
+func quoteLogsStringLiteral(s string) string {
+	return "'" + logsStringLiteralEscaper.Replace(s) + "'"
+}
+
+func quoteLogsBacktickIdentifier(s string) string {
+	return "`" + logsBacktickIdentifierEscaper.Replace(s) + "`"
+}
+
 type AWSError struct {
 	Code    string
 	Message string
@@ -541,7 +558,7 @@ func buildLogGroupsSourceClause(
 
 		// Add class only if not STANDARD which is the default behaviour if not specified
 		if logsQuery.LogGroupClass != nil && *logsQuery.LogGroupClass != dataquery.LogGroupClassSTANDARD {
-			parts = append(parts, fmt.Sprintf("class: ['%s']", *logsQuery.LogGroupClass))
+			parts = append(parts, fmt.Sprintf("class: [%s]", quoteLogsStringLiteral(string(*logsQuery.LogGroupClass))))
 		}
 
 		if includeAccounts && len(logsQuery.SelectedAccountIds) > 0 {
@@ -577,10 +594,10 @@ func buildPPLSourceClause(logGroupIdentifiers []string, dataSourceIdentifiers []
 
 	parts := make([]string, 0, len(logGroupIdentifiers)+len(dataSourceIdentifiers))
 	for _, ds := range dataSourceIdentifiers {
-		parts = append(parts, fmt.Sprintf("ds:`%s`", ds))
+		parts = append(parts, "ds:"+quoteLogsBacktickIdentifier(ds))
 	}
 	for _, lg := range logGroupIdentifiers {
-		parts = append(parts, fmt.Sprintf("lg:`%s`", lg))
+		parts = append(parts, "lg:"+quoteLogsBacktickIdentifier(lg))
 	}
 
 	return fmt.Sprintf("source=[%s]", strings.Join(parts, ", "))
@@ -593,7 +610,7 @@ func expandSQLLogGroupsMacro(queryString string, logGroupIdentifiers []string) (
 
 	quoted := make([]string, len(logGroupIdentifiers))
 	for i, id := range logGroupIdentifiers {
-		quoted[i] = fmt.Sprintf("'%s'", id)
+		quoted[i] = quoteLogsStringLiteral(id)
 	}
 	replacement := fmt.Sprintf("logGroups(logGroupIdentifier: [%s])", strings.Join(quoted, ", "))
 	return strings.Replace(queryString, logGroupsMacro, replacement, 1), nil
@@ -649,7 +666,7 @@ func validateSQLMacroSelections(
 func formatStringArrayForSource(arr []string) string {
 	quoted := make([]string, len(arr))
 	for i, s := range arr {
-		quoted[i] = fmt.Sprintf("'%s'", s)
+		quoted[i] = quoteLogsStringLiteral(s)
 	}
 	return fmt.Sprintf("[%s]", strings.Join(quoted, ", "))
 }
