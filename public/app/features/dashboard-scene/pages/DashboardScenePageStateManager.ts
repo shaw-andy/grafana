@@ -35,6 +35,7 @@ import {
   isDashboardV2Spec,
   isV2StoredVersion,
 } from 'app/features/dashboard/api/utils';
+import { fetchCommunityDashboard } from 'app/features/dashboard/dashgrid/DashboardLibrary/api/dashboardLibraryApi';
 import { initializeDashboardAnalyticsAggregator } from 'app/features/dashboard/services/DashboardAnalyticsAggregator';
 import { recordDashboardFetchTiming } from 'app/features/dashboard/services/DashboardFetchTiming';
 import { dashboardLoaderSrv, DashboardLoaderSrvV2 } from 'app/features/dashboard/services/DashboardLoaderSrv';
@@ -755,7 +756,7 @@ export class DashboardScenePageStateManager extends DashboardScenePageStateManag
     pluginId: string | null
   ): Promise<DashboardDTO> {
     // Fetch the community dashboard from grafana.com
-    const gnetDashboard = await getBackendSrv().get(`/api/gnet/dashboards/${gnetId}`);
+    const gnetDashboard = await fetchCommunityDashboard(gnetId);
 
     // The dashboard JSON is in the 'json' property
     const dashboardJson = gnetDashboard.json;
@@ -791,7 +792,7 @@ export class DashboardScenePageStateManager extends DashboardScenePageStateManag
     }
 
     // Fetch the community dashboard from grafana.com
-    const gnetDashboard = await getBackendSrv().get(`/api/gnet/dashboards/${gnetId}`);
+    const gnetDashboard = await fetchCommunityDashboard(gnetId);
 
     // The dashboard JSON is in the 'json' property
     const dashboardJson = gnetDashboard.json;
