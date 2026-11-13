@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useParams } from 'react-router-dom-v5-compat';
 
 import { useGetPlaylistQuery } from '../../api/clients/playlist/v1';
@@ -8,8 +9,12 @@ import { playlistSrv } from './PlaylistSrv';
 export default function PlaylistStartPage() {
   const { uid = '' } = useParams();
   const { data, isLoading } = useGetPlaylistQuery({ name: uid });
-  if (!isLoading && data) {
-    playlistSrv.start(data);
-  }
+
+  useEffect(() => {
+    if (!isLoading && data) {
+      playlistSrv.start(data);
+    }
+  }, [data, isLoading]);
+
   return null;
 }

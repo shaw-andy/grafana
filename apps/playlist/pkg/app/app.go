@@ -57,9 +57,7 @@ func New(cfg app.Config) (app.App, error) {
 	}
 
 	playlistValidator := &simple.Validator{
-		ValidateFunc: func(ctx context.Context, req *app.AdmissionRequest) error {
-			return nil
-		},
+		ValidateFunc: validatePlaylist,
 	}
 
 	simpleConfig := simple.AppConfig{
