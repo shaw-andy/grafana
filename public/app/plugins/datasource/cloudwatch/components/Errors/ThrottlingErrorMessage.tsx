@@ -1,5 +1,7 @@
 import { TextLink } from '@grafana/ui';
 
+import { getServiceQuotasUrl } from '../../aws_url';
+
 export interface Props {
   region: string;
 }
@@ -7,10 +9,7 @@ export interface Props {
 export const ThrottlingErrorMessage = ({ region }: Props) => (
   <p>
     Please visit the&nbsp;
-    <TextLink
-      external
-      href={`https://${region}.console.aws.amazon.com/servicequotas/home?region=${region}#!/services/monitoring/quotas/L-5E141212`}
-    >
+    <TextLink external href={getServiceQuotasUrl(region)}>
       AWS Service Quotas console
     </TextLink>
     &nbsp;to request a quota increase or see our&nbsp;

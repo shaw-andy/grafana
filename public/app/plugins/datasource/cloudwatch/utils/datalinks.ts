@@ -49,16 +49,19 @@ export async function addDataLinksToLogsResponse(
     // add a link to the cloudwatch console as a separate field that will be displayed as a link
     // @ts-ignore ignore feature toggle type error
     if (config.featureToggles.cloudWatchLogsInsightsDataLinks && dataFrame.fields.length) {
-      dataFrame.fields.push({
-        name: '',
-        type: FieldType.string,
-        values: dataFrame.fields[0]?.values?.length
-          ? new Array(dataFrame.fields[0].values.length).fill('View this query in CloudWatch console')
-          : [],
-        config: {
-          links: [createAwsConsoleLink(curTarget, request.range, interpolatedRegion, replace, getVariableValue)],
-        },
-      });
+      const consoleLink = createAwsConsoleLink(curTarget, request.range, interpolatedRegion, replace, getVariableValue);
+      if (consoleLink) {
+        dataFrame.fields.push({
+          name: '',
+          type: FieldType.string,
+          values: dataFrame.fields[0]?.values?.length
+            ? new Array(dataFrame.fields[0].values.length).fill('View this query in CloudWatch console')
+            : [],
+          config: {
+            links: [consoleLink],
+          },
+        });
+      }
     }
   }
 }
@@ -116,6 +119,9 @@ function createAwsConsoleLink(
   };
 
   const encodedUrl = encodeUrl(urlProps, region);
+  if (!encodedUrl) {
+    return undefined;
+  }
   return {
     url: encodedUrl,
     title: 'View in CloudWatch console',
