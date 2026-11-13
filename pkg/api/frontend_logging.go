@@ -98,7 +98,7 @@ func GrafanaJavascriptAgentLogMessageHandler(store *frontendlogging.SourceMapSto
 // handlers are setup even if frontend logging is disabled, but in this case do nothing
 // this is to avoid reporting errors in case config was changes but there are browser
 // sessions still open with older config
-func (hs *HTTPServer) frontendLogEndpoints() web.Handler {
+func (hs *HTTPServer) frontendLogEndpoints() func(*web.Context) {
 	if !(hs.Cfg.GrafanaJavascriptAgent.Enabled) {
 		return func(ctx *web.Context) {
 			if ctx.Req.Method == http.MethodPost && ctx.Req.URL.Path == grafanaJavascriptAgentEndpointPath {
