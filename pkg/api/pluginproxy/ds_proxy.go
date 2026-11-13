@@ -42,6 +42,10 @@ var (
 // appended to the data proxy User-Agent when forward_user_agent is enabled.
 const maxForwardedUserAgentLen = 255
 
+// maxUnauthorizedBodyDrainBytes bounds how much of an upstream 401 body the
+// proxy reads before replacing the response.
+const maxUnauthorizedBodyDrainBytes = 4 * 1024
+
 type HTTPContext struct {
 	Req  *http.Request
 	Resp http.ResponseWriter
@@ -139,16 +143,14 @@ func (proxy *DataSourceProxy) HandleRequest() {
 
 	modifyResponse := func(resp *http.Response) error {
 		if resp.StatusCode == 401 {
-			// The data source rejected the request as unauthorized, convert to 400 (bad request)
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				return fmt.Errorf("failed to read data source response body: %w", err)
-			}
+			// The data source rejected the request as unauthorized, convert to 400 (bad request).
+			// The upstream body is discarded; dataproxy.response_limit may be 0 (unlimited), so only a
+			// bounded prefix is drained to allow connection reuse.
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxUnauthorizedBodyDrainBytes))
 			_ = resp.Body.Close()
 
 			ctxLogger := proxyErrorLogger.FromContext(resp.Request.Context())
-			ctxLogger.Info("Authentication to data source failed", "body", string(body), "statusCode",
-				resp.StatusCode)
+			ctxLogger.Info("Authentication to data source failed", "statusCode", resp.StatusCode)
 			msg := "Authentication to data source failed"
 			*resp = http.Response{
 				StatusCode:    400,
