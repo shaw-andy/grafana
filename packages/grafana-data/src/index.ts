@@ -893,6 +893,7 @@ export {
   type ActionModel,
   type ActionVariable,
   type ActionVariableInput,
+  type PreparedActionRequest,
   ActionType,
   HttpRequestMethod,
   ActionVariableType,

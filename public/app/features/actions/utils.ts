@@ -90,6 +90,30 @@ export const getActions = (
         dataContext.value.calculatedValue = config.calculatedValue;
       }
 
+      const sendRequest = (request: BackendSrvRequest) => {
+        if (visualizationType) {
+          reportActionTrigger(action.type, action.oneClick ?? false, visualizationType);
+        }
+
+        try {
+          getBackendSrv()
+            .fetch(request)
+            .subscribe({
+              error: (error) => {
+                appEvents.emit(AppEvents.alertError, ['An error has occurred. Check console output for more details.']);
+                console.error(error);
+              },
+              complete: () => {
+                appEvents.emit(AppEvents.alertSuccess, ['API call was successful']);
+              },
+            });
+        } catch (error) {
+          appEvents.emit(AppEvents.alertError, ['An error has occurred. Check console output for more details.']);
+          console.error(error);
+          return;
+        }
+      };
+
       const actionModel: ActionModel<Field> = {
         title: replaceVariables(action.title, actionScopedVars),
         type: action.type,
@@ -100,10 +124,6 @@ export const getActions = (
             actionVars
           )(action.confirmation || `Are you sure you want to ${action.title}?`),
         onClick: (evt: MouseEvent, origin: Field, actionVars?: ActionVariableInput) => {
-          if (visualizationType) {
-            reportActionTrigger(action.type, action.oneClick ?? false, visualizationType);
-          }
-
           // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
           let request = {} as BackendSrvRequest;
           if (isInfinityActionWithAuth(action)) {
@@ -112,25 +132,23 @@ export const getActions = (
             request = buildActionRequest(action, genReplaceActionVars(boundReplaceVariables, action, actionVars));
           }
 
+          sendRequest(request);
+        },
+        prepare: (actionVars?: ActionVariableInput) => {
+          let prepared: PreparedRequest;
           try {
-            getBackendSrv()
-              .fetch(request)
-              .subscribe({
-                error: (error) => {
-                  appEvents.emit(AppEvents.alertError, [
-                    'An error has occurred. Check console output for more details.',
-                  ]);
-                  console.error(error);
-                },
-                complete: () => {
-                  appEvents.emit(AppEvents.alertSuccess, ['API call was successful']);
-                },
-              });
+            prepared = prepareActionRequest(action, genReplaceActionVars(boundReplaceVariables, action, actionVars));
           } catch (error) {
             appEvents.emit(AppEvents.alertError, ['An error has occurred. Check console output for more details.']);
             console.error(error);
-            return;
+            return undefined;
           }
+
+          const { request, preview } = prepared;
+          return Object.freeze({
+            ...preview,
+            execute: () => sendRequest(cloneRequest(request)),
+          });
         },
         oneClick: action.oneClick ?? false,
         style: {
@@ -302,13 +320,14 @@ class InfinityRequestBuilder {
   }
 }
 
-/** @internal */
-export const buildActionProxyRequest = (action: Action, replaceVariables: InterpolateFunction) => {
-  const { config, url, data, processedHeaders, processedQueryParams, contentType } = processActionConfig(
-    action,
-    replaceVariables
-  );
-
+const buildProxyRequestFromConfig = ({
+  config,
+  url,
+  data,
+  processedHeaders,
+  processedQueryParams,
+  contentType,
+}: ReturnType<typeof processActionConfig>) => {
   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
   const infinityConfig = config as InfinityOptions;
   if (!infinityConfig.datasourceUid) {
@@ -318,3 +337,49 @@ export const buildActionProxyRequest = (action: Action, replaceVariables: Interp
   const requestBuilder = new InfinityRequestBuilder();
   return requestBuilder.buildRequest(infinityConfig, url, data, processedHeaders, processedQueryParams, contentType);
 };
+
+/** @internal */
+export const buildActionProxyRequest = (action: Action, replaceVariables: InterpolateFunction) => {
+  return buildProxyRequestFromConfig(processActionConfig(action, replaceVariables));
+};
+
+interface PreparedRequest {
+  request: BackendSrvRequest;
+  preview: { method: string; url: string; body?: string };
+}
+
+/**
+ * Interpolates the action once and returns both the request to send and the values to show the user,
+ * so what the user confirms is what gets sent.
+ * @internal
+ */
+export const prepareActionRequest = (action: Action, replaceVariables: InterpolateFunction): PreparedRequest => {
+  if (isInfinityActionWithAuth(action)) {
+    const processed = processActionConfig(action, replaceVariables);
+    const targetUrl = new URL(processed.url.toString());
+    processed.processedQueryParams.forEach(([name, value]) => {
+      targetUrl.searchParams.append(name, value);
+    });
+    const preview = { method: processed.config.method, url: targetUrl.toString(), body: processed.data };
+
+    return { request: buildProxyRequestFromConfig(processed), preview };
+  }
+
+  if (action.type !== ActionType.Fetch) {
+    throw new Error('Unsupported action type');
+  }
+
+  const request = buildActionRequest(action, replaceVariables);
+  const preview = {
+    method: request.method ?? HttpRequestMethod.GET,
+    url: request.url,
+    body: typeof request.data === 'string' ? request.data : undefined,
+  };
+
+  return { request, preview };
+};
+
+const cloneRequest = (request: BackendSrvRequest): BackendSrvRequest => ({
+  ...request,
+  headers: request.headers ? { ...request.headers } : undefined,
+});

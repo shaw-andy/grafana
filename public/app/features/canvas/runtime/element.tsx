@@ -12,11 +12,13 @@ import {
   type ActionModel,
   type ActionVariableInput,
   ActionType,
+  type PreparedActionRequest,
 } from '@grafana/data';
 import { t } from '@grafana/i18n';
 import { config } from '@grafana/runtime';
 import { TooltipDisplayMode } from '@grafana/schema';
 import { ConfirmModal, VariablesInputModal } from '@grafana/ui';
+import { ActionRequestDetails } from '@grafana/ui/internal';
 import { type LayerElement } from 'app/core/components/Layers/types';
 import { notFoundItem } from 'app/features/canvas/elements/notFound';
 import { type DimensionContext } from 'app/features/dimensions/context';
@@ -70,6 +72,7 @@ export class ElementState implements LayerElement {
   // cached for tooltips/mousemove
   oneClickMode = OneClickMode.Off;
   showActionConfirmation = false;
+  preparedActionRequest?: PreparedActionRequest;
 
   showActionVarsModal = false;
   actionVars: ActionVariableInput = {};
@@ -996,8 +999,7 @@ export class ElementState implements LayerElement {
         this.showActionVarsModal = true;
         this.forceUpdate();
       } else {
-        this.showActionConfirmation = true;
-        this.forceUpdate();
+        this.openActionConfirmation(primaryAction);
       }
     } else {
       this.handleTooltip(event);
@@ -1033,10 +1035,24 @@ export class ElementState implements LayerElement {
     }
   };
 
+  openActionConfirmation = (action: ActionModel | undefined) => {
+    this.preparedActionRequest = action?.prepare?.(this.actionVars);
+    this.showActionConfirmation = !action?.prepare || this.preparedActionRequest !== undefined;
+    this.forceUpdate();
+  };
+
+  closeActionConfirmation = () => {
+    this.showActionConfirmation = false;
+    this.preparedActionRequest = undefined;
+    this.forceUpdate();
+  };
+
   renderActionsConfirmModal = (action: ActionModel | undefined) => {
     if (!action) {
       return;
     }
+
+    const preparedRequest = this.preparedActionRequest;
 
     return (
       <>
@@ -1045,20 +1061,29 @@ export class ElementState implements LayerElement {
             isOpen={true}
             title={t('grafana-ui.action-editor.button.confirm-action', 'Confirm action')}
             body={action.confirmation(/** TODO: implement actionVars */)}
+            description={
+              preparedRequest && (
+                <ActionRequestDetails
+                  method={preparedRequest.method}
+                  url={preparedRequest.url}
+                  body={preparedRequest.body}
+                />
+              )
+            }
             confirmText={t('grafana-ui.action-editor.button.confirm', 'Confirm')}
             confirmVariant="primary"
             onConfirm={() => {
-              this.showActionConfirmation = false;
-              action.onClick(new MouseEvent('click'), null, this.actionVars);
+              if (preparedRequest) {
+                preparedRequest.execute();
+              } else {
+                action.onClick(new MouseEvent('click'), null, this.actionVars);
+              }
               if (action.type) {
                 reportActionTrigger(action.type, true, 'canvas');
               }
-              this.forceUpdate();
+              this.closeActionConfirmation();
             }}
-            onDismiss={() => {
-              this.showActionConfirmation = false;
-              this.forceUpdate();
-            }}
+            onDismiss={this.closeActionConfirmation}
           />
         )}
       </>
@@ -1072,8 +1097,7 @@ export class ElementState implements LayerElement {
 
     const onModalContinue = () => {
       this.showActionVarsModal = false;
-      this.showActionConfirmation = true;
-      this.forceUpdate();
+      this.openActionConfirmation(action);
     };
 
     return (
