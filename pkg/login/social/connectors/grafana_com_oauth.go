@@ -127,10 +127,6 @@ func (s *SocialGrafanaCom) Reload(ctx context.Context, settings ssoModels.SSOSet
 	return nil
 }
 
-func (s *SocialGrafanaCom) IsEmailAllowed(email string) bool {
-	return true
-}
-
 func (s *SocialGrafanaCom) isOrganizationMember(organizations []OrgRecord) bool {
 	if len(s.allowedOrganizations) == 0 {
 		return true
