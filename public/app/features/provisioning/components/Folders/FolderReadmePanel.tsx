@@ -1,6 +1,6 @@
 import { css, cx } from '@emotion/css';
 import { useBooleanFlagValue } from '@openfeature/react-sdk';
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useLocation } from 'react-router-dom-v5-compat';
 import { useIntersection } from 'react-use';
 
@@ -21,6 +21,7 @@ import { type FolderReadmeStatus, useFolderReadme } from '../../hooks/useFolderR
 import { type FolderDoc, FOLDER_DOC_TAB_PARAM, getDocTabLabel } from '../../utils/folderDocConventions';
 import { getRepoEditFileUrl, getRepoNewFileUrl } from '../../utils/git';
 import { RESOURCE_PATH_ATTR, rewriteRelativeMarkdownLinks } from '../../utils/markdownLinks';
+import { getRepositoryMediaOrigin, restrictMarkdownMedia } from '../../utils/markdownMedia';
 import { createGrafanaLinkResolver } from '../../utils/markdownResourceLinks';
 import { splitPath } from '../utils/path';
 
@@ -244,7 +245,9 @@ function RenderedMarkdown({
   // which preserves relative links.
   const html = renderMarkdown(markdown, { noSanitize: true });
   const rewritten = rewriteRelativeMarkdownLinks(html, { repository, baseDirInRepo });
-  const safe = textUtil.sanitize(rewritten);
+  const mediaOrigin = getRepositoryMediaOrigin(repository);
+  const safe = restrictMarkdownMedia(textUtil.sanitize(rewritten), mediaOrigin);
+  const sanitizeDiagram = useCallback((svg: string) => restrictMarkdownMedia(svg, mediaOrigin), [mediaOrigin]);
   const containerRef = useRef<HTMLDivElement>(null);
   // Only the latest async (first-click) resolution navigates, so overlapping
   // clicks can't race and push an earlier link's destination after a later one.
@@ -350,7 +353,7 @@ function RenderedMarkdown({
   // React resets innerHTML whenever this object's identity changes, which would
   // wipe the diagrams the hook swapped in — so only hand it a new one when the html changes.
   const innerHtml = useMemo(() => ({ __html: safe }), [safe]);
-  useMermaidDiagrams(containerRef, safe);
+  useMermaidDiagrams(containerRef, safe, true, sanitizeDiagram);
 
   return (
     <div ref={containerRef} className={cx('markdown-html', styles.markdownBody)} dangerouslySetInnerHTML={innerHtml} />

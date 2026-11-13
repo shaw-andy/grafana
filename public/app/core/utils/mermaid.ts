@@ -14,7 +14,16 @@ const SOURCE_ATTR = 'data-mermaid-source';
 // Render ids have to be unique document-wide, not just per panel.
 let diagramSeq = 0;
 
-export async function renderMermaidDiagrams(container: HTMLElement, theme: GrafanaTheme2, signal: AbortSignal) {
+/**
+ * `sanitizeSvg` runs on each diagram's already-sanitized markup before it is
+ * inserted, for callers that need a stricter policy than the default one.
+ */
+export async function renderMermaidDiagrams(
+  container: HTMLElement,
+  theme: GrafanaTheme2,
+  signal: AbortSignal,
+  sanitizeSvg?: (svg: string) => string
+) {
   const diagrams = Array.from(container.querySelectorAll(MERMAID_SELECTOR), (block) => {
     // A fence keeps the source in the <code>, but the <pre> is what gets replaced.
     const target = block.tagName === 'CODE' ? (block.parentElement ?? block) : block;
@@ -47,7 +56,8 @@ export async function renderMermaidDiagrams(container: HTMLElement, theme: Grafa
       const diagram = document.createElement('div');
       diagram.className = cx(DIAGRAM_CLASS, styles.diagram);
       diagram.setAttribute(SOURCE_ATTR, source);
-      diagram.innerHTML = textUtil.sanitizeSVGContent(result);
+      const svg = textUtil.sanitizeSVGContent(result);
+      diagram.innerHTML = sanitizeSvg ? sanitizeSvg(svg) : svg;
       // A recovered redraw takes the earlier message with it.
       clearError(target);
       target.replaceWith(diagram);

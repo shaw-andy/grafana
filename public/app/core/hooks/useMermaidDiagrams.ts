@@ -6,8 +6,14 @@ import { renderMermaidDiagrams } from 'app/core/utils/mermaid';
 /**
  * Turns the ```mermaid fences and <pre class="mermaid"> blocks inside `ref` into
  * themed diagrams. Pass the html that was injected so a content change redraws.
+ * `sanitizeSvg` must be referentially stable, or every render redraws.
  */
-export function useMermaidDiagrams(ref: RefObject<HTMLElement | null>, html: string, enabled = true) {
+export function useMermaidDiagrams(
+  ref: RefObject<HTMLElement | null>,
+  html: string,
+  enabled = true,
+  sanitizeSvg?: (svg: string) => string
+) {
   const theme = useTheme2();
 
   // Runs after DangerouslySetHtmlContent's own effect (children first), so the
@@ -21,8 +27,8 @@ export function useMermaidDiagrams(ref: RefObject<HTMLElement | null>, html: str
 
     // Never rejects: import and per-diagram failures are reported in place.
     const controller = new AbortController();
-    void renderMermaidDiagrams(container, theme, controller.signal);
+    void renderMermaidDiagrams(container, theme, controller.signal, sanitizeSvg);
 
     return () => controller.abort();
-  }, [ref, html, enabled, theme]);
+  }, [ref, html, enabled, theme, sanitizeSvg]);
 }
