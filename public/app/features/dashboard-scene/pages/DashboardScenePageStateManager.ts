@@ -47,6 +47,7 @@ import { emitDashboardViewEvent } from 'app/features/dashboard/state/analyticsPr
 import { CustomDashboardTemplateInteractions } from 'app/features/dashboard-scene/analytics/dashboard-templates/main';
 import { transformTemplateToSaveModelSchemaV2 } from 'app/features/dashboard-scene/utils/dashboardTemplateEnvelope';
 import { trackDashboardSceneLoaded } from 'app/features/dashboard-scene/utils/tracking';
+import { getGcomDashboardUrl } from 'app/features/manage-dashboards/import/utils/gcomDashboardUrl';
 import { interpolateV1Dashboard } from 'app/features/manage-dashboards/import/utils/inputs';
 import { playlistSrv } from 'app/features/playlist/PlaylistSrv';
 import { isRefNotFoundError } from 'app/features/provisioning/components/utils/errors';
@@ -755,7 +756,7 @@ export class DashboardScenePageStateManager extends DashboardScenePageStateManag
     pluginId: string | null
   ): Promise<DashboardDTO> {
     // Fetch the community dashboard from grafana.com
-    const gnetDashboard = await getBackendSrv().get(`/api/gnet/dashboards/${gnetId}`);
+    const gnetDashboard = await getBackendSrv().get(getGcomDashboardUrl(gnetId));
 
     // The dashboard JSON is in the 'json' property
     const dashboardJson = gnetDashboard.json;
@@ -791,7 +792,7 @@ export class DashboardScenePageStateManager extends DashboardScenePageStateManag
     }
 
     // Fetch the community dashboard from grafana.com
-    const gnetDashboard = await getBackendSrv().get(`/api/gnet/dashboards/${gnetId}`);
+    const gnetDashboard = await getBackendSrv().get(getGcomDashboardUrl(gnetId));
 
     // The dashboard JSON is in the 'json' property
     const dashboardJson = gnetDashboard.json;

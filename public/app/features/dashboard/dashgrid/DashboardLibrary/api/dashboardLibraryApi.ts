@@ -1,4 +1,5 @@
 import { getBackendSrv, logInfo, logWarning } from '@grafana/runtime';
+import { getGcomDashboardUrl } from 'app/features/manage-dashboards/import/utils/gcomDashboardUrl';
 import { type DashboardJson } from 'app/features/manage-dashboards/types';
 import { type PluginDashboard } from 'app/types/plugins';
 
@@ -114,7 +115,7 @@ export async function fetchCommunityDashboards(
  * Fetch a single community dashboard's full JSON from Grafana.com
  */
 export async function fetchCommunityDashboard(gnetId: number): Promise<GnetDashboardResponse> {
-  return getBackendSrv().get(`/api/gnet/dashboards/${gnetId}`);
+  return getBackendSrv().get(getGcomDashboardUrl(gnetId));
 }
 
 /**
