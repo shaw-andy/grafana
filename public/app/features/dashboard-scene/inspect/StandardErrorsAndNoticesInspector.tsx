@@ -1,4 +1,5 @@
 import { css } from '@emotion/css';
+import DOMPurify from 'dompurify';
 import { useState } from 'react';
 
 import {
@@ -7,10 +8,9 @@ import {
   type GrafanaTheme2,
   type QueryResultMetaNotice,
   renderMarkdown,
-  textUtil,
 } from '@grafana/data';
 import { t } from '@grafana/i18n';
-import { ClipboardButton, Icon, type IconName, Stack, TextLink, useStyles2 } from '@grafana/ui';
+import { ClipboardButton, Icon, type IconName, Stack, useStyles2 } from '@grafana/ui';
 
 export interface StandardErrorsAndNoticesInspectorProps {
   data?: DataFrame[];
@@ -23,9 +23,38 @@ export interface InspectableEntry {
   severity: Severity;
   title?: string;
   content: string;
-  link?: string;
   // Errors are raw payloads shown verbatim in a code block; notices are rendered as markdown.
   isCode?: boolean;
+}
+
+// Notices come from query results that dashboard editors can control, so their markdown keeps only
+// formatting: no links, images, frames or attributes that could make the browser load a URL.
+const NOTICE_MARKDOWN_TAGS = [
+  'p',
+  'br',
+  'hr',
+  'strong',
+  'b',
+  'em',
+  'i',
+  'del',
+  's',
+  'code',
+  'pre',
+  'blockquote',
+  'ul',
+  'ol',
+  'li',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+];
+
+function renderNoticeMarkdown(text: string): string {
+  return DOMPurify.sanitize(renderMarkdown(text), { ALLOWED_TAGS: NOTICE_MARKDOWN_TAGS, ALLOWED_ATTR: [] });
 }
 
 // Higher number = higher priority, used to sort cards error > warning > info.
@@ -79,7 +108,6 @@ export function buildEntries(data: DataFrame[] | undefined, errors: DataQueryErr
         severity,
         title: notice.text,
         content: notice.text,
-        link: notice.link,
       });
     }
   }
@@ -140,13 +168,10 @@ function EntryCard({ entry }: { entry: InspectableEntry }) {
               <pre className={styles.code}>{entry.content}</pre>
             </>
           ) : (
-            // renderMarkdown sanitizes its output, so this is safe to set as HTML.
-            <div className={styles.markdown} dangerouslySetInnerHTML={{ __html: renderMarkdown(entry.content) }} />
-          )}
-          {entry.link && (
-            <TextLink href={textUtil.sanitizeUrl(entry.link)} external className={styles.link}>
-              {t('dashboard-scene.errors-and-notices-inspector.learn-more', 'Learn more')}
-            </TextLink>
+            <div
+              className={styles.markdown}
+              dangerouslySetInnerHTML={{ __html: renderNoticeMarkdown(entry.content) }}
+            />
           )}
         </div>
       )}
@@ -227,10 +252,6 @@ const getStyles = (theme: GrafanaTheme2) => ({
     'p:last-child': {
       marginBottom: 0,
     },
-    a: {
-      color: theme.colors.text.link,
-      textDecoration: 'underline',
-    },
     code: {
       fontFamily: theme.typography.fontFamilyMonospace,
       fontSize: theme.typography.bodySmall.fontSize,
@@ -242,10 +263,6 @@ const getStyles = (theme: GrafanaTheme2) => ({
       paddingLeft: theme.spacing(2.5),
       margin: theme.spacing(0.5, 0),
     },
-  }),
-  link: css({
-    display: 'inline-block',
-    marginTop: theme.spacing(2),
   }),
   error: css({
     color: theme.colors.error.text,

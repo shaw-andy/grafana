@@ -65,20 +65,34 @@ describe('StandardErrorsAndNoticesInspector', () => {
     expect(screen.getAllByText('duplicate')).toHaveLength(1);
   });
 
-  it('renders notice text as markdown (links and bold)', () => {
+  it('renders notice text as markdown, keeping link text but not the link', () => {
     setup([
       frameWithNotices([{ severity: 'info', text: 'See [the docs](https://example.com/docs) and **note this**' }]),
     ]);
 
-    const link = screen.getByRole('link', { name: 'the docs' });
-    expect(link).toHaveAttribute('href', 'https://example.com/docs');
+    expect(screen.getByText(/the docs/)).toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
     expect(screen.getByText('note this').tagName.toLowerCase()).toBe('strong');
   });
 
-  it('renders a "Learn more" link from notice.link', () => {
+  it('does not render elements that load a URL from notice markdown', () => {
+    const { container } = setup([
+      frameWithNotices([
+        {
+          severity: 'warning',
+          text: '![x](/logout) <img src="/logout"> <iframe src="/logout"></iframe> <a href="/logout">raw</a>',
+        },
+      ]),
+    ]);
+
+    expect(container.querySelector('a, img, iframe, area, form, [src], [href]')).toBeNull();
+  });
+
+  it('does not render a link from notice.link', () => {
     setup([frameWithNotices([{ severity: 'info', text: 'has a link', link: 'https://example.com/more' }])]);
 
-    expect(screen.getByRole('link', { name: 'Learn more' })).toHaveAttribute('href', 'https://example.com/more');
+    expect(screen.getByText('has a link')).toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
 
   it('renders the raw error payload for errors', () => {

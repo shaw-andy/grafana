@@ -34,21 +34,7 @@ export const PanelHeaderNotice = ({ notice, onClick }: Props) => {
     );
   }
 
-  if (notice.link) {
-    return (
-      <a
-        className={styles.notice}
-        aria-label={notice.text}
-        href={notice.link}
-        target="_blank"
-        rel="noreferrer"
-        data-testid={testId}
-      >
-        <Icon name={iconName} style={{ marginRight: '8px' }} size="md" />
-      </a>
-    );
-  }
-
+  // notice.link comes from query results that dashboard editors can control, so it is never rendered as a link.
   return (
     <Tooltip key={notice.severity} content={notice.text}>
       <span className={styles.iconTooltip} data-testid={testId}>
