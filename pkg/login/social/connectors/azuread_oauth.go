@@ -100,10 +100,11 @@ func NewAzureADProvider(ctx context.Context, info *social.OAuthInfo, cfgProvider
 		return nil, err
 	}
 
-	allowedOrganizations, err := util.SplitStringWithError(info.Extra[allowedOrganizationsKey])
+	allowedOrganizations, err := parseAllowedTenants(info.Extra[allowedOrganizationsKey])
 	if err != nil {
 		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.AzureADProviderName, "error", err)
 	}
+	warnIfNoAllowedTenants(s.log, info, allowedOrganizations)
 
 	provider := &SocialAzureAD{
 		SocialBase:           s,
@@ -446,10 +447,11 @@ func (s *SocialAzureAD) Reload(ctx context.Context, settings ssoModels.SSOSettin
 		appendUniqueScope(s.Config, social.OfflineAccessScope)
 	}
 
-	allowedOrganizations, err := util.SplitStringWithError(newInfo.Extra[allowedOrganizationsKey])
+	allowedOrganizations, err := parseAllowedTenants(newInfo.Extra[allowedOrganizationsKey])
 	if err != nil {
 		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.AzureADProviderName, "error", err)
 	}
+	warnIfNoAllowedTenants(s.log, newInfo, allowedOrganizations)
 
 	s.allowedOrganizations = allowedOrganizations
 	s.forceUseGraphAPI = MustBool(newInfo.Extra[forceUseGraphAPIKey], false)
@@ -477,6 +479,7 @@ func (s *SocialAzureAD) Validate(ctx context.Context, newSettings ssoModels.SSOS
 		validateClientAuthentication,
 		validateFederatedCredentialAudience,
 		validateAllowedGroups,
+		validateAllowedTenants,
 		validation.MustBeEmptyValidator(info.ApiUrl, "API URL"),
 		validation.RequiredUrlValidator(info.AuthUrl, "Auth URL"),
 		validation.RequiredUrlValidator(info.TokenUrl, "Token URL"),
@@ -491,6 +494,39 @@ func validateAllowedGroups(info *social.OAuthInfo, requester identity.Requester)
 		}
 	}
 	return nil
+}
+
+// Multi-tenant app registrations accept ID tokens issued by any tenant, so an
+// enabled provider must name the tenants whose users may sign in.
+func validateAllowedTenants(info *social.OAuthInfo, requester identity.Requester) error {
+	if !info.Enabled {
+		return nil
+	}
+	allowedTenants, err := parseAllowedTenants(info.Extra[allowedOrganizationsKey])
+	if err != nil {
+		return ssosettings.ErrInvalidOAuthConfig("Allowed organizations are not in the correct format. Allowed organizations should be a list of tenant IDs.")
+	}
+	if len(allowedTenants) == 0 {
+		return ssosettings.ErrInvalidOAuthConfig("At least one allowed organization (tenant ID) is required when Microsoft Entra ID login is enabled.")
+	}
+	return nil
+}
+
+func parseAllowedTenants(value string) ([]string, error) {
+	values, err := util.SplitStringWithError(value)
+	tenants := make([]string, 0, len(values))
+	for _, v := range values {
+		if v = strings.TrimSpace(v); v != "" {
+			tenants = append(tenants, v)
+		}
+	}
+	return tenants, err
+}
+
+func warnIfNoAllowedTenants(logger log.Logger, info *social.OAuthInfo, allowedTenants []string) {
+	if info.Enabled && len(allowedTenants) == 0 {
+		logger.Error("No allowed organizations configured, all Microsoft Entra ID logins will be rejected. Set allowed_organizations to the tenant IDs allowed to sign in", "provider", social.AzureADProviderName)
+	}
 }
 
 func (s *SocialAzureAD) validateClaims(ctx context.Context, client *http.Client, idTokenString string) (*azureClaims, error) {
@@ -745,9 +781,9 @@ func (s *SocialAzureAD) SupportBundleContent(bf *bytes.Buffer) error {
 
 func (s *SocialAzureAD) isAllowedTenant(logger log.Logger, tenantID string) bool {
 	if len(s.allowedOrganizations) == 0 {
-		logger.Warn("No allowed organizations specified, all tenants are allowed. Configure allowed_organizations to restrict access")
-		return true
+		logger.Warn("No allowed organizations specified, rejecting login. Configure allowed_organizations with the tenant IDs allowed to sign in")
+		return false
 	}
 
-	return slices.Contains(s.allowedOrganizations, tenantID)
+	return tenantID != "" && slices.Contains(s.allowedOrganizations, tenantID)
 }

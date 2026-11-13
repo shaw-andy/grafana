@@ -42,6 +42,21 @@ func falseBoolPtr() *bool {
 	return &b
 }
 
+const testAllowedTenantID = "uuid-tenant"
+
+// withAllowedTestTenant allow-lists a tenant for cases that do not exercise tenant validation.
+func withAllowedTestTenant(info *social.OAuthInfo, claims *azureClaims) {
+	if info.Extra == nil {
+		info.Extra = map[string]string{}
+	}
+	if _, ok := info.Extra[allowedOrganizationsKey]; !ok {
+		info.Extra[allowedOrganizationsKey] = testAllowedTenantID
+	}
+	if claims != nil && claims.TenantID == "" {
+		claims.TenantID = testAllowedTenantID
+	}
+}
+
 func TestSocialAzureAD_UserInfo(t *testing.T) {
 	type fields struct {
 		providerCfg *social.OAuthInfo
@@ -837,6 +852,7 @@ func TestSocialAzureAD_UserInfo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			withAllowedTestTenant(tt.fields.providerCfg, tt.claims)
 			s := mustNewAzureADProvider(t, tt.fields.providerCfg,
 				tt.fields.cfg,
 				mustProvideOrgRoleMapper(t, tt.fields.cfg,
@@ -1017,6 +1033,7 @@ func TestSocialAzureAD_SkipOrgRole(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			withAllowedTestTenant(tt.fields.providerCfg, tt.claims)
 			s := mustNewAzureADProvider(t, tt.fields.providerCfg,
 				tt.fields.cfg,
 				mustProvideOrgRoleMapper(t, tt.fields.cfg,
