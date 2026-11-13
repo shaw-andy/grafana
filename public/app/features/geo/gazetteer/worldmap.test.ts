@@ -2,7 +2,7 @@ import { toLonLat } from 'ol/proj';
 
 import countriesJSON from '../../../../gazetteer/countries.json';
 
-import { getGazetteer } from './gazetteer';
+import { GAZETTEER_OPTIONS, getGazetteer } from './gazetteer';
 
 const backendResults: Record<string, string> | Array<Record<string, unknown>> = countriesJSON;
 
@@ -21,7 +21,7 @@ describe('Placename lookup from worldmap format', () => {
   });
 
   it('unified worldmap config', async () => {
-    const gaz = await getGazetteer('countries');
+    const gaz = await getGazetteer(GAZETTEER_OPTIONS.countries.path);
     expect(gaz.error).toBeUndefined();
     expect(toLonLat(gaz.find('US')?.point()?.getCoordinates()!)).toMatchInlineSnapshot(`
       [
@@ -36,7 +36,7 @@ describe('Placename lookup from worldmap format', () => {
   it('exposes a frame and row index so fields can be looked up', async () => {
     // getGazetteer caches by path in a module-level registry, so this is the same instance the
     // test above loaded rather than a second fetch.
-    const gaz = await getGazetteer('countries');
+    const gaz = await getGazetteer(GAZETTEER_OPTIONS.countries.path);
     expect(gaz.error).toBeUndefined();
 
     const frame = gaz.frame?.();

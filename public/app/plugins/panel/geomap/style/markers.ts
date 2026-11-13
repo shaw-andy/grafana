@@ -253,7 +253,7 @@ const makers: SymbolMaker[] = [
 ];
 
 async function prepareSVG(url: string, size?: number, backgroundOpacity?: number): Promise<string> {
-  return fetch(url, { method: 'GET' })
+  return fetch(url, { method: 'GET', credentials: 'omit' })
     .then((res) => {
       return res.text();
     })

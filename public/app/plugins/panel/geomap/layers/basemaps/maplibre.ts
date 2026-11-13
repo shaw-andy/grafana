@@ -14,6 +14,13 @@ export interface MaplibreConfig {
 
 const sampleURL = 'https://tiles.stadiamaps.com/styles/alidade_smooth.json';
 
+type TransformRequest = NonNullable<NonNullable<Parameters<typeof apply>[2]>['transformRequest']>;
+
+// The style URL is saved with the panel, so JSON requests it leads to must not carry the viewer's cookies
+const jsonResourceTypes: Array<Parameters<TransformRequest>[1]> = ['Style', 'Source', 'Sprite', 'GeoJSON'];
+const transformRequest: TransformRequest = (url, type) =>
+  jsonResourceTypes.includes(type) ? new Request(url, { credentials: 'omit' }) : undefined;
+
 const defaultMaplibreConfig: MaplibreConfig = {
   url: sampleURL,
 };
@@ -59,7 +66,7 @@ const maplibreLayer: MapLayerRegistryItem<Partial<MaplibreConfig>> = {
       // Handle async operations in the background
       const loadStyle = async () => {
         try {
-          const res = await fetch(cfg.url);
+          const res = await fetch(cfg.url, { credentials: 'omit' });
           if (!res.ok) {
             console.warn(`Failed to load MapLibre style from ${cfg.url}: ${res.status} ${res.statusText}`);
             // Try fallback approach
@@ -79,7 +86,7 @@ const maplibreLayer: MapLayerRegistryItem<Partial<MaplibreConfig>> = {
             }
           }
 
-          await apply(layer, style, { styleUrl: cfg.url, accessToken: cfg.accessToken });
+          await apply(layer, style, { styleUrl: cfg.url, accessToken: cfg.accessToken, transformRequest });
           applyNoRepeat();
         } catch (error) {
           console.warn('Failed to parse or apply MapLibre style JSON:', error);
@@ -90,7 +97,7 @@ const maplibreLayer: MapLayerRegistryItem<Partial<MaplibreConfig>> = {
 
       const tryFallbackApply = async () => {
         try {
-          await apply(layer, cfg.url, { accessToken: cfg.accessToken });
+          await apply(layer, cfg.url, { accessToken: cfg.accessToken, transformRequest });
           applyNoRepeat();
         } catch (fallbackError) {
           console.warn('Failed to load MapLibre style from both JSON and direct URL approaches:', fallbackError);

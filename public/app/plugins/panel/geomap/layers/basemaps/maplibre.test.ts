@@ -55,12 +55,12 @@ describe('maplibre basemap', () => {
 
   it('fetches the default style URL when no config url is set', async () => {
     await initLayer({ config: {} });
-    expect(fetch).toHaveBeenCalledWith(DEFAULT_STYLE_URL);
+    expect(fetch).toHaveBeenCalledWith(DEFAULT_STYLE_URL, { credentials: 'omit' });
   });
 
   it('fetches the configured style URL when one is provided', async () => {
     const url = 'https://tiles.example.com/style.json';
     await initLayer({ config: { url } });
-    expect(fetch).toHaveBeenCalledWith(url);
+    expect(fetch).toHaveBeenCalledWith(url, { credentials: 'omit' });
   });
 });
