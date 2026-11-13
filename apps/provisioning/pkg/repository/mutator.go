@@ -96,3 +96,29 @@ func CopySecureValues(new, old *provisioning.Repository) {
 func RequiresNewTokenForURLChange(new, old *provisioning.Repository) bool {
 	return old != nil && new.URL() != old.URL() && new.Secure.Token.IsZero()
 }
+
+// RequiresNewTokenForConnectionRemoval reports whether an update drops the
+// connection while keeping the stored token that connection issued. Without the
+// connection, that token would be treated as a user token and presented to
+// whatever host the repository URL names.
+// ReferencesForeignSecureValues reports whether new names a stored secure value
+// that old does not already hold in the same field. Storage checks such references
+// on write; callers that build a repository from an unsaved configuration must
+// refuse them instead, or they would decrypt another object's secret.
+func ReferencesForeignSecureValues(new, old *provisioning.Repository) bool {
+	var held provisioning.SecureValues
+	if old != nil {
+		held = old.Secure
+	}
+	foreign := func(name, heldName string) bool {
+		return name != "" && name != heldName
+	}
+	return foreign(new.Secure.Token.Name, held.Token.Name) ||
+		foreign(new.Secure.WebhookSecret.Name, held.WebhookSecret.Name) ||
+		foreign(new.Secure.CommitSigningKey.Name, held.CommitSigningKey.Name)
+}
+
+func RequiresNewTokenForConnectionRemoval(new, old *provisioning.Repository) bool {
+	return old != nil && old.HasConnection() && !new.HasConnection() &&
+		new.Secure.Token.Create.IsZero() && !new.Secure.Token.Remove
+}

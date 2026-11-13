@@ -123,28 +123,42 @@ func (s *testConnector) Connect(ctx context.Context, name string, _ runtime.Obje
 				// HACK: Set the name and namespace if not set so that the temporary repository can be created
 				// This can be removed once we deprecate legacy secrets is deprecated or we use InLineSecureValues as we
 				// use the same field and repository name to detect which one to use.
+				var oldCfg *provisioning.Repository
 				if name == "new" {
 					// HACK: frontend is passing a "new" we need to remove the hack there as well
 					// Otherwise creation will fail as `new` is a reserved word. Not relevant here as we only "test"
 					name = "hack-on-hack-for-new"
-				} else {
+				} else if old, _ := s.repoGetter.GetRepository(ctx, name); old != nil {
+					oldCfg = old.Config()
+				}
+
+				if repository.ReferencesForeignSecureValues(&cfg, oldCfg) {
+					responder.Error(k8serrors.NewBadRequest(
+						"secure values may only reference secrets already held by this repository",
+					))
+					return
+				}
+
+				if oldCfg != nil {
 					// Copy previous secure values if they exist
 					// FIXME: I think this will need decryption on the old object secrets. That shouldn't be necessary as we only need the spec.
-					old, _ := s.repoGetter.GetRepository(ctx, name)
-					if old != nil {
-						oldCfg := old.Config()
-						if repository.RequiresNewTokenForURLChange(&cfg, oldCfg) {
-							responder.Error(k8serrors.NewBadRequest(
-								"a new token is required when changing the repository URL",
-							))
-							return
-						}
-						repository.CopySecureValues(&cfg, oldCfg)
+					if repository.RequiresNewTokenForURLChange(&cfg, oldCfg) {
+						responder.Error(k8serrors.NewBadRequest(
+							"a new token is required when changing the repository URL",
+						))
+						return
+					}
+					if repository.RequiresNewTokenForConnectionRemoval(&cfg, oldCfg) {
+						responder.Error(k8serrors.NewBadRequest(
+							"a new token is required when removing the connection",
+						))
+						return
+					}
+					repository.CopySecureValues(&cfg, oldCfg)
 
-						// Copying previous finalizers
-						if len(cfg.GetFinalizers()) == 0 {
-							cfg.SetFinalizers(oldCfg.GetFinalizers())
-						}
+					// Copying previous finalizers
+					if len(cfg.GetFinalizers()) == 0 {
+						cfg.SetFinalizers(oldCfg.GetFinalizers())
 					}
 				}
 
