@@ -27,9 +27,25 @@ type xormStore struct {
 
 func (ss *xormStore) UpdateTempUserStatus(ctx context.Context, cmd *tempuser.UpdateTempUserStatusCommand) error {
 	return ss.db.WithDbSession(ctx, func(sess *db.Session) error {
-		var rawSQL = "UPDATE temp_user SET status=? WHERE code=?"
-		_, err := sess.Exec(rawSQL, string(cmd.Status), cmd.Code)
-		return err
+		if cmd.ExpectedStatus == "" {
+			var rawSQL = "UPDATE temp_user SET status=? WHERE code=?"
+			_, err := sess.Exec(rawSQL, string(cmd.Status), cmd.Code)
+			return err
+		}
+
+		var rawSQL = "UPDATE temp_user SET status=?, updated=? WHERE id=? AND code=? AND status=?"
+		result, err := sess.Exec(rawSQL, string(cmd.Status), time.Now().Unix(), cmd.ID, cmd.Code, string(cmd.ExpectedStatus))
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected == 0 {
+			return tempuser.ErrTempUserNotFound
+		}
+		return nil
 	})
 }
 
