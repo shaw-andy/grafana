@@ -172,7 +172,7 @@ func (pd *PublicDashboardServiceImpl) FindByAccessToken(ctx context.Context, acc
 	}
 
 	if pubdash == nil {
-		return nil, models.ErrPublicDashboardNotFound.Errorf("FindByAccessToken: Public dashboard not found accessToken: %s", accessToken)
+		return nil, models.ErrPublicDashboardNotFound.Errorf("FindByAccessToken: Public dashboard not found")
 	}
 
 	return pubdash, nil
@@ -188,11 +188,11 @@ func (pd *PublicDashboardServiceImpl) FindEnabledPublicDashboardAndDashboardByAc
 	}
 
 	if !pubdash.IsEnabled {
-		return nil, nil, models.ErrPublicDashboardNotEnabled.Errorf("FindEnabledPublicDashboardAndDashboardByAccessToken: Public dashboard is not enabled accessToken: %s", accessToken)
+		return nil, nil, models.ErrPublicDashboardNotEnabled.Errorf("FindEnabledPublicDashboardAndDashboardByAccessToken: Public dashboard is not enabled uid: %s", pubdash.Uid)
 	}
 
 	if !pd.license.FeatureEnabled(models.FeaturePublicDashboardsEmailSharing) && pubdash.Share == models.EmailShareType {
-		return nil, nil, models.ErrPublicDashboardNotFound.Errorf("FindEnabledPublicDashboardAndDashboardByAccessToken: Dashboard not found accessToken: %s", accessToken)
+		return nil, nil, models.ErrPublicDashboardNotFound.Errorf("FindEnabledPublicDashboardAndDashboardByAccessToken: Dashboard not found uid: %s", pubdash.Uid)
 	}
 
 	return pubdash, dash, err
@@ -213,7 +213,7 @@ func (pd *PublicDashboardServiceImpl) FindPublicDashboardAndDashboardByAccessTok
 	}
 
 	if dash == nil {
-		return nil, nil, models.ErrPublicDashboardNotFound.Errorf("FindPublicDashboardAndDashboardByAccessToken: Dashboard not found accessToken: %s", accessToken)
+		return nil, nil, models.ErrPublicDashboardNotFound.Errorf("FindPublicDashboardAndDashboardByAccessToken: Dashboard not found uid: %s", pubdash.Uid)
 	}
 
 	return pubdash, dash, nil
@@ -569,7 +569,7 @@ func (pd *PublicDashboardServiceImpl) newCreatePublicDashboard(ctx context.Conte
 	if accessToken != "" {
 		existingPubdash, _ := pd.store.FindByAccessToken(ctx, accessToken)
 		if existingPubdash != nil {
-			return nil, models.ErrPublicDashboardAccessTokenExists.Errorf("Create: public dashboard access token %s already exists", accessToken)
+			return nil, models.ErrPublicDashboardAccessTokenExists.Errorf("Create: public dashboard access token already exists")
 		}
 	} else {
 		accessToken, err = pd.NewPublicDashboardAccessToken(ctx)

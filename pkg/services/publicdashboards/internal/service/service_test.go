@@ -964,7 +964,7 @@ func TestIntegrationCreatePublicDashboard(t *testing.T) {
 
 		_, err := service.Create(context.Background(), SignedInUser, dto)
 		require.Error(t, err)
-		require.Equal(t, err, models.ErrPublicDashboardAccessTokenExists.Errorf("Create: public dashboard access token %s already exists", dto.PublicDashboard.AccessToken))
+		require.Equal(t, err, models.ErrPublicDashboardAccessTokenExists.Errorf("Create: public dashboard access token already exists"))
 	})
 
 	t.Run("Create public dashboard with given pubdash access token", func(t *testing.T) {
