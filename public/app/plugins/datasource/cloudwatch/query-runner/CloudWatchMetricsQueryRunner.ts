@@ -16,6 +16,7 @@ import {
 } from '@grafana/data';
 import { type TemplateSrv, getAppEvents } from '@grafana/runtime';
 
+import { getServiceQuotasUrl } from '../aws_url';
 import { ThrottlingErrorMessage } from '../components/Errors/ThrottlingErrorMessage';
 import { type CloudWatchMetricsQuery } from '../dataquery.gen';
 import memoizedDebounce from '../memoizedDebounce';
@@ -25,8 +26,8 @@ import { filterMetricsQuery } from '../utils/utils';
 
 import { CloudWatchRequest } from './CloudWatchRequest';
 
-const getThrottlingErrorMessage = (region: string, message: string) =>
-  `Please visit the AWS Service Quotas console at https://${region}.console.aws.amazon.com/servicequotas/home?region=${region}#!/services/monitoring/quotas/L-5E141212 to request a quota increase or see our documentation at https://grafana.com/docs/grafana/latest/datasources/cloudwatch/#manage-service-quotas to learn more. ${message}`;
+const getThrottlingErrorMessage = (quotasUrl: string, message: string) =>
+  `Please visit the AWS Service Quotas console at ${quotasUrl} to request a quota increase or see our documentation at https://grafana.com/docs/grafana/latest/datasources/cloudwatch/#manage-service-quotas to learn more. ${message}`;
 
 const displayAlert = (datasourceName: string, region: string) =>
   getAppEvents().publish({
@@ -147,7 +148,8 @@ export class CloudWatchMetricsQueryRunner extends CloudWatchRequest {
     errors.forEach((error) => {
       if (error.message && (/^Throttling:.*/.test(error.message) || /^Rate exceeded.*/.test(error.message))) {
         const region = this.getActualRegion(request.targets.find((target) => target.refId === error.refId)?.region);
-        result.push({ ...error, message: getThrottlingErrorMessage(region, error.message) });
+        const quotasUrl = getServiceQuotasUrl(region);
+        result.push(quotasUrl ? { ...error, message: getThrottlingErrorMessage(quotasUrl, error.message) } : error);
       } else {
         result.push(error);
       }

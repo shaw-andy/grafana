@@ -8,6 +8,8 @@ import { type AwsUrl, encodeUrl } from '../../../aws_url';
 import { type CloudWatchLogsQuery } from '../../../dataquery.gen';
 import { type CloudWatchDatasource } from '../../../datasource';
 
+const refusedHref = 'about:blank';
+
 interface Props {
   query: CloudWatchLogsQuery;
   panelData?: PanelData;
@@ -40,12 +42,19 @@ export function CloudWatchLink({ panelData, query, datasource }: Props) {
         source: sources ?? [],
       };
 
-      setHref(encodeUrl(urlProps, datasource.resources.getActualRegion(query.region)));
+      setHref(encodeUrl(urlProps, datasource.resources.getActualRegion(query.region)) || refusedHref);
     }
   }, [panelData, prevPanelData, datasource, query]);
 
   return (
-    <LinkButton variant="secondary" icon="share-alt" href={href} target="_blank" rel="noopener noreferrer">
+    <LinkButton
+      variant="secondary"
+      icon="share-alt"
+      href={href}
+      disabled={href === refusedHref}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
       CloudWatch Logs Insights
     </LinkButton>
   );
