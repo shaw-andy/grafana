@@ -272,19 +272,9 @@ func TestGetAuthorizerToggleOff(t *testing.T) {
 		assert.Equal(t, authorizer.DecisionNoOpinion, decision)
 	})
 
-	t.Run("None role with read verb allows (hotfix)", func(t *testing.T) {
+	t.Run("None role defers to roleAuthorizer for all verbs", func(t *testing.T) {
 		auth := installerWithToggle(t, false, mockAC).GetAuthorizer()
-		for _, verb := range []string{"get", "list", "watch"} {
-			attrs := &mockAttributes{isResourceRequest: true, verb: verb}
-			decision, _, err := auth.Authorize(noneCtx, attrs)
-			require.NoError(t, err)
-			assert.Equal(t, authorizer.DecisionAllow, decision, "verb: %s", verb)
-		}
-	})
-
-	t.Run("None role with write verb defers to roleAuthorizer", func(t *testing.T) {
-		auth := installerWithToggle(t, false, mockAC).GetAuthorizer()
-		for _, verb := range []string{"create", "update", "delete"} {
+		for _, verb := range []string{"get", "list", "watch", "create", "update", "delete"} {
 			attrs := &mockAttributes{isResourceRequest: true, verb: verb}
 			decision, _, err := auth.Authorize(noneCtx, attrs)
 			require.NoError(t, err)

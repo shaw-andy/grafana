@@ -18,7 +18,6 @@ import (
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
-	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/setting"
 )
 
@@ -77,17 +76,9 @@ func (p *AppInstaller) GetAuthorizer() authorizer.Authorizer {
 			}
 
 			if !openfeature.NewDefaultClient().Boolean(ctx, featuremgmt.FlagPlaylistsRBAC, false, openfeature.TransactionContext(ctx)) {
-				// Hotfix: grant None-role users viewer-level access until the toggle is enabled.
-				// All other roles are handled by the default role authorizer.
-				if user.GetOrgRole() != org.RoleNone {
-					return authorizer.DecisionNoOpinion, "", nil
-				}
-				switch attr.GetVerb() {
-				case "get", "list", "watch":
-					return authorizer.DecisionAllow, "", nil
-				default:
-					return authorizer.DecisionNoOpinion, "", nil
-				}
+				// Until the toggle is enabled, the org role authorizer decides for every role,
+				// including None, which has no playlist access.
+				return authorizer.DecisionNoOpinion, "", nil
 			}
 
 			var action string
