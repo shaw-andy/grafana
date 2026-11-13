@@ -396,6 +396,14 @@ func (q updateUserQuery) OrgIDValue() int64 {
 
 func (q updateUserQuery) Validate() error { return nil }
 
+type deleteUserAuthTokensQuery struct {
+	sqltemplate.SQLTemplate
+	TokenTable string
+	UserID     int64
+}
+
+func (q deleteUserAuthTokensQuery) Validate() error { return nil }
+
 func (ss *sqlStore) Update(ctx context.Context, cmd *user.UpdateUserCommand) error {
 	// enforcement of lowercase due to forcement of caseinsensitive login
 	cmd.Login = strings.ToLower(cmd.Login)
@@ -431,6 +439,23 @@ func (ss *sqlStore) Update(ctx context.Context, cmd *user.UpdateUserCommand) err
 		}
 		if _, err := sess.Exec(append([]any{rawSQL}, query.GetArgs()...)...); err != nil {
 			return handleSQLError(dbHelper.DB.GetDialect(), err)
+		}
+
+		// Sessions issued under the previous password must not outlive it, so
+		// they are revoked in the same transaction that stores the new hash.
+		if query.PasswordValue() != "" {
+			tokensQuery := deleteUserAuthTokensQuery{
+				SQLTemplate: sqltemplate.New(dbHelper.DialectForDriver()),
+				TokenTable:  dbHelper.Table("user_auth_token"),
+				UserID:      cmd.UserID,
+			}
+			rawSQL, err := renderUserQuery(deleteUserAuthTokensTemplate, tokensQuery)
+			if err != nil {
+				return err
+			}
+			if _, err := sess.Exec(append([]any{rawSQL}, tokensQuery.GetArgs()...)...); err != nil {
+				return fmt.Errorf("revoke user sessions: %w", err)
+			}
 		}
 
 		if cmd.IsGrafanaAdmin != nil && !*cmd.IsGrafanaAdmin {

@@ -30,4 +30,5 @@ var (
 	searchUsersTemplate                    = mustTemplate("search_users.sql")
 	countSearchUsersTemplate               = mustTemplate("count_search_users.sql")
 	updateUserTemplate                     = mustTemplate("update_user.sql")
+	deleteUserAuthTokensTemplate           = mustTemplate("delete_user_auth_tokens.sql")
 )
