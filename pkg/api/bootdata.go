@@ -6,7 +6,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"hash"
+	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 
@@ -294,7 +296,9 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 			Translations:              plugin.Translations,
 		}
 
-		dsDTO.JSONData = ds.JsonDataMap()
+		// Copy so per-request additions never leak into the shared datasource object.
+		dsDTO.JSONData = make(map[string]any)
+		maps.Copy(dsDTO.JSONData, ds.JsonDataMap())
 
 		if ds.Access == datasources.DS_ACCESS_DIRECT {
 			if ds.BasicAuth {
@@ -351,7 +355,9 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 
 		if ds.Type == datasources.DS_PROMETHEUS || ds.Type == datasources.DS_AMAZON_PROMETHEUS || ds.Type == datasources.DS_AZURE_PROMETHEUS {
 			// add unproxied server URL for link to Prometheus web UI
-			ds.JsonData.Set("directUrl", ds.URL)
+			if directURL, ok := hs.directServerURL(c, ds); ok {
+				dsDTO.JSONData["directUrl"] = directURL
+			}
 		}
 
 		dataSources[ds.Name] = dsDTO
@@ -384,6 +390,40 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 	}
 
 	return dataSources, nil
+}
+
+// directServerURL returns the datasource server URL without credentials, for users
+// allowed to configure the datasource. Proxy mode exists to keep this URL from
+// everyone else, including public dashboard visitors.
+func (hs *HTTPServer) directServerURL(c *contextmodel.ReqContext, ds *datasources.DataSource) (string, bool) {
+	if c.IsPublicDashboardView() || c.SignedInUser == nil {
+		return "", false
+	}
+
+	scope := datasources.ScopeProvider.GetResourceScopeUID(ds.UID)
+	canConfigure, err := hs.AccessControl.Evaluate(c.Req.Context(), c.SignedInUser, accesscontrol.EvalAll(
+		accesscontrol.EvalPermission(datasources.ActionRead, scope),
+		accesscontrol.EvalPermission(datasources.ActionWrite, scope),
+	))
+	if err != nil {
+		c.Logger.Warn("Failed to evaluate datasource configuration access", "datasource_uid", ds.UID, "error", err)
+		return "", false
+	}
+	if !canConfigure {
+		return "", false
+	}
+
+	return stripURLCredentials(ds.URL)
+}
+
+// stripURLCredentials keeps only scheme, host and path, since userinfo and query
+// parameters may carry credentials.
+func stripURLCredentials(raw string) (string, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return "", false
+	}
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawPath: u.RawPath}).String(), true
 }
 
 func (hs *HTTPServer) getFSPanels(c *contextmodel.ReqContext, availablePanels map[string]*availablePluginDTO) map[string]plugins.PanelDTO {
