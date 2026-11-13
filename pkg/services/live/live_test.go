@@ -215,7 +215,7 @@ func TestCheckOrigin(t *testing.T) {
 			name:    "request_host_matches_origin_host",
 			origin:  "http://example.com",
 			appURL:  "https://example.com",
-			success: true,
+			success: false,
 			host:    "example.com",
 		},
 	}

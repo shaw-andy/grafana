@@ -596,9 +596,6 @@ func getCheckOriginFunc(appURL *url.URL, originPatterns []string, originGlobs []
 			logger.Warn("Failed to parse request origin", "error", err, "origin", origin)
 			return false
 		}
-		if strings.EqualFold(originURL.Host, r.Host) {
-			return true
-		}
 		ok, err := checkAllowedOrigin(origin, originURL, appURL, originGlobs)
 		if err != nil {
 			logger.Warn("Error parsing request origin", "error", err, "origin", origin)
@@ -614,14 +611,8 @@ func getCheckOriginFunc(appURL *url.URL, originPatterns []string, originGlobs []
 
 func checkAllowedOrigin(origin string, originURL *url.URL, appURL *url.URL, originGlobs []glob.Glob) (bool, error) {
 	// Try to match over configured [server] root_url first.
-	if originURL.Port() == "" {
-		if strings.EqualFold(originURL.Scheme, appURL.Scheme) && strings.EqualFold(originURL.Host, appURL.Hostname()) {
-			return true, nil
-		}
-	} else {
-		if strings.EqualFold(originURL.Scheme, appURL.Scheme) && strings.EqualFold(originURL.Host, appURL.Host) {
-			return true, nil
-		}
+	if sameOrigin(originURL, appURL) {
+		return true, nil
 	}
 	// If there is still no match try [live] allowed_origins patterns.
 	for _, pattern := range originGlobs {
@@ -630,6 +621,31 @@ func checkAllowedOrigin(origin string, originURL *url.URL, appURL *url.URL, orig
 		}
 	}
 	return false, nil
+}
+
+// sameOrigin compares scheme, hostname and effective port. A URL without a port
+// uses its scheme's default port, so it never matches a non-default port.
+func sameOrigin(a, b *url.URL) bool {
+	if a.Scheme == "" || !strings.EqualFold(a.Scheme, b.Scheme) {
+		return false
+	}
+	if a.Hostname() == "" || !strings.EqualFold(a.Hostname(), b.Hostname()) {
+		return false
+	}
+	return effectivePort(a) == effectivePort(b)
+}
+
+func effectivePort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "ws":
+		return "80"
+	case "https", "wss":
+		return "443"
+	}
+	return ""
 }
 
 var clientConcurrency = 12
