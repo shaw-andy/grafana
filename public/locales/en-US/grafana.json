@@ -13671,6 +13671,7 @@
       "add-title-label": "Add by title",
       "cancel": "Cancel",
       "heading": "Add dashboards",
+      "interval-invalid": "Interval must be a duration such as 30s or 5m, between 1s and 24d",
       "interval-label": "Interval",
       "interval-placeholder": "5m",
       "interval-required": "Interval is required",

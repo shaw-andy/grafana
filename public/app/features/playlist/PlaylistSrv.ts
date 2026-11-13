@@ -1,12 +1,13 @@
 import { type Location } from 'history';
 import { pickBy } from 'lodash';
 
-import { locationUtil, urlUtil, rangeUtil } from '@grafana/data';
+import { locationUtil, urlUtil } from '@grafana/data';
 import { locationService } from '@grafana/runtime';
 import { StateManagerBase } from 'app/core/services/StateManagerBase';
 
 import { type Playlist } from '../../api/clients/playlist/v1';
 
+import { getPlaylistIntervalMs } from './interval';
 import { loadDashboards } from './utils';
 
 const queryParamsToPreserve: { [key: string]: boolean } = {
@@ -110,7 +111,7 @@ export class PlaylistSrv extends StateManagerBase<PlaylistSrvState> {
       return;
     }
 
-    this.interval = rangeUtil.intervalToMs(playlist.spec?.interval);
+    this.interval = getPlaylistIntervalMs(playlist.spec?.interval);
 
     const items = await loadDashboards(playlist.spec?.items);
     for (const item of items) {
