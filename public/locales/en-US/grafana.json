@@ -7276,7 +7276,6 @@
     },
     "errors-and-notices-inspector": {
       "copy": "Copy to clipboard",
-      "learn-more": "Learn more",
       "no-issues": "No errors or notices for this query.",
       "severity-error": "Error",
       "severity-info": "Info",
