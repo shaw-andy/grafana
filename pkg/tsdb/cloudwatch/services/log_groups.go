@@ -40,29 +40,23 @@ func (s *LogGroupsService) GetLogGroups(ctx context.Context, req resources.LogGr
 		input.NextToken = req.NextToken
 	}
 
-	result := []resources.ResourceResponse[resources.LogGroup]{}
-
-	for {
-		response, err := s.logGroupsAPI.DescribeLogGroups(ctx, input)
-		if err != nil || response == nil {
-			return nil, nil, err
-		}
-
-		for _, logGroup := range response.LogGroups {
-			result = append(result, resources.ResourceResponse[resources.LogGroup]{
-				Value: resources.LogGroup{
-					Arn:  *logGroup.Arn,
-					Name: *logGroup.LogGroupName,
-				},
-				AccountId: new(getAccountId(*logGroup.Arn)),
-			})
-		}
-
-		if !req.ListAllLogGroups || response.NextToken == nil {
-			return result, response.NextToken, nil
-		}
-		input.NextToken = response.NextToken
+	response, err := s.logGroupsAPI.DescribeLogGroups(ctx, input)
+	if err != nil || response == nil {
+		return nil, nil, err
 	}
+
+	result := make([]resources.ResourceResponse[resources.LogGroup], 0, len(response.LogGroups))
+	for _, logGroup := range response.LogGroups {
+		result = append(result, resources.ResourceResponse[resources.LogGroup]{
+			Value: resources.LogGroup{
+				Arn:  *logGroup.Arn,
+				Name: *logGroup.LogGroupName,
+			},
+			AccountId: new(getAccountId(*logGroup.Arn)),
+		})
+	}
+
+	return result, response.NextToken, nil
 }
 
 func (s *LogGroupsService) GetLogGroupFields(ctx context.Context, request resources.LogGroupFieldsRequest) ([]resources.ResourceResponse[resources.LogGroupField], error) {
