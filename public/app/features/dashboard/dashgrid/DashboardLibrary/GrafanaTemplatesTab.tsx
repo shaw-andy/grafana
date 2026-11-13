@@ -21,7 +21,8 @@ import {
   TemplateDashboardSourceEntryPoint,
 } from './constants';
 import { TemplateDashboardInteractions } from './interactions';
-import { type GnetDashboard, type GnetDashboardsResponse, type Link } from './types';
+import { type GnetDashboard, type GnetDashboardsResponse } from './types';
+import { getThumbnailUrl } from './utils/communityDashboardHelpers';
 import { getTemplateDashboardUrl } from './utils/templateDashboardHelpers';
 
 interface GrafanaTemplatesTabProps {
@@ -146,8 +147,7 @@ export const GrafanaTemplatesTab = ({
       {loading
         ? Array.from({ length: 4 }).map((_, index) => <DashboardCard.Skeleton key={index} />)
         : dashboards?.map((dashboard) => {
-            const thumbnail = dashboard.screenshots?.[0]?.links.find((l: Link) => l.rel === 'image')?.href ?? '';
-            const thumbnailUrl = thumbnail ? `/api/gnet${thumbnail}` : '';
+            const thumbnailUrl = getThumbnailUrl(dashboard);
 
             return (
               <DashboardCard

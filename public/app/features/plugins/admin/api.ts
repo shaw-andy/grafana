@@ -6,6 +6,7 @@ import { isVersionGtOrEq } from 'app/core/utils/version';
 
 import { API_ROOT, GCOM_API_ROOT, INSTANCE_API_ROOT } from './constants';
 import { isLocalPluginVisibleByConfig, isRemotePluginVisibleByConfig } from './helpers';
+import { sanitizeCatalogHtml } from './sanitizeCatalogHtml';
 import {
   type LocalPlugin,
   type RemotePlugin,
@@ -48,11 +49,11 @@ export async function getPluginDetails(id: string): Promise<CatalogPluginDetails
     grafanaDependency: dependencies?.grafanaDependency ?? dependencies?.grafanaVersion ?? '',
     pluginDependencies: dependencies?.plugins || [],
     links: local?.info.links || remote?.json?.info.links || [],
-    readme: localReadme || remote?.readme,
+    readme: localReadme || (remote?.readme && sanitizeCatalogHtml(remote.readme)),
     versions,
     statusContext: remote?.statusContext ?? '',
     iam: remote?.json?.iam,
-    changelog: remote?.changelog || localChangelog,
+    changelog: (remote?.changelog && sanitizeCatalogHtml(remote.changelog)) || localChangelog,
     licenseUrl: remote?.licenseUrl,
     documentationUrl: remote?.documentationUrl,
     sponsorshipUrl: remote?.sponsorshipUrl,
@@ -171,7 +172,7 @@ async function getPluginVersions(id: string, isPublished: boolean): Promise<Vers
 async function getLocalPluginReadme(id: string): Promise<string> {
   try {
     const markdown: string = await getBackendSrv().get(`${API_ROOT}/${id}/markdown/README`);
-    const markdownAsHtml = markdown ? renderMarkdown(markdown) : '';
+    const markdownAsHtml = markdown ? sanitizeCatalogHtml(renderMarkdown(markdown)) : '';
 
     return markdownAsHtml;
   } catch (error) {
@@ -185,7 +186,7 @@ async function getLocalPluginReadme(id: string): Promise<string> {
 async function getLocalPluginChangelog(id: string): Promise<string> {
   try {
     const markdown: string = await getBackendSrv().get(`${API_ROOT}/${id}/markdown/CHANGELOG`);
-    const markdownAsHtml = markdown ? renderMarkdown(markdown) : '';
+    const markdownAsHtml = markdown ? sanitizeCatalogHtml(renderMarkdown(markdown)) : '';
     return markdownAsHtml;
   } catch (error) {
     if (isFetchError(error)) {

@@ -5,8 +5,10 @@ import { PluginSignatureStatus, dateTimeParse, type PluginError, PluginType, Plu
 import { config, featureEnabled } from '@grafana/runtime';
 import { FlagKeys, getFeatureFlagClient } from '@grafana/runtime/internal';
 import { contextSrv } from 'app/core/services/context_srv';
+import { encodeRelativeUrlPath, encodeUrlPathSegment } from 'app/core/utils/urlPath';
 import { AccessControlAction } from 'app/types/accessControl';
 
+import { GCOM_API_ROOT } from './constants';
 import {
   type CatalogPlugin,
   type InstancePlugin,
@@ -122,10 +124,7 @@ export function mapRemoteToCatalog(plugin: RemotePlugin, error?: PluginError): C
     downloads,
     id,
     info: {
-      logos: {
-        small: `${config.appSubUrl}/api/gnet/plugins/${id}/versions/${version}/logos/small`,
-        large: `${config.appSubUrl}/api/gnet/plugins/${id}/versions/${version}/logos/large`,
-      },
+      logos: getCatalogPluginLogos(id, version, typeCode),
       keywords,
     },
     name,
@@ -223,16 +222,10 @@ export function mapToCatalogPlugin(local?: LocalPlugin, remote?: RemotePlugin, e
   const isDisabled = !!error;
   const keywords = remote?.keywords || local?.info.keywords || [];
 
-  let logos = {
-    small: `${window.__grafana_build_path__}img/icn-${type}.svg`,
-    large: `${window.__grafana_build_path__}img/icn-${type}.svg`,
-  };
+  let logos = getDefaultPluginLogos(type);
 
   if (remote) {
-    logos = {
-      small: `${config.appSubUrl}/api/gnet/plugins/${id}/versions/${remote.version}/logos/small`,
-      large: `${config.appSubUrl}/api/gnet/plugins/${id}/versions/${remote.version}/logos/large`,
-    };
+    logos = getCatalogPluginLogos(id, remote.version, type);
   } else if (local && local.info.logos) {
     logos = local.info.logos;
   }
@@ -284,6 +277,39 @@ export function mapToCatalogPlugin(local?: LocalPlugin, remote?: RemotePlugin, e
     category: remote?.category || local?.category || '',
     distributionType: remote?.versionDistributionType,
   };
+}
+
+/**
+ * Builds the same-origin URL of a plugin asset served through the Grafana.com proxy. The id, version and asset path
+ * come from the catalog, so returns undefined when any of them would address a URL outside the asset directory.
+ */
+export function getCatalogPluginAssetUrl(
+  id: string,
+  version: string | undefined,
+  kind: 'logos' | 'images',
+  assetPath: string
+): string | undefined {
+  const encodedId = encodeUrlPathSegment(id);
+  const encodedVersion = encodeUrlPathSegment(version);
+  const encodedAssetPath = encodeRelativeUrlPath(assetPath);
+  if (!encodedId || !encodedVersion || !encodedAssetPath) {
+    return undefined;
+  }
+  return `${config.appSubUrl}${GCOM_API_ROOT}/plugins/${encodedId}/versions/${encodedVersion}/${kind}/${encodedAssetPath}`;
+}
+
+function getDefaultPluginLogos(type: string | undefined) {
+  const logo = `${window.__grafana_build_path__}img/icn-${encodeUrlPathSegment(String(type)) ?? ''}.svg`;
+  return { small: logo, large: logo };
+}
+
+function getCatalogPluginLogos(id: string, version: string | undefined, type: string | undefined) {
+  const small = getCatalogPluginAssetUrl(id, version, 'logos', 'small');
+  const large = getCatalogPluginAssetUrl(id, version, 'logos', 'large');
+  if (!small || !large) {
+    return getDefaultPluginLogos(type);
+  }
+  return { small, large };
 }
 
 export const getExternalManageLink = (pluginId: string) => `${config.pluginCatalogURL}${pluginId}`;
