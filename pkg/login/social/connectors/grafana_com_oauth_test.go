@@ -38,14 +38,17 @@ func TestSocialGrafanaCom_UserInfo(t *testing.T) {
 		AutoAssignOrgRole: "Viewer",
 		AutoAssignOrgId:   2,
 	}
-	provider := mustNewGrafanaComProvider(t, social.NewOAuthInfo(),
+	info := social.NewOAuthInfo()
+	info.Extra = map[string]string{allowedOrganizationsKey: "grafana"}
+	provider := mustNewGrafanaComProvider(t, info,
 		cfg,
 		mustProvideOrgRoleMapper(t, cfg, &orgtest.FakeOrgService{}),
 		ssosettingstests.NewFakeService(),
 		featuremgmt.WithFeatures())
 
 	type conf struct {
-		skipOrgRoleSync bool
+		skipOrgRoleSync      bool
+		allowedOrganizations []string
 	}
 
 	tests := []struct {
@@ -64,7 +67,7 @@ func TestSocialGrafanaCom_UserInfo(t *testing.T) {
 				Name:     "Eric Leijonmarck",
 				Email:    "octocat@github.com",
 				Login:    "octocat",
-				OrgRoles: map[int64]org.RoleType{},
+				OrgRoles: nil,
 			},
 		},
 		{
@@ -76,15 +79,31 @@ func TestSocialGrafanaCom_UserInfo(t *testing.T) {
 				Name:     "Eric Leijonmarck",
 				Email:    "octocat@github.com",
 				Login:    "octocat",
-				OrgRoles: map[int64]org.RoleType{2: org.RoleAdmin},
+				OrgRoles: map[int64]org.RoleType{1: org.RoleAdmin},
 			},
+		},
+		{
+			Name:          "should refuse the user when allowed organizations is empty",
+			userInfoResp:  userResponse,
+			Cfg:           conf{allowedOrganizations: []string{}},
+			ExpectedError: ErrMissingOrganizationMembership,
+		},
+		{
+			Name:          "should refuse the user when not a member of an allowed organization",
+			userInfoResp:  userResponse,
+			Cfg:           conf{allowedOrganizations: []string{"other"}},
+			ExpectedError: ErrMissingOrganizationMembership,
 		},
 	}
 
 	for _, test := range tests {
-		provider.info.SkipOrgRoleSync = test.Cfg.skipOrgRoleSync
-
 		t.Run(test.Name, func(t *testing.T) {
+			provider.info.SkipOrgRoleSync = test.Cfg.skipOrgRoleSync
+			provider.allowedOrganizations = []string{"grafana"}
+			if test.Cfg.allowedOrganizations != nil {
+				provider.allowedOrganizations = test.Cfg.allowedOrganizations
+			}
+
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				w.Header().Set("Content-Type", "application/json")
@@ -99,12 +118,14 @@ func TestSocialGrafanaCom_UserInfo(t *testing.T) {
 			provider.url = ts.URL
 			actualResult, err := provider.UserInfo(context.Background(), ts.Client(), nil)
 			if test.ExpectedError != nil {
-				require.Equal(t, err, test.ExpectedError)
+				require.ErrorIs(t, err, test.ExpectedError)
+				require.Nil(t, actualResult)
 				return
 			}
 
 			require.NoError(t, err)
 			require.Equal(t, test.want.Role, actualResult.Role)
+			require.Equal(t, test.want.OrgRoles, actualResult.OrgRoles)
 		})
 	}
 }
