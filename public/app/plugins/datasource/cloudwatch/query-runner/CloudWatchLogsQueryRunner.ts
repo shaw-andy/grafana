@@ -65,6 +65,29 @@ import { CloudWatchRequest } from './CloudWatchRequest';
 export const LOG_IDENTIFIER_INTERNAL = '__log__grafana_internal__';
 export const LOGSTREAM_IDENTIFIER_INTERNAL = '__logstream__grafana_internal__';
 
+// Values can land in a single- or double-quoted literal or in a backtick-quoted identifier such as
+// `logGroups(logGroupIdentifier: [...])`. Backslashes must be escaped because the Logs SQL and PPL grammars treat
+// them as escapes inside quotes, and backticks are doubled because SQL backtick identifiers don't accept backslash
+// escapes.
+const escapeLogsQueryText = (text: string) =>
+  text.replace(/[\\'"`]/g, (char) => (char === '\\' || char === '"' ? `\\${char}` : `${char}${char}`));
+
+const escapeLogsQueryValue = (value: unknown) => {
+  if (typeof value === 'string') {
+    return escapeLogsQueryText(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => (typeof v === 'string' ? escapeLogsQueryText(v) : v));
+  }
+  return value;
+};
+
+const logsPPLFormatter = (value: unknown) => {
+  const escaped = escapeLogsQueryValue(value);
+  // Keeps the glob format that PPL queries used before a formatter was applied to them.
+  return Array.isArray(escaped) && escaped.length > 1 ? `{${escaped.join(',')}}` : escaped;
+};
+
 // This class handles execution of CloudWatch logs query data queries
 export class CloudWatchLogsQueryRunner extends CloudWatchRequest {
   logsTimeout: string;
@@ -328,16 +351,25 @@ export class CloudWatchLogsQueryRunner extends CloudWatchRequest {
           ?.replaceAll(/[\r\n\t\s]+/g, '')
           .includes(`\`logGroups(logGroupIdentifier:[$${varName}])\``);
         if (variable && 'current' in variable && 'text' in variable.current) {
+          const formatText = (text: string) => {
+            const escaped = escapeLogsQueryText(text);
+            return shouldSurroundInQuotes ? `'${escaped}'` : escaped;
+          };
           if (Array.isArray(variable.current.text)) {
-            return variable.current.text.map((v) => (shouldSurroundInQuotes ? `'${v}'` : v)).join(',');
+            return variable.current.text.map(formatText).join(',');
           }
-          return shouldSurroundInQuotes ? `'${variable.current.text}'` : variable.current.text;
+          return formatText(variable.current.text);
         }
       }
 
-      return value;
+      return escapeLogsQueryValue(value);
     };
-    const formatter = query.queryLanguage === LogsQueryLanguage.SQL ? logsSQLCustomerFormatter : undefined;
+    const formatter =
+      query.queryLanguage === LogsQueryLanguage.SQL
+        ? logsSQLCustomerFormatter
+        : query.queryLanguage === LogsQueryLanguage.PPL
+          ? logsPPLFormatter
+          : undefined;
     const expression = this.templateSrv.replace(query.expression || '', scopedVars, formatter);
 
     return {
