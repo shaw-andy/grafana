@@ -236,7 +236,6 @@ describe('variables', () => {
       expect(getLogGroups).toHaveBeenCalledWith({
         region: query.region,
         logGroupNamePrefix: 'templatedField',
-        listAllLogGroups: true,
         accountId: query.accountId,
       });
     });
