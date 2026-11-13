@@ -156,6 +156,43 @@ describe('PlaylistForm', () => {
         expect(onSubmitMock).not.toHaveBeenCalled();
       });
     });
+
+    // Same strings the player turns into a non-positive delay, including values parseInt truncates to 0.
+    describe.each(['0s', '-1s', '0ms', '-1', '0.5s', '00s', '0.0s', '-0.1s'])(
+      'and interval is %s',
+      (interval) => {
+        it('then an alert should appear and nothing should be submitted', async () => {
+          const { onSubmitMock } = getTestContext();
+
+          const intervalInput = screen.getByRole('textbox', { name: /interval/i });
+          await userEvent.clear(intervalInput);
+          await userEvent.type(intervalInput, interval);
+          expect(intervalInput).toHaveValue(interval);
+
+          await userEvent.click(screen.getByRole('button', { name: /save/i }));
+
+          expect(onSubmitMock).not.toHaveBeenCalled();
+          expect(screen.getByRole('alert')).toBeInTheDocument();
+        });
+      }
+    );
+
+    describe('and interval is a positive duration', () => {
+      it('then a one second interval is submitted', async () => {
+        const { onSubmitMock } = getTestContext();
+
+        const intervalInput = screen.getByRole('textbox', { name: /interval/i });
+        await userEvent.clear(intervalInput);
+        await userEvent.type(intervalInput, '1s');
+        await userEvent.click(screen.getByRole('button', { name: /save/i }));
+
+        expect(onSubmitMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            spec: expect.objectContaining({ interval: '1s' }),
+          })
+        );
+      });
+    });
   });
 
   describe('when items are missing', () => {
