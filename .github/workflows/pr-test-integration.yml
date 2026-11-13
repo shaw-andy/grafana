@@ -118,7 +118,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Start MySQL via docker compose
-        run: make devenv sources=mysql_tests mysql_version=8.0.43
+        run: make devenv sources=mysql_tests mysql_version=8.0.45
       - name: Setup Go
         uses: ./.github/actions/setup-go
       - name: Wait for MySQL
@@ -264,7 +264,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Start MySQL via docker compose
-        run: make devenv sources=mysql_tests mysql_version=8.0.43
+        run: make devenv sources=mysql_tests mysql_version=8.0.45
       - name: Get GitHub App token
         id: get-github-app-token
         uses: grafana/shared-workflows/actions/create-github-app-token@46f48da11e78ebdba7a8747ae456b11062fac83e # create-github-app-token/v0.3.1
