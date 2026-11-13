@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"golang.org/x/oauth2"
 
@@ -54,7 +55,7 @@ func NewGrafanaComProvider(ctx context.Context, info *social.OAuthInfo, cfgProvi
 		return nil, err
 	}
 
-	allowedOrganizations, err := util.SplitStringWithError(info.Extra[allowedOrganizationsKey])
+	allowedOrganizations, err := parseGrafanaComAllowedOrganizations(info.Extra[allowedOrganizationsKey])
 	if err != nil {
 		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.GrafanaComProviderName, "error", err)
 	}
@@ -100,7 +101,7 @@ func (s *SocialGrafanaCom) Reload(ctx context.Context, settings ssoModels.SSOSet
 		return ssosettings.ErrInvalidSettings.Errorf("SSO settings map cannot be converted to OAuthInfo: %v", err)
 	}
 
-	allowedOrganizations, err := util.SplitStringWithError(newInfo.Extra[allowedOrganizationsKey])
+	allowedOrganizations, err := parseGrafanaComAllowedOrganizations(newInfo.Extra[allowedOrganizationsKey])
 	if err != nil {
 		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.GrafanaComProviderName, "error", err)
 	}
@@ -127,15 +128,24 @@ func (s *SocialGrafanaCom) Reload(ctx context.Context, settings ssoModels.SSOSet
 	return nil
 }
 
+// parseGrafanaComAllowedOrganizations drops blank entries so that values such as
+// `""` or `[""]` cannot match an organization record without a login.
+func parseGrafanaComAllowedOrganizations(value string) ([]string, error) {
+	entries, err := util.SplitStringWithError(value)
+	allowed := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry = strings.TrimSpace(entry); entry != "" {
+			allowed = append(allowed, entry)
+		}
+	}
+	return allowed, err
+}
+
 func (s *SocialGrafanaCom) IsEmailAllowed(email string) bool {
 	return true
 }
 
 func (s *SocialGrafanaCom) isOrganizationMember(organizations []OrgRecord) bool {
-	if len(s.allowedOrganizations) == 0 {
-		return true
-	}
-
 	for _, allowedOrganization := range s.allowedOrganizations {
 		for _, organization := range organizations {
 			if organization.Login == allowedOrganization {
@@ -171,6 +181,19 @@ func (s *SocialGrafanaCom) UserInfo(ctx context.Context, client *http.Client, _ 
 		return nil, fmt.Errorf("Error getting user info: %s", err)
 	}
 
+	// Any grafana.com account can complete the OAuth flow, so an empty allowlist
+	// must refuse every account rather than admit all of them.
+	if len(s.allowedOrganizations) == 0 {
+		return nil, ErrMissingOrganizationMembership.Errorf(
+			"%s is not configured for provider %s; refusing login", allowedOrganizationsKey, social.GrafanaComProviderName)
+	}
+
+	if !s.isOrganizationMember(data.Orgs) {
+		return nil, ErrMissingOrganizationMembership.Errorf(
+			"User is not a member of any of the allowed organizations: %v. Returned Organizations: %v",
+			s.allowedOrganizations, data.Orgs)
+	}
+
 	userInfo := &social.BasicUserInfo{
 		Id:    fmt.Sprintf("%d", data.Id),
 		Name:  data.Name,
@@ -183,12 +206,6 @@ func (s *SocialGrafanaCom) UserInfo(ctx context.Context, client *http.Client, _ 
 		if err != nil {
 			return nil, fmt.Errorf("map organization roles: %w", err)
 		}
-	}
-
-	if !s.isOrganizationMember(data.Orgs) {
-		return nil, ErrMissingOrganizationMembership.Errorf(
-			"User is not a member of any of the allowed organizations: %v. Returned Organizations: %v",
-			s.allowedOrganizations, data.Orgs)
 	}
 
 	return userInfo, nil
