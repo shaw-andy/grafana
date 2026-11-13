@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"strings"
 	"time"
+
+	"gopkg.in/ini.v1"
 
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/plugins"
@@ -92,8 +95,7 @@ func settingsCollector(settings setting.Provider) supportbundles.Collector {
 		IncludedByDefault: false,
 		Default:           true,
 		Fn: func(ctx context.Context) (*supportbundles.SupportItem, error) {
-			current := settings.Current()
-			data, err := json.MarshalIndent(current, "", " ")
+			data, err := json.MarshalIndent(supportBundleSettings(settings.Current()), "", " ")
 			if err != nil {
 				return nil, err
 			}
@@ -104,6 +106,55 @@ func settingsCollector(settings setting.Provider) supportbundles.Collector {
 			}, nil
 		},
 	}
+}
+
+// supportBundleSettingsAllowlist lists the non-boolean settings whose values
+// are copied into a support bundle. Settings.Current only redacts keys whose
+// names match known credential patterns, which misses many credential keys,
+// so every value not listed here is masked instead.
+var supportBundleSettingsAllowlist = map[string]map[string]struct{}{
+	ini.DefaultSection: keySet("app_mode", "target"),
+	"paths":            keySet("data", "temp_data_lifetime", "logs", "plugins", "bundled_plugins", "provisioning"),
+	"server":           keySet("protocol", "min_tls_version", "http_addr", "http_port", "domain", "static_root_path", "read_timeout"),
+	"database":         keySet("type", "max_idle_conn", "max_open_conn", "conn_max_lifetime", "ssl_mode", "isolation_level", "cache_mode", "locking_attempt_timeout_sec", "query_retries", "transaction_retries"),
+	"remote_cache":     keySet("type"),
+	"dataproxy":        keySet("timeout", "dialTimeout", "keep_alive_seconds", "tls_handshake_timeout_seconds", "expect_continue_timeout_seconds", "max_conns_per_host", "max_idle_connections", "idle_conn_timeout_seconds", "response_limit", "row_limit"),
+	"log":              keySet("mode", "level", "filters"),
+	"log.console":      keySet("level", "format"),
+	"log.file":         keySet("level", "format", "max_lines", "max_size_shift", "max_days"),
+	"feature_toggles":  keySet("enable"),
+	"plugins":          keySet("allow_loading_unsigned_plugins", "disable_plugins", "update_strategy"),
+	"unified_alerting": keySet("initialization_timeout", "admin_config_poll_interval", "alertmanager_config_poll_interval", "evaluation_timeout", "max_attempts", "min_interval"),
+	"live":             keySet("max_connections", "message_size_limit", "client_queue_max_size", "ha_engine"),
+}
+
+func keySet(keys ...string) map[string]struct{} {
+	set := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		set[k] = struct{}{}
+	}
+	return set
+}
+
+func supportBundleSettings(current setting.SettingsBag) setting.SettingsBag {
+	out := make(setting.SettingsBag, len(current))
+	for section, keys := range current {
+		out[section] = make(map[string]string, len(keys))
+		for key, value := range keys {
+			out[section][key] = supportBundleSettingValue(section, key, value)
+		}
+	}
+	return out
+}
+
+func supportBundleSettingValue(section, key, value string) string {
+	if value == "" || value == setting.RedactedPassword || strings.EqualFold(value, "true") || strings.EqualFold(value, "false") {
+		return value
+	}
+	if _, ok := supportBundleSettingsAllowlist[section][key]; ok {
+		return value
+	}
+	return setting.RedactedPassword
 }
 
 func pluginInfoCollector(pluginStore pluginstore.Store, pluginSettings pluginsettings.Service, logger log.Logger) supportbundles.Collector {
