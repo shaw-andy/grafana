@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -145,6 +146,9 @@ func (e *AzureLogAnalyticsDatasource) ResourceRequest(rw http.ResponseWriter, re
 
 		encoding := resp.Header.Get("Content-Encoding")
 		body, err := decode(encoding, resp.Body)
+		if errors.Is(err, utils.ErrResponseTooLarge) {
+			return nil, writeErrorResponse(rw, http.StatusBadGateway, "metadata response too large")
+		}
 		if err != nil {
 			return nil, writeErrorResponse(rw, resp.StatusCode, fmt.Sprintf("failed to read metadata response: %s", err))
 		}
@@ -248,7 +252,11 @@ func (e *AzureLogAnalyticsDatasource) GetLogsUsage(ctx context.Context, url stri
 		}
 	}()
 
+	resp.Body = utils.LimitReadCloser(resp.Body)
 	logResponse, err := e.unmarshalResponse(resp)
+	if errors.Is(err, utils.ErrResponseTooLarge) {
+		return nil, writeErrorResponse(rw, http.StatusBadGateway, "logs usage response too large")
+	}
 	if err != nil {
 		return rw, err
 	}
@@ -838,7 +846,7 @@ func getCorrelationWorkspaces(ctx context.Context, baseResource string, resource
 		if err != nil {
 			return AzureCorrelationAPIResponse{}, backend.DownstreamError(err)
 		}
-		body, err := io.ReadAll(res.Body)
+		body, err := utils.ReadAllLimited(res.Body)
 		if err != nil {
 			return AzureCorrelationAPIResponse{}, backend.DownstreamError(err)
 		}
@@ -913,7 +921,7 @@ func (e *AzureLogAnalyticsDatasource) unmarshalResponse(res *http.Response) (Azu
 	}()
 
 	if res.StatusCode/100 != 2 {
-		body, readErr := io.ReadAll(res.Body)
+		body, readErr := utils.ReadAllLimited(res.Body)
 		if readErr != nil {
 			return AzureLogAnalyticsResponse{}, fmt.Errorf("non-2xx response %s and failed to read body: %w", res.Status, readErr)
 		}

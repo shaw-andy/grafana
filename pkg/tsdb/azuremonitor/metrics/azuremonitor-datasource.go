@@ -466,7 +466,7 @@ func (e *AzureMonitorDatasource) fetchSubscriptionDisplayName(cli *http.Client, 
 		}
 	}()
 
-	body, err := io.ReadAll(res.Body)
+	body, err := utils.ReadAllLimited(res.Body)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response body: %s", err)
 	}
@@ -549,7 +549,7 @@ func (e *AzureMonitorDatasource) createRequest(ctx context.Context, url string) 
 
 func (e *AzureMonitorDatasource) unmarshalResponse(res *http.Response) (types.AzureMonitorResponse, error) {
 	if res.StatusCode/100 != 2 {
-		body, readErr := io.ReadAll(res.Body)
+		body, readErr := utils.ReadAllLimited(res.Body)
 		if readErr != nil {
 			return types.AzureMonitorResponse{}, fmt.Errorf("non-2xx response %s and failed to read body: %w", res.Status, readErr)
 		}

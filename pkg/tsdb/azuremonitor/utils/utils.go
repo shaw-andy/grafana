@@ -54,7 +54,7 @@ func ParseSubscriptions(res *http.Response, logger log.Logger) ([]string, error)
 			SubscriptionId string `json:"subscriptionId"`
 		}
 	}
-	err := json.NewDecoder(res.Body).Decode(&target)
+	err := json.NewDecoder(LimitReader(res.Body)).Decode(&target)
 	if err != nil {
 		return nil, err
 	}

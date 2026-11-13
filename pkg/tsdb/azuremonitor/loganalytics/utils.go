@@ -14,6 +14,7 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/data"
 	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/kinds/dataquery"
+	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/utils"
 )
 
 func AddCustomDataLink(frame data.Frame, dataLink data.DataLink, singleField bool) data.Frame {
@@ -179,7 +180,8 @@ func decode(encoding string, original io.ReadCloser) ([]byte, error) {
 		return nil, fmt.Errorf("unexpected encoding type %v", err)
 	}
 
-	body, err := io.ReadAll(reader)
+	// The cap applies after decompression so a compressed body cannot expand past it.
+	body, err := utils.ReadAllLimited(reader)
 	if err != nil {
 		return nil, err
 	}

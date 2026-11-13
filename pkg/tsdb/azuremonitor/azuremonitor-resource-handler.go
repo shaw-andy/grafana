@@ -2,8 +2,8 @@ package azuremonitor
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -13,6 +13,7 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 
 	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/types"
+	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/utils"
 )
 
 func getTarget(original string) (target string, err error) {
@@ -81,7 +82,16 @@ func (s *httpServiceProxy) Do(rw http.ResponseWriter, req *http.Request, cli *ht
 		}
 	}()
 
-	body, err := io.ReadAll(res.Body)
+	var body []byte
+	if res.ContentLength > utils.MaxResponseBodyBytes {
+		err = utils.ErrResponseTooLarge
+	} else {
+		body, err = utils.ReadAllLimited(res.Body)
+	}
+	if errors.Is(err, utils.ErrResponseTooLarge) {
+		s.logger.Warn("Azure resource response exceeded the size limit", "limit_bytes", utils.MaxResponseBodyBytes)
+		return nil, s.writeErrorResponse(rw, http.StatusBadGateway, "upstream response too large")
+	}
 	if err != nil {
 		rw.WriteHeader(http.StatusInternalServerError)
 		_, err = fmt.Fprintf(rw, "unexpected error %v", err)

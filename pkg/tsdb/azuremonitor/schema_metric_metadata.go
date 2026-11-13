@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/metrics"
 	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/types"
+	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/utils"
 )
 
 const (
@@ -150,7 +150,7 @@ func fetchMetricDefinitionsForResource(ctx context.Context, dsInfo types.Datasou
 		return nil, backend.DownstreamError(err)
 	}
 	defer func() { _ = res.Body.Close() }()
-	b, err := io.ReadAll(res.Body)
+	b, err := utils.ReadAllLimited(res.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +241,7 @@ func fetchDimensionValuesMetadata(ctx context.Context, dsInfo types.DatasourceIn
 		return nil, backend.DownstreamError(err)
 	}
 	defer func() { _ = res.Body.Close() }()
-	b, err := io.ReadAll(res.Body)
+	b, err := utils.ReadAllLimited(res.Body)
 	if err != nil {
 		return nil, err
 	}
