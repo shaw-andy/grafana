@@ -21,7 +21,13 @@ import { RawFrameEditor } from './components/RawFrameEditor';
 import { SimulationQueryEditor } from './components/SimulationQueryEditor';
 import { StreamingClientEditor } from './components/StreamingClientEditor';
 import { USAQueryEditor, usaQueryModes } from './components/USAQueryEditor';
-import { defaultCSVWaveQuery, defaultExemplarLabels, defaultPulseQuery, defaultQuery } from './constants';
+import {
+  defaultCSVWaveQuery,
+  defaultExemplarLabels,
+  defaultPulseQuery,
+  defaultQuery,
+  grafanaApiEndpoints,
+} from './constants';
 import {
   type CSVWave,
   type ExemplarLabel,
@@ -32,12 +38,6 @@ import {
 } from './dataquery';
 import { type TestDataDataSource } from './datasource';
 import { defaultStreamQuery } from './runStreams';
-
-const endpoints = [
-  { value: 'datasources', label: 'Data Sources' },
-  { value: 'search', label: 'Search' },
-  { value: 'annotations', label: 'Annotations' },
-];
 
 const selectors = editorSelectors.components.DataSource.TestData.QueryTab;
 
@@ -363,10 +363,10 @@ export const QueryEditor = ({ query, datasource, onChange, onRunQuery }: Props) 
       {scenarioId === TestDataQueryType.GrafanaAPI && (
         <InlineField labelWidth={14} label="Endpoint">
           <Select
-            options={endpoints}
+            options={grafanaApiEndpoints}
             onChange={onEndPointChange}
             width={32}
-            value={endpoints.find((ep) => ep.value === query.stringInput)}
+            value={grafanaApiEndpoints.find((ep) => ep.value === query.stringInput)}
           />
         </InlineField>
       )}

@@ -180,7 +180,6 @@ These errors occur with the Streaming Client and Grafana Live scenarios.
 **Solutions:**
 
 1. Verify the **Speed** field is set to a reasonable value (in milliseconds). Lower values produce faster updates.
-1. For the **Fetch** type, verify the URL is accessible from the browser.
 1. Check the browser console for WebSocket or network errors.
 
 ### Grafana Live channel shows no data

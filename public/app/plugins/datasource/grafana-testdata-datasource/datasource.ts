@@ -28,7 +28,7 @@ import {
   type TemplateSrv,
 } from '@grafana/runtime';
 
-import { DATAPLANE_LABEL_TYPES_NAME } from './constants';
+import { DATAPLANE_LABEL_TYPES_NAME, grafanaApiEndpoints } from './constants';
 import { type Scenario, type TestDataDataQuery, TestDataQueryType } from './dataquery';
 import { queryMetricTree } from './metricTree';
 import { generateRandomEdges, generateRandomNodes, generateShowcaseData, savedNodesResponse } from './nodeGraphUtils';
@@ -110,7 +110,7 @@ export class TestDataDataSource
           streams.push(runGrafanaLiveQuery(target, options));
           break;
         case 'streaming_client':
-          streams.push(runStream(target, options));
+          streams.push(runStream(target, options, this.uid));
           break;
         case 'grafana_api':
           streams.push(runGrafanaAPI(target, options));
@@ -489,7 +489,11 @@ function runGrafanaAPI(
   target: TestDataDataQuery,
   req: DataQueryRequest<TestDataDataQuery>
 ): Observable<DataQueryResponse> {
-  const url = `/api/${target.stringInput}`;
+  const endpoint = grafanaApiEndpoints.find((ep) => ep.value === target.stringInput);
+  if (!endpoint) {
+    return throwError(() => new Error('Unsupported Grafana API endpoint'));
+  }
+  const url = `/api/${endpoint.value}`;
   return from(
     getBackendSrv()
       .get(url)
