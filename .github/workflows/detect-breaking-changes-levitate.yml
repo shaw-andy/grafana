@@ -111,9 +111,9 @@ jobs:
     needs: ['buildPR', 'buildBase']
     env:
       GITHUB_STEP_NUMBER: 8
+    # This job runs code from the pull request, so it must never be able to request an OIDC token.
     permissions:
       contents: 'read'
-      id-token: 'write'
 
     steps:
       - uses: actions/checkout@v5
@@ -142,22 +142,6 @@ jobs:
       - name: Unzip artifact from base
         run: unzip -j base_built_packages.zip -d ./base && rm base_built_packages.zip
 
-      - id: 'auth'
-        uses: 'google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093'
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        with:
-          workload_identity_provider: projects/304398677251/locations/global/workloadIdentityPools/github/providers/github-provider
-          service_account: github-plugins-data-levitate@grafanalabs-workload-identity.iam.gserviceaccount.com
-          project_id: 'grafanalabs-global'
-
-      - name: 'Set up Cloud SDK'
-        uses: 'google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db'
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        with:
-          version: '>= 363.0.0'
-          project_id: 'grafanalabs-global'
-          install_components: 'bq'
-
       - name: Detect breaking changes
         id: breaking-changes
         run: ./.github/workflows/scripts/levitate/check-breaking-changes.sh
@@ -168,7 +152,11 @@ jobs:
       - name: Persisting the check output
         run: |
             mkdir -p ./levitate
-            echo "{ \"exit_code\": ${IS_BREAKING}, \"message\": \"${MESSAGE}\", \"pr_number\": \"${PR_NUMBER}\" }" > ./levitate/result.json
+            jq -n \
+              --arg exit_code "${IS_BREAKING}" \
+              --arg message "${MESSAGE}" \
+              --arg pr_number "${PR_NUMBER}" \
+              '{exit_code: ($exit_code | tonumber), message: $message, pr_number: $pr_number}' > ./levitate/result.json
         env:
           IS_BREAKING: ${{ steps.breaking-changes.outputs.is_breaking }}
           MESSAGE: ${{ steps.breaking-changes.outputs.message }}
@@ -197,21 +185,27 @@ jobs:
         with:
           github_app: grafana-pr-automation
 
+      # This job can request an OIDC token, so it must only run files from the base branch.
       - uses: actions/checkout@v5
         with:
+          ref: ${{ github.event.pull_request.base.ref }}
           persist-credentials: false
 
+      # The artifact is written by pull request code: keep it out of the checkout and treat it as data only.
       - name: 'Download artifact'
         uses: actions/download-artifact@v8
         with:
           name: levitate
+          path: ${{ runner.temp }}/levitate
 
       - name: Parsing levitate result
         uses: actions/github-script@v8
         id: levitate-run
+        env:
+          LEVITATE_RESULT: ${{ runner.temp }}/levitate/result.json
         with:
           script: |
-            const filePath = 'result.json';
+            const filePath = process.env.LEVITATE_RESULT;
             const script = require('./.github/workflows/scripts/levitate/json-file-to-job-output.js');
             await script({ core, filePath });
 
@@ -233,12 +227,15 @@ jobs:
       # put the markdown into a variable
       - name: Levitate Markdown
         id: levitate-markdown
+        env:
+          LEVITATE_MARKDOWN: ${{ runner.temp }}/levitate/levitate.md
         run: |
-            if [ -f "levitate.md" ]; then
+            if [ -f "${LEVITATE_MARKDOWN}" ]; then
+            delimiter="LEVITATE_EOF_$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
             {
-              echo 'levitate_markdown<<EOF'
-              cat levitate.md
-              echo EOF
+              echo "levitate_markdown<<${delimiter}"
+              cat "${LEVITATE_MARKDOWN}"
+              echo "${delimiter}"
             } >> "$GITHUB_OUTPUT"
             else
               echo "levitate_markdown=No breaking changes detected" >> "$GITHUB_OUTPUT"
@@ -314,7 +311,7 @@ jobs:
         if: steps.levitate-run.outputs.exit_code == 1 && steps.does-label-exist.outputs.result == 0
         uses: actions/github-script@v8
         env:
-          PR_NUMBER: ${{ steps.levitate-run.outputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         with:
           github-token: ${{ steps.get-github-app-token.outputs.token }}
           script: |
@@ -330,7 +327,7 @@ jobs:
         if: steps.levitate-run.outputs.exit_code == 0 && steps.does-label-exist.outputs.result == 1
         uses: actions/github-script@v8
         env:
-          PR_NUMBER: ${{ steps.levitate-run.outputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         with:
           github-token: ${{ steps.get-github-app-token.outputs.token }}
           script: |
@@ -350,7 +347,7 @@ jobs:
         # FIXME: GATB doesn't seem to grant us necessary pull_requests write permissions
         continue-on-error: true
         env:
-          PR_NUMBER: ${{ steps.levitate-run.outputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         with:
           github-token: ${{ steps.get-github-app-token.outputs.token }}
           script: |
@@ -369,7 +366,7 @@ jobs:
         # FIXME: GATB doesn't seem to grant us necessary pull_requests write permissions
         continue-on-error: true
         env:
-          PR_NUMBER: ${{ steps.levitate-run.outputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         with:
           github-token: ${{ steps.get-github-app-token.outputs.token }}
           script: |
