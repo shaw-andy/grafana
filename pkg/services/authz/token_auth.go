@@ -31,4 +31,4 @@ func (t *tokenAuth) GetRequestMetadata(ctx context.Context, _ ...string) (map[st
 	return map[string]string{metadataKey: token.Token}, nil
 }
 
-func (t *tokenAuth) RequireTransportSecurity() bool { return false }
+func (t *tokenAuth) RequireTransportSecurity() bool { return true }
