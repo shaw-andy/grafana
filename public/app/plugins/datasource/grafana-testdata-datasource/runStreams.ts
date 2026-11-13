@@ -6,8 +6,6 @@ import {
   type DataQueryResponse,
   FieldType,
   CircularDataFrame,
-  CSVReader,
-  type Field,
   LoadingState,
   type DataFrameSchema,
   type DataFrameData,
@@ -33,7 +31,8 @@ export const defaultStreamQuery: StreamingQuery = {
 
 export function runStream(
   target: TestDataDataQuery,
-  req: DataQueryRequest<TestDataDataQuery>
+  req: DataQueryRequest<TestDataDataQuery>,
+  datasourceUid: string
 ): Observable<DataQueryResponse> {
   const query = defaults(target.stream, defaultStreamQuery);
   switch (query.type) {
@@ -42,11 +41,13 @@ export function runStream(
     case 'logs':
       return runLogsStream(target, query, req);
     case 'fetch':
-      return runFetchStream(target, query, req);
+      // Requesting a URL saved in the query from every viewer's browser lets a dashboard editor
+      // drive arbitrary requests, including credentialed ones against Grafana itself.
+      return throwError(() => new Error('The Fetch stream type is no longer supported'));
     case 'traces':
       return runTracesStream(target, query, req);
     case 'watch':
-      return runWatchStream(target, query, req);
+      return runWatchStream(target, query, req, datasourceUid);
   }
   throw new Error(`Unknown Stream Type: ${query.type}`);
 }
@@ -186,9 +187,9 @@ interface StreamMessage {
 function runWatchStream(
   target: TestDataDataQuery,
   query: StreamingQuery,
-  req: DataQueryRequest<TestDataDataQuery>
+  req: DataQueryRequest<TestDataDataQuery>,
+  uid: string
 ): Observable<DataQueryResponse> {
-  const uid = req.targets[0].datasource?.uid;
   if (!uid) {
     return throwError(() => new Error('expected datasource uid'));
   }
@@ -208,7 +209,7 @@ function runWatchStream(
 
     const sub = getBackendSrv()
       .chunked({
-        url: `api/datasources/uid/${uid}/resources/stream`,
+        url: `api/datasources/uid/${encodeURIComponent(uid)}/resources/stream`,
         params: {
           count: req.maxDataPoints || 1000, // connection will close when done
           format: 'json',
@@ -256,86 +257,6 @@ function runWatchStream(
     return () => {
       console.log('unsubscribing to stream', streamId);
       sub.unsubscribe();
-    };
-  });
-}
-
-function runFetchStream(
-  target: TestDataDataQuery,
-  query: StreamingQuery,
-  req: DataQueryRequest<TestDataDataQuery>
-): Observable<DataQueryResponse> {
-  return new Observable<DataQueryResponse>((subscriber) => {
-    const streamId = `fetch-${req.panelId || 'explore'}-${target.refId}`;
-    const maxDataPoints = req.maxDataPoints || 1000;
-
-    let data = new CircularDataFrame({
-      append: 'tail',
-      capacity: maxDataPoints,
-    });
-    data.refId = target.refId;
-    data.name = target.alias || 'Fetch ' + target.refId;
-
-    let reader: ReadableStreamDefaultReader<Uint8Array>;
-    const csv = new CSVReader({
-      callback: {
-        onHeader: (fields: Field[]) => {
-          // Clear any existing fields
-          if (data.fields.length) {
-            data = new CircularDataFrame({
-              append: 'tail',
-              capacity: maxDataPoints,
-            });
-            data.refId = target.refId;
-            data.name = 'Fetch ' + target.refId;
-          }
-          for (const field of fields) {
-            data.addField(field);
-          }
-        },
-        onRow: (row) => {
-          data.add(row);
-        },
-      },
-    });
-
-    const processChunk = async (
-      value: ReadableStreamReadResult<Uint8Array>
-    ): Promise<ReadableStreamReadResult<Uint8Array> | undefined> => {
-      if (value.value) {
-        const text = new TextDecoder().decode(value.value);
-        csv.readCSV(text);
-      }
-
-      subscriber.next({
-        data: [data],
-        key: streamId,
-        state: value.done ? LoadingState.Done : LoadingState.Streaming,
-      });
-
-      if (value.done) {
-        console.log('Finished stream');
-        subscriber.complete(); // necessary?
-        return;
-      }
-
-      return reader.read().then(processChunk);
-    };
-
-    if (!query.url) {
-      throw new Error('query.url is not defined');
-    }
-
-    fetch(new Request(query.url)).then((response) => {
-      if (response.body) {
-        reader = response.body.getReader();
-        reader.read().then(processChunk);
-      }
-    });
-
-    return () => {
-      // Cancel fetch?
-      console.log('unsubscribing to stream ' + streamId);
     };
   });
 }

@@ -15,7 +15,6 @@ const streamingClientFields = [
 const types = [
   { value: 'signal', label: 'Signal' },
   { value: 'logs', label: 'Logs' },
-  { value: 'fetch', label: 'Fetch' },
   { value: 'traces', label: 'Traces' },
   { value: 'watch', label: 'Watch' },
 ];
@@ -67,19 +66,6 @@ export const StreamingClientEditor = ({ onChange, query }: EditorProps) => {
           </InlineField>
         );
       })}
-
-      {query?.stream?.type === 'fetch' && (
-        <InlineField label="URL" labelWidth={14} grow>
-          <Input
-            type="text"
-            name="url"
-            id={`stream.url-${query.refId}`}
-            value={query?.stream?.url}
-            placeholder="Fetch URL"
-            onChange={onChange}
-          />
-        </InlineField>
-      )}
     </InlineFieldRow>
   );
 };

@@ -307,15 +307,16 @@ These scenarios produce real-time streaming data. Data updates continuously in t
 
 Generates streaming data directly from the browser client.
 
-| Field    | Description                                                   |
-| -------- | ------------------------------------------------------------- |
-| **Type** | Stream type: `Signal`, `Logs`, `Fetch`, `Traces`, or `Watch`. |
+| Field    | Description                                          |
+| -------- | ---------------------------------------------------- |
+| **Type** | Stream type: `Signal`, `Logs`, `Traces`, or `Watch`. |
 
 Additional fields depend on the selected type:
 
 - **Signal:** Speed (ms), Spread, Noise, Bands.
 - **Logs, Traces, Watch:** Speed (ms) only.
-- **Fetch:** URL of a remote CSV endpoint to stream incrementally.
+
+Queries saved with the `Fetch` stream type return an error. Select another stream type.
 
 ### Grafana Live
 

@@ -28,6 +28,12 @@ export const defaultExemplarLabels: ExemplarLabel[] = [
   },
 ];
 
+export const grafanaApiEndpoints = [
+  { value: 'datasources', label: 'Data Sources' },
+  { value: 'search', label: 'Search' },
+  { value: 'annotations', label: 'Annotations' },
+];
+
 export const defaultQuery: TestDataDataQuery = {
   scenarioId: TestDataQueryType.RandomWalk,
   refId: '',
