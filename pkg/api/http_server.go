@@ -722,12 +722,12 @@ func (hs *HTTPServer) addMiddlewaresAndStaticRoutes() {
 	m.UseMiddleware(web.Renderer(filepath.Join(hs.Cfg.StaticRootPath, "views"), "[[", "]]"))
 
 	// These endpoints are used for monitoring the Grafana instance
-	// and should not be redirected or rejected.
-	m.Use(hs.healthzHandler)
-	m.Use(hs.apiHealthHandler)
-	m.Use(hs.metricsEndpoint)
-	m.Use(hs.pluginMetricsEndpoint)
-	m.Use(hs.frontendLogEndpoints())
+	// and are answered before authentication and org redirects.
+	m.Use(hs.requireDomain(hs.healthzHandler))
+	m.Use(hs.requireDomain(hs.apiHealthHandler))
+	m.Use(hs.requireDomain(hs.metricsEndpoint))
+	m.Use(hs.requireDomain(hs.pluginMetricsEndpoint))
+	m.Use(hs.requireDomain(hs.frontendLogEndpoints()))
 
 	m.UseMiddleware(hs.ContextHandler.Middleware)
 	m.Use(middleware.OrgRedirect(hs.Cfg, hs.userService))
@@ -747,6 +747,22 @@ func (hs *HTTPServer) addMiddlewaresAndStaticRoutes() {
 
 	for _, mw := range hs.middlewares {
 		m.Use(mw)
+	}
+}
+
+// requireDomain runs h only when enforce_domain is off or the Host header matches
+// the configured domain. Handlers that write a response stop the middleware chain,
+// so for any other Host h must not run at all: the request then continues to
+// ValidateHostHeader, which redirects it.
+func (hs *HTTPServer) requireDomain(h func(*web.Context)) func(*web.Context) {
+	if !hs.Cfg.EnforceDomain {
+		return h
+	}
+	return func(ctx *web.Context) {
+		if !middleware.HostMatchesDomain(hs.Cfg, ctx.Req.Host) {
+			return
+		}
+		h(ctx)
 	}
 }
 

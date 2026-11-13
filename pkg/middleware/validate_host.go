@@ -19,6 +19,14 @@ var (
 	})
 )
 
+// HostMatchesDomain reports whether host, ignoring any port, names cfg.Domain.
+func HostMatchesDomain(cfg *setting.Cfg, host string) bool {
+	if i := strings.Index(host, ":"); i >= 0 {
+		host = host[:i]
+	}
+	return strings.EqualFold(host, cfg.Domain)
+}
+
 func ValidateHostHeader(cfg *setting.Cfg) web.Handler {
 	return func(c *contextmodel.ReqContext) {
 		// ignore local render calls
@@ -26,12 +34,7 @@ func ValidateHostHeader(cfg *setting.Cfg) web.Handler {
 			return
 		}
 
-		h := c.Req.Host
-		if i := strings.Index(h, ":"); i >= 0 {
-			h = h[:i]
-		}
-
-		if !strings.EqualFold(h, cfg.Domain) {
+		if !HostMatchesDomain(cfg, c.Req.Host) {
 			// the normal redirecting logic doesn't work when running as frontend service, since it has no knowledge of the custom domain.
 			// instead, we modify the single tenant `/bootdata` call with a 204 response and a header indicating the domain to redirect to
 			// this is safe because only the frontend service calls `/bootdata`
