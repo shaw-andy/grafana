@@ -19,8 +19,9 @@ const sanitizeTextPanelWhitelist = new xss.FilterXSS({
   // Add sandbox attribute to iframe tags if an attribute is allowed.
   onTagAttr(tag, name, value, isWhiteAttr) {
     if (tag === 'iframe') {
+      // Embeds commonly use scheme-relative sources; the sandboxed frame cannot navigate the viewer.
       return isWhiteAttr
-        ? ` ${name}="${xss.escapeAttrValue(sanitizeUrl(value))}" sandbox credentialless referrerpolicy=no-referrer`
+        ? ` ${name}="${xss.escapeAttrValue(braintreeSanitizeUrl(value))}" sandbox credentialless referrerpolicy=no-referrer`
         : '';
     }
     return;
@@ -113,9 +114,38 @@ function sanitizeSVGContent(unsanitizedString: string): string {
   return DOMPurify.sanitize(unsanitizedString, { USE_PROFILES: { svg: true, svgFilters: true } });
 }
 
-// Return a sanitized URL, free from XSS attacks, such as javascript:alert(1)
+const BLANK_URL = 'about:blank';
+
+// Two bases, so a reference that happens to name one base's host is still caught by the other.
+const RELATIVE_URL_PROBE_BASES = ['http://probe-a.invalid/', 'http://probe-b.invalid/'];
+
+/**
+ * True when the url has no scheme of its own but still names a host, such as //example.com,
+ * \\example.com or /\example.com. Browsers resolve these to another server while they look
+ * like paths on this one.
+ */
+function isSchemeRelativeUrl(url: string): boolean {
+  try {
+    new URL(url);
+    return false;
+  } catch {
+    // Not an absolute URL; check how it resolves as a relative reference.
+  }
+
+  return RELATIVE_URL_PROBE_BASES.some((base) => {
+    try {
+      return new URL(url, base).host !== new URL(base).host;
+    } catch {
+      return true;
+    }
+  });
+}
+
+// Return a sanitized URL, free from XSS attacks, such as javascript:alert(1),
+// and from scheme-relative URLs, such as //example.com, that leave this server.
 export function sanitizeUrl(url: string): string {
-  return braintreeSanitizeUrl(url);
+  const sanitized = braintreeSanitizeUrl(url);
+  return isSchemeRelativeUrl(sanitized) ? BLANK_URL : sanitized;
 }
 
 // Returns true if the string contains ANSI color codes.
