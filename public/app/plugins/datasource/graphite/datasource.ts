@@ -63,6 +63,8 @@ const GRAPHITE_TAG_COMPARATORS = {
   '!=~': AbstractLabelOperator.NotEqualRegEx,
 };
 
+const DATASOURCE_PROXY_PATH = '/api/datasources/proxy/';
+
 /**
  * Converts Graphite glob-like pattern to a regular expression
  */
@@ -378,7 +380,8 @@ export class GraphiteDatasource
   }
 
   addTracingHeaders(httpOptions: BackendSrvRequest, options: Partial<DataQueryRequest<GraphiteQuery>>) {
-    const proxyMode = !this.url?.match(/^http/);
+    // Browser access sends requests straight to the saved URL, so only the Grafana proxy may receive dashboard identifiers.
+    const proxyMode = this.url?.startsWith(DATASOURCE_PROXY_PATH) ?? false;
     if (!httpOptions.headers) {
       httpOptions.headers = {};
     }
