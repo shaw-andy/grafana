@@ -2,7 +2,7 @@ import { parseAtomFeed } from './atom';
 import { parseRSSFeed } from './rss';
 
 async function fetchFeedText(url: string) {
-  const rsp = await fetch(url);
+  const rsp = await fetch(url, { credentials: 'omit' });
   const txt = await rsp.text();
   return txt;
 }
