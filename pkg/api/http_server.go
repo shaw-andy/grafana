@@ -697,6 +697,11 @@ func (hs *HTTPServer) addMiddlewaresAndStaticRoutes() {
 	}
 
 	m.UseMiddleware(middleware.Recovery(hs.Cfg, hs.License))
+
+	if hs.Cfg.EnforceDomain {
+		m.UseMiddleware(middleware.ValidateHostHeader(hs.Cfg))
+	}
+
 	m.UseMiddleware(hs.Csrf.Middleware())
 
 	hs.mapStatic(m, hs.Cfg.StaticRootPath, webassets.BuildDir, "public/build")
@@ -722,7 +727,7 @@ func (hs *HTTPServer) addMiddlewaresAndStaticRoutes() {
 	m.UseMiddleware(web.Renderer(filepath.Join(hs.Cfg.StaticRootPath, "views"), "[[", "]]"))
 
 	// These endpoints are used for monitoring the Grafana instance
-	// and should not be redirected or rejected.
+	// and should not be redirected or rejected by later middleware.
 	m.Use(hs.healthzHandler)
 	m.Use(hs.apiHealthHandler)
 	m.Use(hs.metricsEndpoint)
@@ -732,10 +737,6 @@ func (hs *HTTPServer) addMiddlewaresAndStaticRoutes() {
 	m.UseMiddleware(hs.ContextHandler.Middleware)
 	m.Use(middleware.OrgRedirect(hs.Cfg, hs.userService))
 
-	// needs to be after context handler
-	if hs.Cfg.EnforceDomain {
-		m.Use(middleware.ValidateHostHeader(hs.Cfg))
-	}
 	// handle action urls
 	m.UseMiddleware(middleware.ValidateActionUrl(hs.Cfg, hs.log))
 
