@@ -24,9 +24,12 @@ import (
 	"github.com/grafana/grafana/pkg/util"
 )
 
+const allowChildTeamMembersKey = "allow_child_team_members"
+
 var ExtraGithubSettingKeys = map[string]ExtraKeyInfo{
-	allowedOrganizationsKey: {Type: String},
-	teamIdsKey:              {Type: String},
+	allowedOrganizationsKey:  {Type: String},
+	teamIdsKey:               {Type: String},
+	allowChildTeamMembersKey: {Type: Bool, DefaultValue: false},
 }
 
 var _ social.SocialConnector = (*SocialGithub)(nil)
@@ -34,8 +37,9 @@ var _ ssosettings.Reloadable = (*SocialGithub)(nil)
 
 type SocialGithub struct {
 	*SocialBase
-	allowedOrganizations []string
-	teamIds              []int
+	allowedOrganizations  []string
+	teamIds               []int
+	allowChildTeamMembers bool
 }
 
 type GithubTeam struct {
@@ -79,9 +83,10 @@ func NewGitHubProvider(ctx context.Context, info *social.OAuthInfo, cfgProvider 
 	}
 
 	provider := &SocialGithub{
-		SocialBase:           s,
-		teamIds:              teamIds,
-		allowedOrganizations: allowedOrganizations,
+		SocialBase:            s,
+		teamIds:               teamIds,
+		allowedOrganizations:  allowedOrganizations,
+		allowChildTeamMembers: MustBool(info.Extra[allowChildTeamMembersKey], false),
 	}
 
 	if len(teamIdsSplitted) != len(teamIds) {
@@ -159,23 +164,24 @@ func (s *SocialGithub) Reload(ctx context.Context, settings ssoModels.SSOSetting
 
 	s.teamIds = teamIds
 	s.allowedOrganizations = allowedOrganizations
+	s.allowChildTeamMembers = MustBool(newInfo.Extra[allowChildTeamMembersKey], false)
 
 	return nil
 }
 
-func (s *SocialGithub) isTeamMember(ctx context.Context, client *http.Client) bool {
+// isTeamMember only matches a team's immediate parent when allowChildTeamMembers is set,
+// because a member of a child team is not a member of the parent team on GitHub.
+func (s *SocialGithub) isTeamMember(teamMemberships []GithubTeam) bool {
 	if len(s.teamIds) == 0 {
 		return true
 	}
 
-	teamMemberships, err := s.fetchTeamMemberships(ctx, client)
-	if err != nil {
-		return false
-	}
-
 	for _, teamId := range s.teamIds {
 		for _, membership := range teamMemberships {
-			if teamId == membership.Id || (membership.Parent != nil && teamId == membership.Parent.Id) {
+			if teamId == membership.Id {
+				return true
+			}
+			if s.allowChildTeamMembers && membership.Parent != nil && teamId == membership.Parent.Id {
 				return true
 			}
 		}
@@ -376,7 +382,7 @@ func (s *SocialGithub) UserInfo(ctx context.Context, client *http.Client, token 
 
 	organizationsUrl := s.info.ApiUrl + "/orgs?per_page=100"
 
-	if !s.isTeamMember(ctx, client) {
+	if !s.isTeamMember(teamMemberships) {
 		return nil, ErrMissingTeamMembership.Errorf("User is not a member of any of the allowed teams: %v", s.teamIds)
 	}
 
