@@ -46,10 +46,9 @@ jobs:
           github_app: grafana-pr-automation
           permission_set: ${{ startsWith(github.ref_name, 'release-') && 'pr-writer-release' || 'pr-writer-main' }}
       - name: Migrate PRs
-        uses: grafana/grafana-github-actions-go/migrate-open-prs@main
+        uses: grafana/grafana-github-actions-go/migrate-open-prs@015e217f58ce35182230e20ac721e8351258f0ad # main
         with:
           token: ${{ steps.get-github-app-token.outputs.token }}
           ownerRepo: ${{ inputs.ownerRepo }}
           from: ${{ inputs.from }}
           to: ${{ inputs.to }}
-          binary_release_tag: 'dev'
