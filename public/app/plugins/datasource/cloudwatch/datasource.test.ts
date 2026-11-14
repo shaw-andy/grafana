@@ -337,7 +337,11 @@ describe('datasource', () => {
 
     it('should replace correct variables in CloudWatchLogsQuery', () => {
       const { datasource, templateService } = setupMockedDataSource({ variables: [logGroupNamesVariable] });
-      templateService.replace = jest.fn().mockImplementation(() => 'resolved1|resolved2');
+      templateService.replace = jest
+        .fn()
+        .mockImplementation((_target, _scopedVars, format) =>
+          format === 'text' ? 'resolved1 + resolved2' : 'resolved1|resolved2'
+        );
       const logQuery: CloudWatchLogsQuery = {
         queryMode: 'Logs',
         expression: `$expressionVar`,

@@ -51,6 +51,10 @@ var sourceCommandRegex = regexp.MustCompile(`(?i)^\s*source\s+`)
 var pplSourceCommandRegex = regexp.MustCompile(`(?im)(^|\|)\s*(--[^\n]*(\n|$)\s*)*(search\s+)?source\s*=`)
 var dataSourceIdentifierPartRegex = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
+// Values embedded in generated SOURCE, PPL, and SQL clauses are wrapped in quotes or backticks without
+// escaping, so they are restricted to the characters AWS allows in log group names, ARNs, and account IDs.
+var queryLiteralRegex = regexp.MustCompile(`^[A-Za-z0-9_./#:*-]+$`)
+
 type AWSError struct {
 	Code    string
 	Message string
@@ -409,7 +413,10 @@ func buildCWLIStartQuery(
 		sourceLogGroupIdentifiers = nil
 	}
 
-	sourceClause := buildSourceClause(logsQuery, includeAccounts, sourceLogGroupIdentifiers, dataSourceIdentifiers)
+	sourceClause, err := buildSourceClause(logsQuery, includeAccounts, sourceLogGroupIdentifiers, dataSourceIdentifiers)
+	if err != nil {
+		return startQueryPlan{}, err
+	}
 	return startQueryPlan{
 		queryString:                 sourceClause + " | " + logContextFieldsClause + "|" + logsQuery.QueryString,
 		useStartQueryInputLogGroups: useStartQueryInputLogGroups,
@@ -432,7 +439,10 @@ func buildPPLStartQuery(
 		return startQueryPlan{}, backend.DownstreamError(fmt.Errorf("query cannot contain source= when source is injected automatically"))
 	}
 
-	sourceClause := buildPPLSourceClause(logGroupIdentifiers, dataSourceIdentifiers)
+	sourceClause, err := buildPPLSourceClause(logGroupIdentifiers, dataSourceIdentifiers)
+	if err != nil {
+		return startQueryPlan{}, err
+	}
 	return startQueryPlan{
 		queryString:                 sourceClause + " | " + logsQuery.QueryString,
 		useStartQueryInputLogGroups: false,
@@ -503,31 +513,37 @@ func buildSourceClause(
 	includeAccounts bool,
 	logGroupIdentifiers []string,
 	dataSourceIdentifiers []string,
-) string {
+) (string, error) {
 	var parts []string
 
-	dataSourceClause := buildDataSourceClause(dataSourceIdentifiers)
+	dataSourceClause, err := buildDataSourceClause(dataSourceIdentifiers)
+	if err != nil {
+		return "", err
+	}
 	if dataSourceClause != "" {
 		parts = append(parts, dataSourceClause)
 	}
 
-	logGroupsClause := buildLogGroupsSourceClause(logsQuery, includeAccounts, logGroupIdentifiers)
+	logGroupsClause, err := buildLogGroupsSourceClause(logsQuery, includeAccounts, logGroupIdentifiers)
+	if err != nil {
+		return "", err
+	}
 	if logGroupsClause != "" {
 		parts = append(parts, logGroupsClause)
 	}
 
 	if len(parts) == 0 {
-		return "SOURCE logGroups()"
+		return "SOURCE logGroups()", nil
 	}
 
-	return "SOURCE " + strings.Join(parts, " ")
+	return "SOURCE " + strings.Join(parts, " "), nil
 }
 
 func buildLogGroupsSourceClause(
 	logsQuery models.LogsQuery,
 	includeAccounts bool,
 	logGroupIdentifiers []string,
-) string {
+) (string, error) {
 	var parts []string
 
 	usesNamePrefixScope := logsQuery.LogsQueryScope != nil && *logsQuery.LogsQueryScope == dataquery.LogsQueryScopeNamePrefix
@@ -535,55 +551,78 @@ func buildLogGroupsSourceClause(
 
 	if usesNamePrefixScope || usesAllLogGroupsScope {
 		if usesNamePrefixScope && len(logsQuery.LogGroupPrefixes) > 0 {
-			prefixes := formatStringArrayForSource(logsQuery.LogGroupPrefixes)
+			prefixes, err := formatStringArrayForSource(logsQuery.LogGroupPrefixes)
+			if err != nil {
+				return "", err
+			}
 			parts = append(parts, fmt.Sprintf("namePrefix: %s", prefixes))
 		}
 
 		// Add class only if not STANDARD which is the default behaviour if not specified
 		if logsQuery.LogGroupClass != nil && *logsQuery.LogGroupClass != dataquery.LogGroupClassSTANDARD {
+			if *logsQuery.LogGroupClass != dataquery.LogGroupClassINFREQUENTACCESS {
+				return "", backend.DownstreamError(fmt.Errorf("unsupported log group class %q", *logsQuery.LogGroupClass))
+			}
 			parts = append(parts, fmt.Sprintf("class: ['%s']", *logsQuery.LogGroupClass))
 		}
 
 		if includeAccounts && len(logsQuery.SelectedAccountIds) > 0 {
-			accounts := formatStringArrayForSource(logsQuery.SelectedAccountIds)
+			accounts, err := formatStringArrayForSource(logsQuery.SelectedAccountIds)
+			if err != nil {
+				return "", err
+			}
 			parts = append(parts, fmt.Sprintf("accountIdentifier: %s", accounts))
 		}
 
 		if len(parts) == 0 {
-			return "logGroups()"
+			return "logGroups()", nil
 		}
 
-		return fmt.Sprintf("logGroups(%s)", strings.Join(parts, ", "))
+		return fmt.Sprintf("logGroups(%s)", strings.Join(parts, ", ")), nil
 	}
 
 	if len(logGroupIdentifiers) == 0 {
-		return ""
+		return "", nil
 	}
 
-	return fmt.Sprintf("logGroups(logGroupIdentifier: %s)", formatStringArrayForSource(logGroupIdentifiers))
+	identifiers, err := formatStringArrayForSource(logGroupIdentifiers)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("logGroups(logGroupIdentifier: %s)", identifiers), nil
 }
 
-func buildDataSourceClause(dataSourceIdentifiers []string) string {
+func buildDataSourceClause(dataSourceIdentifiers []string) (string, error) {
 	if len(dataSourceIdentifiers) == 0 {
-		return ""
+		return "", nil
 	}
-	return fmt.Sprintf("dataSource(%s)", formatStringArrayForSource(dataSourceIdentifiers))
+	identifiers, err := formatStringArrayForSource(dataSourceIdentifiers)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("dataSource(%s)", identifiers), nil
 }
 
-func buildPPLSourceClause(logGroupIdentifiers []string, dataSourceIdentifiers []string) string {
+func buildPPLSourceClause(logGroupIdentifiers []string, dataSourceIdentifiers []string) (string, error) {
 	if len(logGroupIdentifiers) == 0 && len(dataSourceIdentifiers) == 0 {
-		return ""
+		return "", nil
 	}
 
 	parts := make([]string, 0, len(logGroupIdentifiers)+len(dataSourceIdentifiers))
 	for _, ds := range dataSourceIdentifiers {
+		if err := validateQueryLiteral(ds); err != nil {
+			return "", err
+		}
 		parts = append(parts, fmt.Sprintf("ds:`%s`", ds))
 	}
 	for _, lg := range logGroupIdentifiers {
+		if err := validateQueryLiteral(lg); err != nil {
+			return "", err
+		}
 		parts = append(parts, fmt.Sprintf("lg:`%s`", lg))
 	}
 
-	return fmt.Sprintf("source=[%s]", strings.Join(parts, ", "))
+	return fmt.Sprintf("source=[%s]", strings.Join(parts, ", ")), nil
 }
 
 func expandSQLLogGroupsMacro(queryString string, logGroupIdentifiers []string) (string, error) {
@@ -591,11 +630,11 @@ func expandSQLLogGroupsMacro(queryString string, logGroupIdentifiers []string) (
 		return queryString, nil
 	}
 
-	quoted := make([]string, len(logGroupIdentifiers))
-	for i, id := range logGroupIdentifiers {
-		quoted[i] = fmt.Sprintf("'%s'", id)
+	identifiers, err := formatStringArrayForSource(logGroupIdentifiers)
+	if err != nil {
+		return "", err
 	}
-	replacement := fmt.Sprintf("logGroups(logGroupIdentifier: [%s])", strings.Join(quoted, ", "))
+	replacement := fmt.Sprintf("logGroups(logGroupIdentifier: %s)", identifiers)
 	return strings.Replace(queryString, logGroupsMacro, replacement, 1), nil
 }
 
@@ -610,10 +649,18 @@ func expandSQLSourceMacro(
 
 	parts := make([]string, 0, 2)
 	if len(dataSourceIdentifiers) > 0 {
-		parts = append(parts, buildDataSourceClause(dataSourceIdentifiers))
+		dataSourceClause, err := buildDataSourceClause(dataSourceIdentifiers)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, dataSourceClause)
 	}
 	if len(logGroupIdentifiers) > 0 {
-		parts = append(parts, fmt.Sprintf("logGroups(logGroupIdentifier: %s)", formatStringArrayForSource(logGroupIdentifiers)))
+		identifiers, err := formatStringArrayForSource(logGroupIdentifiers)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, fmt.Sprintf("logGroups(logGroupIdentifier: %s)", identifiers))
 	}
 
 	return strings.Replace(queryString, sourceMacro, strings.Join(parts, " "), 1), nil
@@ -646,12 +693,22 @@ func validateSQLMacroSelections(
 	}
 }
 
-func formatStringArrayForSource(arr []string) string {
+func formatStringArrayForSource(arr []string) (string, error) {
 	quoted := make([]string, len(arr))
 	for i, s := range arr {
+		if err := validateQueryLiteral(s); err != nil {
+			return "", err
+		}
 		quoted[i] = fmt.Sprintf("'%s'", s)
 	}
-	return fmt.Sprintf("[%s]", strings.Join(quoted, ", "))
+	return fmt.Sprintf("[%s]", strings.Join(quoted, ", ")), nil
+}
+
+func validateQueryLiteral(value string) error {
+	if !queryLiteralRegex.MatchString(value) {
+		return backend.DownstreamError(fmt.Errorf("log selection value %q may only contain letters, numbers, and the characters _ . / # : * -", value))
+	}
+	return nil
 }
 
 func validateLogGroupPrefixes(prefixes []string) error {

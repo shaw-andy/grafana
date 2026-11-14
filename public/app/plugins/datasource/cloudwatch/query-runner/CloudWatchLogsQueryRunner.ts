@@ -65,6 +65,20 @@ import { CloudWatchRequest } from './CloudWatchRequest';
 export const LOG_IDENTIFIER_INTERNAL = '__log__grafana_internal__';
 export const LOGSTREAM_IDENTIFIER_INTERNAL = '__logstream__grafana_internal__';
 
+// Log selections are embedded in generated SOURCE, PPL, and SQL clauses inside quotes or backticks, so they are
+// restricted to the characters AWS allows in log group names, ARNs, and account IDs.
+const LOG_SELECTION_VALUE_REGEX = /^[A-Za-z0-9_./#:*-]+$/;
+
+function assertValidLogSelectionValues(kind: string, values: Array<string | undefined>) {
+  for (const value of values) {
+    if (value && !LOG_SELECTION_VALUE_REGEX.test(value)) {
+      throw new Error(
+        `Invalid ${kind} "${value}": only letters, numbers, and the characters _ . / # : * - are allowed`
+      );
+    }
+  }
+}
+
 // This class handles execution of CloudWatch logs query data queries
 export class CloudWatchLogsQueryRunner extends CloudWatchRequest {
   logsTimeout: string;
@@ -288,6 +302,10 @@ export class CloudWatchLogsQueryRunner extends CloudWatchRequest {
     // Otherwise the StartLogQuery API will return a permission error
     const logGroups = uniqBy(interpolatedLogGroups, 'arn');
     const logGroupNames = uniq(interpolatedLegacyLogGroupNames);
+    assertValidLogSelectionValues(
+      'log group',
+      logGroups.flatMap((lg) => [lg.arn, lg.name])
+    );
 
     const logGroupPrefixes = query.logGroupPrefixes
       ? uniq(
@@ -298,6 +316,7 @@ export class CloudWatchLogsQueryRunner extends CloudWatchRequest {
     if (logGroupPrefixes && logGroupPrefixes.length > LOG_GROUP_PREFIX_MAX) {
       throw new Error(`Expanded prefix count (${logGroupPrefixes.length}) exceeds maximum of ${LOG_GROUP_PREFIX_MAX}`);
     }
+    assertValidLogSelectionValues('log group prefix', logGroupPrefixes ?? []);
 
     // Filter out "all" which is a special UI value meaning "don't filter by account"
     const expandedAccountIds = query.selectedAccountIds
@@ -313,6 +332,7 @@ export class CloudWatchLogsQueryRunner extends CloudWatchRequest {
         `Expanded account count (${selectedAccountIds.length}) exceeds maximum of ${LOG_GROUP_ACCOUNT_MAX}`
       );
     }
+    assertValidLogSelectionValues('account identifier', selectedAccountIds ?? []);
 
     const logsSQLCustomerFormatter = (value: unknown, model: Partial<CustomFormatterVariable>) => {
       if (
@@ -328,10 +348,11 @@ export class CloudWatchLogsQueryRunner extends CloudWatchRequest {
           ?.replaceAll(/[\r\n\t\s]+/g, '')
           .includes(`\`logGroups(logGroupIdentifier:[$${varName}])\``);
         if (variable && 'current' in variable && 'text' in variable.current) {
-          if (Array.isArray(variable.current.text)) {
-            return variable.current.text.map((v) => (shouldSurroundInQuotes ? `'${v}'` : v)).join(',');
-          }
-          return shouldSurroundInQuotes ? `'${variable.current.text}'` : variable.current.text;
+          const texts: string[] = Array.isArray(variable.current.text)
+            ? variable.current.text
+            : [variable.current.text];
+          assertValidLogSelectionValues('log group', texts);
+          return texts.map((v) => (shouldSurroundInQuotes ? `'${v}'` : v)).join(',');
         }
       }
 
