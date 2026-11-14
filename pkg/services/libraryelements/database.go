@@ -435,45 +435,49 @@ func (l *LibraryElementService) getAllLibraryElements(c context.Context, signedI
 	if err != nil {
 		return model.LibraryElementSearchResult{}, err
 	}
-	retDTOs := make([]model.LibraryElementDTO, 0)
-	err = l.SQLStore.WithDbSession(c, func(session *db.Session) error {
-		builder := db.NewSqlBuilder(l.Cfg, l.features, l.SQLStore.GetDialect(), recursiveQueriesAreSupported)
+	dialect := l.SQLStore.GetDialect()
+	newBuilder := func() db.SQLBuilder {
+		return db.NewSqlBuilder(l.Cfg, l.features, dialect, recursiveQueriesAreSupported)
+	}
+	// writeSearchSQL writes the filtered union shared by the page and count
+	// queries. folder_uid is appended to the columns selected by selectSQL.
+	writeSearchSQL := func(builder *db.SQLBuilder, selectSQL, fromSQL string, includeGeneralInFolderFilter bool) error {
 		if folderFilter.includeGeneralFolder {
-			builder.Write(selectLibraryElementDTOWithMeta)
+			builder.Write(selectSQL)
 			builder.Write(", '' as folder_uid ")
-			builder.Write(getFromLibraryElementDTOWithMeta(l.SQLStore.GetDialect()))
-			builder.Write(` WHERE le.org_id=?  AND le.folder_id=0`, signedInUser.GetOrgID())
-			writeKindSQL(query, &builder)
-			writeSearchStringSQL(query, l.SQLStore, &builder, foldersWithMatchingTitles)
-			writeExcludeSQL(query, &builder)
-			writeTypeFilterSQL(typeFilter, &builder)
+			builder.Write(fromSQL)
+			builder.Write(` WHERE le.org_id=? AND le.folder_id=0`, signedInUser.GetOrgID())
+			writeKindSQL(query, builder)
+			writeSearchStringSQL(query, l.SQLStore, builder, foldersWithMatchingTitles)
+			writeExcludeSQL(query, builder)
+			writeTypeFilterSQL(typeFilter, builder)
 			builder.Write(" ")
-			builder.Write(l.SQLStore.GetDialect().UnionDistinct())
+			builder.Write(dialect.UnionDistinct())
 			builder.Write(" ")
 		}
-		builder.Write(selectLibraryElementDTOWithMeta)
+		builder.Write(selectSQL)
 		builder.Write(", le.folder_uid as folder_uid ")
-		builder.Write(getFromLibraryElementDTOWithMeta(l.SQLStore.GetDialect()))
+		builder.Write(fromSQL)
 		builder.Write(` WHERE le.org_id=? AND le.folder_id<>0`, signedInUser.GetOrgID())
-		writeKindSQL(query, &builder)
-		writeSearchStringSQL(query, l.SQLStore, &builder, foldersWithMatchingTitles)
-		writeExcludeSQL(query, &builder)
-		writeTypeFilterSQL(typeFilter, &builder)
-		if err := folderFilter.writeFolderFilterSQL(false, &builder); err != nil {
-			return err
-		}
+		writeKindSQL(query, builder)
+		writeSearchStringSQL(query, l.SQLStore, builder, foldersWithMatchingTitles)
+		writeExcludeSQL(query, builder)
+		writeTypeFilterSQL(typeFilter, builder)
+		return folderFilter.writeFolderFilterSQL(includeGeneralInFolderFilter, builder)
+	}
+	writeOrderBySQL := func(builder *db.SQLBuilder) {
 		if query.SortDirection == sort.SortAlphaDesc.Name {
 			builder.Write(" ORDER BY 1 DESC")
 		} else {
 			builder.Write(" ORDER BY 1 ASC")
 		}
-		writePerPageSQL(query, l.SQLStore, &builder)
-		if err := session.SQL(builder.GetSQLString(), builder.GetParams()...).Find(&elements); err != nil {
-			return err
-		}
+	}
 
+	isAdmin := signedInUser.HasRole(org.RoleAdmin)
+	retDTOs := make([]model.LibraryElementDTO, 0)
+	err = l.SQLStore.WithDbSession(c, func(session *db.Session) error {
 		metrics.MFolderIDsServiceCount.WithLabelValues(metrics.LibraryElements).Inc()
-		needsFolderTree := !query.SkipFolderTreeForAdmin || !signedInUser.HasRole(org.RoleAdmin)
+		needsFolderTree := !query.SkipFolderTreeForAdmin || !isAdmin
 		var folderTree *folder.FolderTree
 		if needsFolderTree {
 			// Get the folder tree filtered by user permissions (cached per user per request)
@@ -482,14 +486,69 @@ func (l *LibraryElementService) getAllLibraryElements(c context.Context, signedI
 				return err
 			}
 		}
+		canList := func(folderUID string) bool {
+			return isAdmin || folderTree.Contains(folderUID)
+		}
 
-		// Filter elements based on folder access using the tree
-		for _, element := range elements {
-			if !signedInUser.HasRole(org.RoleAdmin) {
-				if !folderTree.Contains(element.FolderUID) {
+		// The model column is only read for rows on the requested page. Non-admins
+		// pick the page from id/folder rows filtered by the folder tree first, so
+		// models in folders they cannot list are never read.
+		if isAdmin {
+			builder := newBuilder()
+			if err := writeSearchSQL(&builder, selectLibraryElementDTOWithMeta, getFromLibraryElementDTOWithMeta(dialect), false); err != nil {
+				return err
+			}
+			writeOrderBySQL(&builder)
+			writePerPageSQL(query, l.SQLStore, &builder)
+			if err := session.SQL(builder.GetSQLString(), builder.GetParams()...).Find(&elements); err != nil {
+				return err
+			}
+		} else {
+			var refs []struct {
+				Name      string
+				ID        int64  `xorm:"id"`
+				FolderUID string `xorm:"folder_uid"`
+			}
+			builder := newBuilder()
+			if err := writeSearchSQL(&builder, "SELECT DISTINCT le.name, le.id", " FROM library_element AS le ", false); err != nil {
+				return err
+			}
+			writeOrderBySQL(&builder)
+			if err := session.SQL(builder.GetSQLString(), builder.GetParams()...).Find(&refs); err != nil {
+				return err
+			}
+			pageIDs := make([]int64, 0, query.PerPage)
+			folderUIDs := make(map[int64]string, query.PerPage)
+			start, end := pageBounds(len(refs), query.PerPage, query.Page)
+			listed := 0
+			for _, ref := range refs {
+				if listed >= end {
+					break
+				}
+				if !canList(ref.FolderUID) {
 					continue
 				}
+				if listed >= start {
+					pageIDs = append(pageIDs, ref.ID)
+					folderUIDs[ref.ID] = ref.FolderUID
+				}
+				listed++
 			}
+			byID, err := l.getLibraryElementsWithMetaByIDs(session, signedInUser.GetOrgID(), pageIDs)
+			if err != nil {
+				return err
+			}
+			for _, id := range pageIDs {
+				element, ok := byID[id]
+				if !ok {
+					continue
+				}
+				element.FolderUID = folderUIDs[id]
+				elements = append(elements, element)
+			}
+		}
+
+		for _, element := range elements {
 			var title string
 			if needsFolderTree {
 				title = folderTree.GetTitle(element.FolderUID)
@@ -529,44 +588,24 @@ func (l *LibraryElementService) getAllLibraryElements(c context.Context, signedI
 			})
 		}
 
-		var libraryElements []model.LibraryElementWithMeta
-		countBuilder := db.SQLBuilder{}
-		if folderFilter.includeGeneralFolder {
-			countBuilder.Write(selectLibraryElementDTOWithMeta)
-			countBuilder.Write(", '' as folder_uid ")
-			countBuilder.Write(getFromLibraryElementDTOWithMeta(l.SQLStore.GetDialect()))
-			countBuilder.Write(` WHERE le.org_id=? AND le.folder_id=0`, signedInUser.GetOrgID())
-			writeKindSQL(query, &countBuilder)
-			writeSearchStringSQL(query, l.SQLStore, &countBuilder, foldersWithMatchingTitles)
-			writeExcludeSQL(query, &countBuilder)
-			writeTypeFilterSQL(typeFilter, &countBuilder)
-			countBuilder.Write(" ")
-			countBuilder.Write(l.SQLStore.GetDialect().UnionDistinct())
-			countBuilder.Write(" ")
+		// Counted per folder so the same folder permission filter applies to the total.
+		var folderCounts []struct {
+			FolderUID    string `xorm:"folder_uid"`
+			ElementCount int64  `xorm:"element_count"`
 		}
-		countBuilder.Write(selectLibraryElementDTOWithMeta)
-		countBuilder.Write(", le.folder_uid as folder_uid ")
-		countBuilder.Write(getFromLibraryElementDTOWithMeta(l.SQLStore.GetDialect()))
-		countBuilder.Write(` WHERE le.org_id=? AND le.folder_id<>0`, signedInUser.GetOrgID())
-		writeKindSQL(query, &countBuilder)
-		writeSearchStringSQL(query, l.SQLStore, &countBuilder, foldersWithMatchingTitles)
-		writeExcludeSQL(query, &countBuilder)
-		writeTypeFilterSQL(typeFilter, &countBuilder)
-		if err := folderFilter.writeFolderFilterSQL(true, &countBuilder); err != nil {
+		countBuilder := newBuilder()
+		countBuilder.Write("SELECT t.folder_uid, COUNT(*) AS element_count FROM (")
+		if err := writeSearchSQL(&countBuilder, "SELECT DISTINCT le.id", " FROM library_element AS le ", true); err != nil {
 			return err
 		}
-		if err := session.SQL(countBuilder.GetSQLString(), countBuilder.GetParams()...).Find(&libraryElements); err != nil {
+		countBuilder.Write(") AS t GROUP BY t.folder_uid")
+		if err := session.SQL(countBuilder.GetSQLString(), countBuilder.GetParams()...).Find(&folderCounts); err != nil {
 			return err
 		}
-
-		// Apply the same folder permission filtering to the count for non-admin users
-		totalCount := int64(len(libraryElements))
-		if !signedInUser.HasRole(org.RoleAdmin) {
-			totalCount = 0
-			for _, element := range libraryElements {
-				if folderTree.Contains(element.FolderUID) {
-					totalCount++
-				}
+		var totalCount int64
+		for _, fc := range folderCounts {
+			if canList(fc.FolderUID) {
+				totalCount += fc.ElementCount
 			}
 		}
 
@@ -588,6 +627,45 @@ func (l *LibraryElementService) getAllLibraryElements(c context.Context, signedI
 	}
 
 	return result, nil
+}
+
+// pageBounds returns the [start, end) range of the given page over n items.
+func pageBounds(n, perPage, page int) (int, int) {
+	start := n
+	// Dividing first avoids overflowing perPage*(page-1) for extreme parameters.
+	if page-1 <= n/perPage {
+		start = min(perPage*(page-1), n)
+	}
+	return start, start + min(perPage, n-start)
+}
+
+// getLibraryElementsWithMetaByIDs loads the given library elements, including
+// their models, keyed by ID.
+func (l *LibraryElementService) getLibraryElementsWithMetaByIDs(session *db.Session, orgID int64, ids []int64) (map[int64]model.LibraryElementWithMeta, error) {
+	const batchSize = 500
+	byID := make(map[int64]model.LibraryElementWithMeta, len(ids))
+	dialect := l.SQLStore.GetDialect()
+	for start := 0; start < len(ids); start += batchSize {
+		batch := ids[start:min(start+batchSize, len(ids))]
+		params := make([]any, 0, len(batch)+1)
+		params = append(params, orgID)
+		for _, id := range batch {
+			params = append(params, id)
+		}
+		builder := db.SQLBuilder{}
+		builder.Write(selectLibraryElementDTOWithMeta)
+		builder.Write(getFromLibraryElementDTOWithMeta(dialect))
+		builder.Write(` WHERE le.org_id=? AND le.id IN (?`+strings.Repeat(",?", len(batch)-1)+")", params...)
+		builder.Write(dialect.LimitOffset(int64(len(batch)), 0))
+		var rows []model.LibraryElementWithMeta
+		if err := session.SQL(builder.GetSQLString(), builder.GetParams()...).Find(&rows); err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			byID[row.ID] = row
+		}
+	}
+	return byID, nil
 }
 
 func (l *LibraryElementService) handleFolderIDPatches(ctx context.Context, elementToPatch *model.LibraryElement,
