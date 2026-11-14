@@ -13,6 +13,7 @@ import (
 	ringclient "github.com/grafana/dskit/ring/client"
 	"github.com/grafana/dskit/services"
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/services/apiserver/options"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/storage/unified/resource"
@@ -125,8 +126,14 @@ func newClientPool(clientCfg grpcclient.Config, log log.Logger, reg prometheus.R
 		Name: "resource_server_client_request_retries_total",
 		Help: "Total number of retries for requests to the resource server.",
 	}, []string{"operation"})
+	tlsCfg := options.ReadGrpcClientTLSConfig(cfg)
 
 	factory := ringclient.PoolInstFunc(func(inst ring.InstanceDesc) (ringclient.PoolClient, error) {
+		creds, err := tlsCfg.TransportCredentials(inst.Addr)
+		if err != nil {
+			return nil, fmt.Errorf("resource server %s: %w", inst.Id, err)
+		}
+
 		unaryInterceptors, streamInterceptors := grpcclient.Instrument(factoryRequestDuration)
 
 		// Add retry interceptors for transient connection issues
@@ -139,6 +146,8 @@ func newClientPool(clientCfg grpcclient.Config, log log.Logger, reg prometheus.R
 		}
 
 		opts = append(opts, grpc.WithStatsHandler(otelgrpc.NewClientHandler()))
+		// Replaces the plaintext credentials that grpcclient.Config adds when its own TLS is disabled.
+		opts = append(opts, grpc.WithTransportCredentials(creds))
 		opts = append(opts, connectionBackoffOptions())
 
 		conn, err := grpc.NewClient(inst.Addr, opts...)

@@ -20,6 +20,7 @@ import (
 	"github.com/grafana/grafana/pkg/infra/nats"
 	"github.com/grafana/grafana/pkg/infra/tracing"
 	"github.com/grafana/grafana/pkg/services/apiserver"
+	"github.com/grafana/grafana/pkg/services/apiserver/options"
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/storage/unified"
 	"github.com/grafana/grafana/pkg/storage/unified/resource"
@@ -89,6 +90,9 @@ type ControllerConfig struct {
 // [unified_storage]
 // grpc_address =
 // grpc_index_address =
+// grpc_use_tls =
+// grpc_tls_ca_file =
+// grpc_tls_server_name =
 // allow_insecure =
 // audiences =
 // [operator]
@@ -737,18 +741,28 @@ func setupUnifiedStorageClient(cfg *setting.Cfg, tracer tracing.Tracer, registry
 	if address == "" {
 		return nil, fmt.Errorf("grpc_address is required in [unified_storage] section")
 	}
-	conn, err := unified.GrpcConn(address, registry)
+	indexAddress := unifiedStorageSec.Key("grpc_index_address").String()
+	tlsCfg := options.GrpcClientTLSConfig{
+		Enabled:    unifiedStorageSec.Key("grpc_use_tls").MustBool(false),
+		CAFile:     unifiedStorageSec.Key("grpc_tls_ca_file").String(),
+		ServerName: unifiedStorageSec.Key("grpc_tls_server_name").String(),
+	}
+	// Check both addresses before dialing either.
+	if _, err := tlsCfg.TransportCredentials(address, indexAddress); err != nil {
+		return nil, fmt.Errorf("unified storage gRPC client: %w", err)
+	}
+
+	conn, err := unified.GrpcConnWithTLS(address, registry, tlsCfg)
 	if err != nil {
 		return nil, fmt.Errorf("create unified storage gRPC connection: %w", err)
 	}
 
 	// Connect to Index
 	indexConn := conn
-	indexAddress := unifiedStorageSec.Key("grpc_index_address").String()
 	if indexAddress != "" {
 		// The index connection registers the same client metrics as the storage connection, so
 		// prefix them to avoid a duplicate-registration collision on the shared registry.
-		indexConn, err = unified.GrpcConn(indexAddress, prometheus.WrapRegistererWithPrefix("index_", registry))
+		indexConn, err = unified.GrpcConnWithTLS(indexAddress, prometheus.WrapRegistererWithPrefix("index_", registry), tlsCfg)
 		if err != nil {
 			return nil, fmt.Errorf("create unified storage index gRPC connection: %w", err)
 		}

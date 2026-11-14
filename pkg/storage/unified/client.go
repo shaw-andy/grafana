@@ -15,7 +15,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/grafana/authlib/types"
@@ -126,6 +126,7 @@ func ProvideUnifiedStorageClient(opts *Options,
 		BlobStoreURL:            apiserverCfg.Key("blob_url").MustString(""),
 		BlobThresholdBytes:      apiserverCfg.Key("blob_threshold_bytes").MustInt(options.BlobThresholdDefault),
 		GrpcClientKeepaliveTime: apiserverCfg.Key("grpc_client_keepalive_time").MustDuration(options.DefaultGrpcClientKeepaliveTime),
+		GrpcClientTLS:           options.ReadGrpcClientTLSConfig(opts.Cfg),
 	}, opts.Cfg, opts.Features, opts.Tracer, opts.Reg, opts.Authzc, opts.Docs, storageMetrics, indexMetrics, vectorMetrics, opts.SecureValues, opts.VectorBackend, opts.Embedder, opts.Reranker, opts.DashboardStats, opts.KV, opts.EDB, gcGate, opts.Publisher, opts.Subscriber, opts.ExperimentalKV)
 	if err == nil {
 		// Used to get the folder stats
@@ -189,20 +190,24 @@ func newClient(opts options.StorageOptions,
 			return nil, fmt.Errorf("expecting address for storage_type: %s", opts.StorageType)
 		}
 
+		creds, err := opts.GrpcClientTLS.TransportCredentials(opts.Address, opts.SearchServerAddress)
+		if err != nil {
+			return nil, fmt.Errorf("unified storage gRPC client: %w", err)
+		}
+
 		var (
 			conn      grpc.ClientConnInterface
 			indexConn grpc.ClientConnInterface
-			err       error
 			metrics   = newClientMetrics(reg)
 		)
 
-		conn, err = grpcConn(opts.Address, metrics, opts.GrpcClientKeepaliveTime)
+		conn, err = grpcConn(opts.Address, metrics, opts.GrpcClientKeepaliveTime, creds)
 		if err != nil {
 			return nil, err
 		}
 
 		if opts.SearchServerAddress != "" {
-			indexConn, err = grpcConn(opts.SearchServerAddress, metrics, opts.GrpcClientKeepaliveTime)
+			indexConn, err = grpcConn(opts.SearchServerAddress, metrics, opts.GrpcClientKeepaliveTime, creds)
 
 			if err != nil {
 				return nil, err
@@ -340,17 +345,22 @@ func newRemoteResourceClientFromConfig(cfg *setting.Cfg, reg prometheus.Register
 	if address == "" {
 		return nil, fmt.Errorf("expecting address to be set for remote unified storage client under grafana-apiserver section")
 	}
+	searchAddress := apiserverCfg.Key("search_server_address").MustString("")
+	creds, err := options.ReadGrpcClientTLSConfig(cfg).TransportCredentials(address, searchAddress)
+	if err != nil {
+		return nil, fmt.Errorf("unified storage gRPC client: %w", err)
+	}
 	keepaliveTime := apiserverCfg.Key("grpc_client_keepalive_time").MustDuration(options.DefaultGrpcClientKeepaliveTime)
 	metrics := newClientMetrics(reg)
-	storageConn, err := grpcConn(address, metrics, keepaliveTime)
+	storageConn, err := grpcConn(address, metrics, keepaliveTime, creds)
 	if err != nil {
 		return nil, fmt.Errorf("create unified storage connection: %w", err)
 	}
 
 	indexConn := grpc.ClientConnInterface(storageConn)
 	var searchConn *grpc.ClientConn
-	if searchAddress := apiserverCfg.Key("search_server_address").MustString(""); searchAddress != "" {
-		searchConn, err = grpcConn(searchAddress, metrics, keepaliveTime)
+	if searchAddress != "" {
+		searchConn, err = grpcConn(searchAddress, metrics, keepaliveTime, creds)
 		if err != nil {
 			_ = storageConn.Close()
 			return nil, fmt.Errorf("create search server connection: %w", err)
@@ -377,9 +387,13 @@ func NewSearchClient(cfg *setting.Cfg, features featuremgmt.FeatureToggles) (res
 	if searchServerAddress == "" {
 		return nil, fmt.Errorf("expecting search_server_address to be set for search client under grafana-apiserver section")
 	}
+	creds, err := options.ReadGrpcClientTLSConfig(cfg).TransportCredentials(searchServerAddress)
+	if err != nil {
+		return nil, fmt.Errorf("search server gRPC client: %w", err)
+	}
 
 	metrics := newClientMetrics(prometheus.NewRegistry())
-	conn, err := grpcConn(searchServerAddress, metrics, grpcClientKeepaliveTime)
+	conn, err := grpcConn(searchServerAddress, metrics, grpcClientKeepaliveTime, creds)
 	if err != nil {
 		return nil, err
 	}
@@ -412,7 +426,7 @@ func NewSearchClient(cfg *setting.Cfg, features featuremgmt.FeatureToggles) (res
 }
 
 // grpcConn creates a new gRPC connection to the provided address.
-func grpcConn(address string, metrics *clientMetrics, clientKeepaliveTime time.Duration) (*grpc.ClientConn, error) {
+func grpcConn(address string, metrics *clientMetrics, clientKeepaliveTime time.Duration, creds credentials.TransportCredentials) (*grpc.ClientConn, error) {
 	// Report gRPC status code errors as labels.
 	unary, stream := instrument(metrics.requestDuration, middleware.ReportGRPCStatusOption)
 
@@ -436,7 +450,8 @@ func grpcConn(address string, metrics *clientMetrics, clientKeepaliveTime time.D
 	}
 
 	opts = append(opts, grpc.WithStatsHandler(otelgrpc.NewClientHandler()))
-	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Replaces the plaintext credentials that grpcclient.Config adds when its own TLS is disabled.
+	opts = append(opts, grpc.WithTransportCredentials(creds))
 
 	// Use round_robin to balance requests more evenly over the available Storage server.
 	opts = append(opts, grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`))
@@ -457,11 +472,21 @@ func grpcConn(address string, metrics *clientMetrics, clientKeepaliveTime time.D
 	return grpc.NewClient(address, opts...)
 }
 
-// GrpcConn is the public constructor that can be used for testing.
+// GrpcConn is the public constructor that can be used for testing. It dials
+// without TLS, so only local addresses are accepted.
 // TODO: also use grpc_client_keepalive_time here.
 func GrpcConn(address string, reg prometheus.Registerer) (*grpc.ClientConn, error) {
+	return GrpcConnWithTLS(address, reg, options.GrpcClientTLSConfig{})
+}
+
+// GrpcConnWithTLS creates a gRPC connection to a unified storage server using tlsCfg.
+func GrpcConnWithTLS(address string, reg prometheus.Registerer, tlsCfg options.GrpcClientTLSConfig) (*grpc.ClientConn, error) {
+	creds, err := tlsCfg.TransportCredentials(address)
+	if err != nil {
+		return nil, err
+	}
 	metrics := newClientMetrics(reg)
-	return grpcConn(address, metrics, 0)
+	return grpcConn(address, metrics, 0, creds)
 }
 
 // instrument is the same as grpcclient.Instrument but without the middleware.ClientUserHeaderInterceptor

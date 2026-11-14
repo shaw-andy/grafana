@@ -13,7 +13,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	genericapiserver "k8s.io/apiserver/pkg/server"
 	"k8s.io/apiserver/pkg/server/options"
@@ -63,6 +62,7 @@ type StorageOptions struct {
 	GrpcClientAuthenticationTokenNamespace   string
 	GrpcClientAuthenticationAllowInsecure    bool
 	GrpcClientKeepaliveTime                  time.Duration
+	GrpcClientTLS                            GrpcClientTLSConfig
 
 	// Secrets Manager Configuration for InlineSecureValueSupport
 	SecretsManagerGrpcClientEnable        bool
@@ -187,6 +187,9 @@ func (o *StorageOptions) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.GrpcClientAuthenticationTokenNamespace, "grpc-client-authentication-token-namespace", o.GrpcClientAuthenticationTokenNamespace, "Token namespace for grpc client authentication")
 	fs.BoolVar(&o.GrpcClientAuthenticationAllowInsecure, "grpc-client-authentication-allow-insecure", o.GrpcClientAuthenticationAllowInsecure, "Allow insecure grpc client authentication")
 	fs.DurationVar(&o.GrpcClientKeepaliveTime, "grpc-client-keepalive-time", o.GrpcClientKeepaliveTime, "gRPC client keep-alive ping interval (e.g., 6m).")
+	fs.BoolVar(&o.GrpcClientTLS.Enabled, "grpc-client-tls-enabled", o.GrpcClientTLS.Enabled, "Use TLS for gRPC connections to the unified storage and search servers")
+	fs.StringVar(&o.GrpcClientTLS.CAFile, "grpc-client-tls-ca-file", o.GrpcClientTLS.CAFile, "PEM file of the CAs trusted to sign the unified storage and search server certificates")
+	fs.StringVar(&o.GrpcClientTLS.ServerName, "grpc-client-tls-server-name", o.GrpcClientTLS.ServerName, "Server name to verify in the unified storage and search server certificates")
 
 	// Use custom flag value for unified storage config
 	fs.Var(&unifiedStorageConfigValue{config: &o.UnifiedStorageConfig},
@@ -254,6 +257,9 @@ func (o *StorageOptions) ApplyTo(serverConfig *genericapiserver.RecommendedConfi
 		return nil
 	}
 
+	if _, err := o.GrpcClientTLS.TransportCredentials(o.Address, o.SearchServerAddress); err != nil {
+		return fmt.Errorf("unified storage gRPC client: %w", err)
+	}
 	grpcOpts := o.buildGrpcDialOptions()
 
 	conn, err := grpc.NewClient(o.Address, grpcOpts...)
@@ -318,6 +324,7 @@ func (o *StorageOptions) ApplyTo(serverConfig *genericapiserver.RecommendedConfi
 // - Round-robin load balancing with client-side health checking
 // - Retry interceptor for transient connection issues
 // - Keepalive for long-lived connections
+// - Transport security from GrpcClientTLS
 func (o *StorageOptions) buildGrpcDialOptions() []grpc.DialOption {
 	// Retry interceptor for transient connection issues (codes.Unavailable includes connection refused)
 	retryInterceptor := grpc_retry.UnaryClientInterceptor(
@@ -326,9 +333,15 @@ func (o *StorageOptions) buildGrpcDialOptions() []grpc.DialOption {
 		grpc_retry.WithCodes(codes.ResourceExhausted, codes.Unavailable, codes.Aborted),
 	)
 
+	creds, err := o.GrpcClientTLS.TransportCredentials()
+	if err != nil {
+		// ApplyTo reports this error before dialing; refuse every handshake if it is reached anyway.
+		creds = refusingCredentials{err: err}
+	}
+
 	opts := []grpc.DialOption{
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 		grpc.WithChainUnaryInterceptor(retryInterceptor),
 		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
 		grpc.WithConnectParams(grpc.ConnectParams{
