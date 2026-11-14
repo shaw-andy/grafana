@@ -28,6 +28,7 @@ jobs:
       - name: Run Relyance scan
         env:
           API_KEY: "${{ fromJSON(steps.vault-secrets.outputs.secrets).API_KEY }}"
+        # The image receives API_KEY, so it is pinned by digest: a moved tag must not change what runs.
         run: |
-          docker pull gcr.io/relyance-ext/compliance_inspector:release && \
-          docker run --rm -v ${{ github.workspace }}:/repo --env "API_KEY=${{ env.API_KEY }}" gcr.io/relyance-ext/compliance_inspector:release
+          docker pull gcr.io/relyance-ext/compliance_inspector:release_2026.1028.5@sha256:8ec3ca4904fd6cf7d2e617b7fa440a0929405515539de0aa3260876e34d8db93 && \
+          docker run --rm -v ${{ github.workspace }}:/repo --env API_KEY gcr.io/relyance-ext/compliance_inspector:release_2026.1028.5@sha256:8ec3ca4904fd6cf7d2e617b7fa440a0929405515539de0aa3260876e34d8db93
