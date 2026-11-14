@@ -28,7 +28,7 @@ import {
   type TemplateSrv,
 } from '@grafana/runtime';
 
-import { DATAPLANE_LABEL_TYPES_NAME } from './constants';
+import { DATAPLANE_LABEL_TYPES_NAME, MAX_ANNOTATION_EVENTS } from './constants';
 import { type Scenario, type TestDataDataQuery, TestDataQueryType } from './dataquery';
 import { queryMetricTree } from './metricTree';
 import { generateRandomEdges, generateRandomNodes, generateShowcaseData, savedNodesResponse } from './nodeGraphUtils';
@@ -214,12 +214,19 @@ export class TestDataDataSource
   }
 
   buildFakeAnnotationEvents(range: TimeRange, count: number): AnnotationEvent[] {
+    // Saved queries are not type checked, so `count` may be a string or an object with a custom valueOf.
+    const requested = Number(count);
+    if (!Number.isFinite(requested) || requested <= 0) {
+      return [];
+    }
+    const total = Math.min(Math.floor(requested), MAX_ANNOTATION_EVENTS);
+
     let timeWalker = range.from.valueOf();
     const to = range.to.valueOf();
     const events = [];
-    const step = (to - timeWalker) / count;
+    const step = (to - timeWalker) / total;
 
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < total; i++) {
       events.push({
         time: timeWalker,
         text: 'This is the text, <a href="https://grafana.com">Grafana.com</a>',
