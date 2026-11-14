@@ -496,7 +496,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: grafana/shared-workflows/actions/dockerhub-login@dockerhub-login/v1.0.2
+      - uses: grafana/shared-workflows/actions/dockerhub-login@c6d954f7cd9c0022018982e01268de6cb75b913c # dockerhub-login/v1.0.2
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
@@ -619,7 +619,7 @@ jobs:
           - name: windows-arm64
             arch: arm64
     steps:
-      - uses: grafana/shared-workflows/actions/dockerhub-login@dockerhub-login/v1.0.2
+      - uses: grafana/shared-workflows/actions/dockerhub-login@c6d954f7cd9c0022018982e01268de6cb75b913c # dockerhub-login/v1.0.2
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
@@ -952,7 +952,7 @@ jobs:
           name: artifacts-packages-linux-amd64
           path: dist
 
-      - uses: grafana/shared-workflows/actions/dockerhub-login@dockerhub-login/v1.0.4
+      - uses: grafana/shared-workflows/actions/dockerhub-login@ef3a62a3ca4c1a15505b4235a5a51493194da3c7 # dockerhub-login/v1.0.4
 
       - name: Set up Docker Buildx
         run: docker buildx create --use
@@ -994,7 +994,7 @@ jobs:
 
       - name: Get vault secrets
         id: vault-secrets
-        uses: grafana/shared-workflows/actions/get-vault-secrets@main
+        uses: grafana/shared-workflows/actions/get-vault-secrets@2f1ddaf3ce1aa677356243d0dd584be33cfa35e3 # get-vault-secrets/v2.1.0
         with:
           repo_secrets: |
             METICULOUS_API_TOKEN=meticulous-ui:api-token

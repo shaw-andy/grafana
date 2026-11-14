@@ -6,6 +6,8 @@ rules:
         actions/*: any
         github/*: any
         grafana/*: any
+        # These actions run in jobs that can request an OIDC token for production service accounts.
+        grafana/shared-workflows/*: hash-pin
   forbidden-uses:
     config:
       deny:
