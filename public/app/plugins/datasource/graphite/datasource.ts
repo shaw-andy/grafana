@@ -74,6 +74,56 @@ function convertGlobToRegEx(text: string): string {
   }
 }
 
+const seriesReferenceRegex = /\#([A-Z])/g;
+
+// Dense reference graphs (cyclic or not) multiply the target text at every level, so the total text substituted
+// while expanding one target is capped to keep the work bounded before any request is sent.
+const MAX_SERIES_REFERENCE_SUBSTITUTION_LENGTH = 1_000_000;
+
+/**
+ * Replaces #X series references in a target with the original text of query X, recursively.
+ * A letter already being expanded on the current path (including the target itself) is replaced with its
+ * stored text without expanding it again, so reference cycles terminate. Letters without a query are kept as-is.
+ */
+function expandSeriesReferences(
+  text: string,
+  refId: string,
+  originalTargetMap: Record<string, string>,
+  storedTargets: Record<string, string>
+): string {
+  const entered = new Set<string>([refId]);
+  let substitutedLength = 0;
+
+  function substitute(value: string): string {
+    substitutedLength += value.length;
+    if (substitutedLength > MAX_SERIES_REFERENCE_SUBSTITUTION_LENGTH) {
+      throw new Error(
+        `Series references in query ${refId} expand to more than ${MAX_SERIES_REFERENCE_SUBSTITUTION_LENGTH} characters`
+      );
+    }
+    return value;
+  }
+
+  function replacer(match: string, g1: string): string {
+    if (entered.has(g1)) {
+      return substitute(storedTargets[g1] || match);
+    }
+
+    const referencedTarget = originalTargetMap[g1];
+    if (referencedTarget === undefined) {
+      return match;
+    }
+
+    entered.add(g1);
+    const expanded = referencedTarget.replace(seriesReferenceRegex, replacer);
+    entered.delete(g1);
+
+    return substitute(expanded || match);
+  }
+
+  return text.replace(seriesReferenceRegex, replacer);
+}
+
 export class GraphiteDatasource
   extends DataSourceWithBackend<GraphiteQuery, GraphiteOptions>
   implements DataSourceWithQueryExportSupport<GraphiteQuery>
@@ -284,18 +334,6 @@ export class GraphiteDatasource
       referenceTargets[target.refId] = target.target;
     }
 
-    const seriesReferenceRegex = /\#([A-Z])/g;
-
-    function nestedSeriesRegexReplacer(match: string, g1: string) {
-      // Handle the case where a query references itself to prevent infinite recursion
-      if (target.refId === g1) {
-        return referenceTargets[g1] || match;
-      }
-
-      // Recursively replace all nested series references
-      return originalTargetMap[g1].replace(seriesReferenceRegex, nestedSeriesRegexReplacer) || match;
-    }
-
     for (i = 0; i < options.targets.length; i++) {
       const targetClone = { ...options.targets[i] };
       target = options.targets[i];
@@ -303,14 +341,14 @@ export class GraphiteDatasource
         continue;
       }
 
-      targetValue = this.templateSrv.replace(
-        referenceTargets[target.refId].replace(seriesReferenceRegex, nestedSeriesRegexReplacer),
-        options.scopedVars
+      const expandedTarget = expandSeriesReferences(
+        referenceTargets[target.refId],
+        target.refId,
+        originalTargetMap,
+        referenceTargets
       );
-      targetFullValue = this.templateSrv.replace(
-        referenceTargets[target.refId].replace(seriesReferenceRegex, nestedSeriesRegexReplacer),
-        options.scopedVars
-      );
+      targetValue = this.templateSrv.replace(expandedTarget, options.scopedVars);
+      targetFullValue = this.templateSrv.replace(expandedTarget, options.scopedVars);
 
       targetClone.target = targetValue;
       targetClone.targetFull = targetFullValue;
@@ -367,14 +405,23 @@ export class GraphiteDatasource
     }
 
     if (config.featureToggles.graphiteBackendMode) {
-      const graphiteQueries = this.backendBuildGraphiteQueries(options, originalTargetMap);
+      let graphiteQueries: GraphiteQuery[];
+      try {
+        graphiteQueries = this.backendBuildGraphiteQueries(options, originalTargetMap);
+      } catch (err) {
+        return throwError(() => err);
+      }
 
       options.targets = graphiteQueries;
 
       return super.query(options);
     }
 
-    return this.frontendQuery(options, originalTargetMap, formattedRefIdsMap);
+    try {
+      return this.frontendQuery(options, originalTargetMap, formattedRefIdsMap);
+    } catch (err) {
+      return throwError(() => err);
+    }
   }
 
   addTracingHeaders(httpOptions: BackendSrvRequest, options: Partial<DataQueryRequest<GraphiteQuery>>) {
@@ -1186,26 +1233,14 @@ export class GraphiteDatasource
       targets[target.refId] = targetValue;
     }
 
-    const regex = /\#([A-Z])/g;
-
-    function nestedSeriesRegexReplacer(match: string, g1: string) {
-      // Handle the case where a query references itself to prevent infinite recursion
-      if (target.refId === g1) {
-        return targets[g1] || match;
-      }
-
-      // Recursively replace all nested series references
-      return originalTargetMap[g1].replace(regex, nestedSeriesRegexReplacer) || match;
-    }
-
     for (i = 0; i < options.targets.length; i++) {
       target = options.targets[i];
       if (!target.target) {
         continue;
       }
 
-      targetValue = targets[target.refId];
-      targetValue = this.templateSrv.replace(targetValue.replace(regex, nestedSeriesRegexReplacer), scopedVars);
+      targetValue = expandSeriesReferences(targets[target.refId], target.refId, originalTargetMap, targets);
+      targetValue = this.templateSrv.replace(targetValue, scopedVars);
       targets[target.refId] = targetValue;
 
       if (!target.hide) {
