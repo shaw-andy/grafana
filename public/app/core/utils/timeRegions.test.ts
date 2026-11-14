@@ -377,4 +377,91 @@ describe('timeRegions', () => {
       }
     );
   });
+
+  // A stored cron is expanded once per tick for the whole dashboard range. Sub-minute
+  // expressions are rejected, and every other walk stops at 1000 ranges, so opening a
+  // dashboard cannot build one range object per second across that range.
+  describe('range limits', () => {
+    const hourStart = 1577836800000; // 2020-01-01T00:00:00.000Z
+    const minuteMs = 60_000;
+    const hourMs = 3_600_000;
+
+    const range = (fromMs: number, toMs: number): TimeRange => ({
+      from: dateTimeForTimeZone('utc', fromMs),
+      to: dateTimeForTimeZone('utc', toMs),
+      raw: { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() },
+    });
+
+    it('returns one range per hour for an hourly cron inside a six hour window', () => {
+      const ranges = calculateTimesWithin(
+        { mode: 'cron', cronExpr: '0 0 * * * *', duration: '1s', timezone: 'utc' },
+        range(hourStart, hourStart + 5 * hourMs)
+      );
+
+      expect(ranges).toEqual([
+        { from: hourStart, to: hourStart + 1000 },
+        { from: hourStart + hourMs, to: hourStart + hourMs + 1000 },
+        { from: hourStart + 2 * hourMs, to: hourStart + 2 * hourMs + 1000 },
+        { from: hourStart + 3 * hourMs, to: hourStart + 3 * hourMs + 1000 },
+        { from: hourStart + 4 * hourMs, to: hourStart + 4 * hourMs + 1000 },
+        { from: hourStart + 5 * hourMs, to: hourStart + 5 * hourMs + 1000 },
+      ]);
+    });
+
+    it('returns one range per minute for a five-field cron inside a ten minute window', () => {
+      const ranges = calculateTimesWithin(
+        { mode: 'cron', cronExpr: '* * * * *', duration: '1s', timezone: 'utc' },
+        range(hourStart, hourStart + 10 * minuteMs)
+      );
+
+      expect(ranges.map((r) => r.from)).toEqual(
+        Array.from({ length: 11 }, (_, index) => hourStart + index * minuteMs)
+      );
+    });
+
+    it('rejects a cron expression that fires every second', () => {
+      expect(() =>
+        calculateTimesWithin(
+          { mode: 'cron', cronExpr: '* * * * * *', duration: '1s', timezone: 'utc' },
+          range(hourStart, hourStart + 2 * minuteMs)
+        )
+      ).toThrow('Time region cron interval is shorter than 1 minute');
+    });
+
+    it('rejects a cron expression that fires every thirty seconds', () => {
+      expect(() =>
+        calculateTimesWithin(
+          { mode: 'cron', cronExpr: '*/30 * * * * *', duration: '1s', timezone: 'utc' },
+          range(hourStart, hourStart + 5 * minuteMs)
+        )
+      ).toThrow('Time region cron interval is shorter than 1 minute');
+    });
+
+    it('stops a once-per-minute cron after 1000 ranges', () => {
+      expect(() =>
+        calculateTimesWithin(
+          { mode: 'cron', cronExpr: '0 * * * * *', duration: '1s', timezone: 'utc' },
+          range(hourStart, hourStart + 24 * hourMs)
+        )
+      ).toThrow('Time region query exceeds the maximum of 1000 ranges');
+    });
+
+    it('stops a five-field every-minute cron after 1000 ranges', () => {
+      expect(() =>
+        calculateTimesWithin(
+          { mode: 'cron', cronExpr: '* * * * *', duration: '1s', timezone: 'utc' },
+          range(hourStart, hourStart + 24 * hourMs)
+        )
+      ).toThrow('Time region query exceeds the maximum of 1000 ranges');
+    });
+
+    it('stops an every-day region after 1000 ranges', () => {
+      const fromMs = hourStart;
+      const toMs = Date.parse('2023-01-15T00:00:00.000Z');
+
+      expect(() =>
+        calculateTimesWithin({ from: '00:00', timezone: 'utc' }, range(fromMs, toMs))
+      ).toThrow('Time region query exceeds the maximum of 1000 ranges');
+    });
+  });
 });
