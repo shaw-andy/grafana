@@ -2,6 +2,7 @@ package setting
 
 import (
 	"bufio"
+	"net/netip"
 	"net/url"
 	"os"
 	"path"
@@ -460,6 +461,25 @@ func TestParseAppURLAndSubURL(t *testing.T) {
 		require.Equal(t, tc.expectedAppURL, cfg.AppURL)
 		require.Equal(t, tc.expectedAppSubURL, cfg.AppSubURL)
 	}
+}
+
+func TestDataSourceSecurityTrustedProxies(t *testing.T) {
+	f := ini.Empty()
+	sec, err := f.NewSection("datasources.ip_range_security")
+	require.NoError(t, err)
+	_, err = sec.NewKey("trusted_proxies", "10.0.0.0/8, 192.168.1.7, ::ffff:172.16.0.1, 2001:db8::1/64, not-an-ip")
+	require.NoError(t, err)
+
+	cfg := NewCfg()
+	cfg.Raw = f
+	cfg.readDataSourceSecuritySettings()
+
+	require.Equal(t, []netip.Prefix{
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("192.168.1.7/32"),
+		netip.MustParsePrefix("172.16.0.1/32"),
+		netip.MustParsePrefix("2001:db8::/64"),
+	}, cfg.IPRangeACTrustedProxies)
 }
 
 func TestAuthDurationSettings(t *testing.T) {

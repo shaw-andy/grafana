@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path"
@@ -458,6 +459,9 @@ type Cfg struct {
 	IPRangeACEnabled     bool
 	IPRangeACAllowedURLs []*url.URL
 	IPRangeACSecretKey   string
+	// Proxies in front of Grafana whose X-Forwarded-For entries are trusted when
+	// determining the client address reported for IP range access control.
+	IPRangeACTrustedProxies []netip.Prefix
 
 	// SQL Data sources
 	SqlDatasourceMaxOpenConnsDefault    int
@@ -2494,6 +2498,31 @@ func (cfg *Cfg) readDataSourceSecuritySettings() {
 			cfg.IPRangeACAllowedURLs = append(cfg.IPRangeACAllowedURLs, allowedURL)
 		}
 	}
+	for _, s := range util.SplitString(datasources.Key("trusted_proxies").MustString("")) {
+		prefix, err := parseIPPrefix(s)
+		if err != nil {
+			cfg.Logger.Error("Error parsing trusted proxy for IP range access control", "value", s, "error", err)
+			continue
+		}
+		cfg.IPRangeACTrustedProxies = append(cfg.IPRangeACTrustedProxies, prefix)
+	}
+}
+
+// parseIPPrefix parses a CIDR range or a single IP address.
+func parseIPPrefix(s string) (netip.Prefix, error) {
+	if strings.Contains(s, "/") {
+		prefix, err := netip.ParsePrefix(s)
+		if err != nil {
+			return netip.Prefix{}, err
+		}
+		return prefix.Masked(), nil
+	}
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		return netip.Prefix{}, err
+	}
+	addr = addr.WithZone("").Unmap()
+	return netip.PrefixFrom(addr, addr.BitLen()), nil
 }
 
 func (cfg *Cfg) readSqlDataSourceSettings() {
