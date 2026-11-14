@@ -2,6 +2,7 @@ import { type FormEvent } from 'react';
 
 import { InlineField, InlineFieldRow, Input } from '@grafana/ui';
 
+import { MAX_SERIES_COUNT } from '../randomWalk';
 import { type GrafanaQuery } from '../types';
 
 interface RandomWalkEditorProps {
@@ -27,8 +28,9 @@ const coreFields: FieldConfig[] = [
     id: 'seriesCount',
     placeholder: '1',
     min: 1,
+    max: MAX_SERIES_COUNT,
     step: 1,
-    tooltip: 'Number of series to generate',
+    tooltip: `Number of series to generate (up to ${MAX_SERIES_COUNT})`,
   },
   {
     label: 'Start value',
@@ -70,12 +72,20 @@ const advancedFields: FieldConfig[] = [
   },
 ];
 
+const fieldMaxById = new Map<string, number | undefined>(
+  [...coreFields, ...advancedFields].map((field) => [field.id, field.max])
+);
+
 const labelWidth = 16;
 
 export const RandomWalkEditor = ({ query, onChange, onRunQuery }: RandomWalkEditorProps) => {
   const onInputChange = (e: FormEvent<HTMLInputElement>) => {
     const { name, value } = e.currentTarget;
-    const numValue = value === '' ? undefined : parseFloat(value);
+    const max = fieldMaxById.get(name);
+    let numValue = value === '' ? undefined : parseFloat(value);
+    if (numValue !== undefined && max !== undefined && numValue > max) {
+      numValue = max;
+    }
 
     onChange({
       ...query,
