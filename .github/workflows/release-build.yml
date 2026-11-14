@@ -701,7 +701,7 @@ jobs:
           - target: windows-arm64
           - target: darwin-amd64
           - target: darwin-arm64
-    uses: grafana/grafana/.github/workflows/publish-artifact.yml@main
+    uses: ./.github/workflows/publish-artifact.yml
     permissions:
       id-token: write
     needs:
@@ -729,7 +729,7 @@ jobs:
           # riscv64 is not an officially supported architecture; failures are allowed.
           - target: linux-riscv64
             allow-failure: true
-    uses: grafana/grafana/.github/workflows/publish-artifact.yml@main
+    uses: ./.github/workflows/publish-artifact.yml
     permissions:
       id-token: write
     needs:
@@ -753,7 +753,7 @@ jobs:
           - target: linux-arm64
           - target: linux-s390x
           - target: linux-armv7
-    uses: grafana/grafana/.github/workflows/publish-artifact.yml@main
+    uses: ./.github/workflows/publish-artifact.yml
     permissions:
       id-token: write
     needs:
@@ -780,7 +780,7 @@ jobs:
           - target: linux-arm64
           - target: linux-s390x
           - target: linux-armv7
-    uses: grafana/grafana/.github/workflows/publish-artifact.yml@main
+    uses: ./.github/workflows/publish-artifact.yml
     permissions:
       id-token: write
     needs:
@@ -807,7 +807,7 @@ jobs:
           - target: linux-arm64
           - target: linux-s390x
           - target: linux-armv7
-    uses: grafana/grafana/.github/workflows/publish-artifact.yml@main
+    uses: ./.github/workflows/publish-artifact.yml
     permissions:
       id-token: write
     needs:
@@ -834,7 +834,7 @@ jobs:
           - target: linux-arm64
           - target: linux-s390x
           - target: linux-armv7
-    uses: grafana/grafana/.github/workflows/publish-artifact.yml@main
+    uses: ./.github/workflows/publish-artifact.yml
     permissions:
       id-token: write
     needs:
@@ -861,7 +861,7 @@ jobs:
           - target: linux-arm64
           - target: linux-s390x
           - target: linux-armv7
-    uses: grafana/grafana/.github/workflows/publish-artifact.yml@main
+    uses: ./.github/workflows/publish-artifact.yml
     permissions:
       id-token: write
     needs:
@@ -888,7 +888,7 @@ jobs:
           - target: linux-arm64
           - target: linux-s390x
           - target: linux-armv7
-    uses: grafana/grafana/.github/workflows/publish-artifact.yml@main
+    uses: ./.github/workflows/publish-artifact.yml
     permissions:
       id-token: write
     needs:
@@ -913,7 +913,7 @@ jobs:
         include:
           - target: windows-amd64
           - target: windows-arm64
-    uses: grafana/grafana/.github/workflows/publish-artifact.yml@main
+    uses: ./.github/workflows/publish-artifact.yml
     permissions:
       id-token: write
     needs:
