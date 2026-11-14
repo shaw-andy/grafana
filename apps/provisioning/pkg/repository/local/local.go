@@ -14,9 +14,9 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -91,6 +91,10 @@ type localRepository struct {
 	// validated path that can be read if not empty
 	path     string
 	maxBytes atomic.Int64
+
+	// identity of the repository directory when the repository was built, nil
+	// if it did not exist yet
+	rootInfo fs.FileInfo
 }
 
 func NewRepository(config *provisioning.Repository, resolver *LocalFolderResolver, metrics *repository.OperationMetrics) *localRepository {
@@ -109,9 +113,147 @@ func NewRepository(config *provisioning.Repository, resolver *LocalFolderResolve
 		for i, permitted := range r.resolver.PermittedPrefixes {
 			r.resolver.PermittedPrefixes[i] = safepath.Clean(permitted)
 		}
+
+		if root, err := r.openRoot(false); err == nil {
+			r.rootInfo, _ = root.Stat(".")
+			_ = root.Close()
+		}
 	}
 
 	return r
+}
+
+// rootLocation splits the repository path into the permitted prefix directory
+// that contains it and the repository path relative to that directory.
+func (r *localRepository) rootLocation() (anchor string, rel string, err error) {
+	repoPath := safepath.Clean(r.path)
+	if r.resolver == nil || repoPath == "" {
+		return "", "", &InvalidLocalFolderError{r.path, "no repository path is configured"}
+	}
+
+	for _, permitted := range r.resolver.PermittedPrefixes {
+		permitted = safepath.Clean(permitted)
+		if !safepath.InDir(repoPath, permitted) {
+			continue
+		}
+
+		switch {
+		case permitted == "" && safepath.IsAbs(repoPath):
+			anchor = "/"
+		case permitted == "":
+			anchor = "."
+		case repoPath == permitted || strings.HasPrefix(repoPath, permitted+"/"):
+			anchor = permitted
+		default:
+			// The prefix ends inside a path element, so anchor at its parent.
+			anchor = path.Dir(permitted)
+		}
+
+		switch {
+		case repoPath == anchor:
+			rel = "."
+		case anchor == ".":
+			rel = repoPath
+		default:
+			rel = strings.TrimPrefix(strings.TrimPrefix(repoPath, anchor), "/")
+		}
+		return anchor, rel, nil
+	}
+
+	return "", "", &InvalidLocalFolderError{r.path, "the path matches no permitted prefix"}
+}
+
+// openRoot opens the repository directory beneath the permitted prefix that
+// contains it. All file access must go through the returned root: it resolves
+// every path, including symlink targets, without leaving the directory, so a
+// symlink placed in the repository cannot reach files outside of it.
+func (r *localRepository) openRoot(create bool) (*os.Root, error) {
+	anchor, rel, err := r.rootLocation()
+	if err != nil {
+		return nil, err
+	}
+
+	if create {
+		if err := os.MkdirAll(anchor, 0700); err != nil {
+			return nil, fmt.Errorf("create permitted path: %w", err)
+		}
+	}
+	prefix, err := os.OpenRoot(anchor)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = prefix.Close() }()
+
+	if create {
+		if err := prefix.MkdirAll(rel, 0700); err != nil {
+			return nil, fmt.Errorf("create repository path: %w", err)
+		}
+	}
+	root, err := prefix.OpenRoot(rel)
+	if err != nil {
+		return nil, err
+	}
+
+	if r.rootInfo != nil {
+		info, err := root.Stat(".")
+		if err != nil {
+			_ = root.Close()
+			return nil, fmt.Errorf("stat repository path: %w", err)
+		}
+		if !os.SameFile(r.rootInfo, info) {
+			_ = root.Close()
+			return nil, apierrors.NewConflict(schema.GroupResource{}, r.path, errors.New("the repository path was replaced"))
+		}
+	}
+
+	return root, nil
+}
+
+// openInRoot opens name inside root without blocking on FIFOs or devices, so
+// that callers can check the file type of what was opened before using it.
+func openInRoot(root *os.Root, name string, flag int, perm os.FileMode) (*os.File, fs.FileInfo, error) {
+	f, err := root.OpenFile(name, flag|openNonBlocking, perm)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, err
+	}
+	return f, info, nil
+}
+
+func notRegularFileError(p string) error {
+	return apierrors.NewBadRequest(fmt.Sprintf("the path '%s' is not a regular file", p))
+}
+
+// writeRegularFile writes data to name inside root, refusing anything that is
+// not a regular file once opened.
+func writeRegularFile(root *os.Root, name, displayPath string, data []byte, flag int) error {
+	f, info, err := openInRoot(root, name, os.O_WRONLY|flag, 0600)
+	if errors.Is(err, syscall.EISDIR) {
+		return apierrors.NewBadRequest("path exists but it is a directory")
+	} else if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		_ = f.Close()
+		return apierrors.NewBadRequest("path exists but it is a directory")
+	}
+	if !info.Mode().IsRegular() {
+		_ = f.Close()
+		return notRegularFileError(displayPath)
+	}
+	if err := f.Truncate(0); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func (r *localRepository) Config() *provisioning.Repository {
@@ -151,25 +293,22 @@ func (r *localRepository) validateRequest(ref string) error {
 	return nil
 }
 
-// resolvePath joins the repository root with a relative path and ensures the
-// result stays within the root. It blocks path traversal (e.g. "../") that can
-// be introduced by unsanitized resource or folder titles during export.
+// resolvePath converts a repository path into a name relative to the
+// repository root, for use with the root returned by openRoot. It blocks path
+// traversal (e.g. "../") that can be introduced by unsanitized resource or
+// folder titles during export. Symlinks are handled by the root itself.
 func (r *localRepository) resolvePath(p string) (string, error) {
 	// Normalize OS-specific separators and collapse the path first, so a
 	// Windows-style traversal like "..\..\etc" is resolved here instead of
-	// surviving the join and being interpreted by the filesystem. safepath.Clean
-	// drops the trailing slash, so restore the directory marker that Create and
-	// Write rely on to choose between MkdirAll and WriteFile.
-	clean := safepath.Clean(p)
-	if clean != "" && safepath.IsDir(p) {
-		clean += "/"
-	}
-
-	full := safepath.Join(r.path, clean)
-	if !safepath.InDir(safepath.EnsureTrailingSlash(full), safepath.EnsureTrailingSlash(r.path)) {
+	// being interpreted by the filesystem.
+	clean := strings.TrimPrefix(safepath.Clean(p), "/")
+	if clean == ".." || strings.HasPrefix(clean, "../") {
 		return "", apierrors.NewBadRequest(fmt.Sprintf("the path '%s' escapes the repository root", p))
 	}
-	return full, nil
+	if clean == "" {
+		return ".", nil
+	}
+	return clean, nil
 }
 
 // ReadResource implements provisioning.Repository.
@@ -181,13 +320,25 @@ func (r *localRepository) Read(ctx context.Context, filePath string, ref string)
 		return nil, err
 	}
 
-	actualPath := safepath.Join(r.path, filePath)
-	info, err := os.Stat(actualPath)
-	if errors.Is(err, os.ErrNotExist) {
+	name, err := r.resolvePath(filePath)
+	if err != nil {
+		return nil, err
+	}
+	root, err := r.openRoot(false)
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, repository.ErrFileNotFound
 	} else if err != nil {
-		return nil, fmt.Errorf("stat file: %w", err)
+		return nil, err
 	}
+	defer func() { _ = root.Close() }()
+
+	f, info, err := openInRoot(root, name, os.O_RDONLY, 0)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, repository.ErrFileNotFound
+	} else if err != nil {
+		return nil, fmt.Errorf("open file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
 
 	if info.IsDir() {
 		return &repository.FileInfo{
@@ -198,27 +349,39 @@ func (r *localRepository) Read(ctx context.Context, filePath string, ref string)
 		}, nil
 	}
 
-	if max := r.maxBytes.Load(); max > 0 && info.Size() > max {
+	if !info.Mode().IsRegular() {
+		return nil, notRegularFileError(filePath)
+	}
+
+	max := r.maxBytes.Load()
+	if max > 0 && info.Size() > max {
 		return nil, apierrors.NewRequestEntityTooLargeError(
 			fmt.Sprintf("file %q is %d bytes; max allowed is %d bytes", filePath, info.Size(), max),
 		)
 	}
 
-	//nolint:gosec
-	data, err := os.ReadFile(actualPath)
+	var reader io.Reader = f
+	if max > 0 {
+		// The file can grow after it was checked.
+		reader = io.LimitReader(f, max+1)
+	}
+	data, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
-
-	hash, _, err := r.calculateFileHash(actualPath)
-	if err != nil {
-		return nil, fmt.Errorf("calculate hash of file: %w", err)
+	if max > 0 && int64(len(data)) > max {
+		return nil, apierrors.NewRequestEntityTooLargeError(
+			fmt.Sprintf("file %q is larger than the max allowed %d bytes", filePath, max),
+		)
 	}
+
+	//nolint:gosec
+	sum := sha1.Sum(data)
 
 	return &repository.FileInfo{
 		Path: filePath,
 		Data: data,
-		Hash: hash,
+		Hash: hex.EncodeToString(sum[:]),
 		Modified: &metav1.Time{
 			Time: info.ModTime(),
 		},
@@ -239,53 +402,60 @@ func (r *localRepository) ReadTree(ctx context.Context, ref string) (tree []repo
 	}
 
 	// Return an empty list when folder does not exist
-	_, err = os.Stat(r.path)
+	root, err := r.openRoot(false)
 	if errors.Is(err, fs.ErrNotExist) {
 		return []repository.FileTreeEntry{}, nil
+	} else if err != nil {
+		return nil, err
 	}
+	defer func() { _ = root.Close() }()
 
-	rootlen := len(r.path)
 	entries := make([]repository.FileTreeEntry, 0, 100)
-	err = filepath.Walk(r.path, func(path string, info fs.FileInfo, err error) error {
+	err = fs.WalkDir(root.FS(), ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		entry := repository.FileTreeEntry{
-			Path: strings.TrimLeft(path[rootlen:], "/"),
-			Size: info.Size(),
-		}
-		if entry.Path == "" {
+		if path == "." {
 			return nil // skip the root file
 		}
 
-		if !info.IsDir() {
-			entry.Blob = true
-			entry.Hash, _, err = r.calculateFileHash(path)
+		if d.IsDir() {
+			info, err := d.Info()
 			if err != nil {
-				return fmt.Errorf("read and calculate hash of path %s: %w", path, err)
+				return err
 			}
-		} else if !strings.HasSuffix(entry.Path, "/") {
-			// ensure trailing slash for directories
-			entry.Path = entry.Path + "/"
+			entries = append(entries, repository.FileTreeEntry{
+				// ensure trailing slash for directories
+				Path: path + "/",
+				Size: info.Size(),
+			})
+			return nil
 		}
-		entries = append(entries, entry)
-		return err
+
+		hash, size, err := calculateFileHash(root, path)
+		if err != nil {
+			return fmt.Errorf("read and calculate hash of path %s: %w", path, err)
+		}
+		entries = append(entries, repository.FileTreeEntry{
+			Path: path,
+			Size: size,
+			Hash: hash,
+			Blob: true,
+		})
+		return nil
 	})
 
 	return entries, err
 }
 
-func (r *localRepository) calculateFileHash(path string) (string, int64, error) {
-	// Treats https://securego.io/docs/rules/g304.html
-	if !safepath.InDir(path, r.path) {
-		return "", 0, repository.ErrFileNotFound
-	}
-
-	// We've already made sure the path is safe, so we'll ignore the gosec lint.
-	//nolint:gosec
-	file, err := os.OpenFile(path, os.O_RDONLY, 0)
+func calculateFileHash(root *os.Root, name string) (string, int64, error) {
+	file, info, err := openInRoot(root, name, os.O_RDONLY, 0)
 	if err != nil {
 		return "", 0, fmt.Errorf("open file: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+	if !info.Mode().IsRegular() {
+		return "", 0, notRegularFileError(name)
 	}
 
 	// TODO: Define what hashing algorithm we want to use for the entire repository. Maybe a config option?
@@ -307,35 +477,45 @@ func (r *localRepository) Create(ctx context.Context, filepath string, ref strin
 		return err
 	}
 
-	fpath, err := r.resolvePath(filepath)
+	name, err := r.resolvePath(filepath)
 	if err != nil {
 		return err
 	}
-	_, err = os.Stat(fpath)
-	if !errors.Is(err, os.ErrNotExist) {
+	root, err := r.openRoot(true)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+
+	_, err = root.Lstat(name)
+	if !errors.Is(err, fs.ErrNotExist) {
 		if err != nil {
 			return apierrors.NewInternalError(fmt.Errorf("failed to check if file exists: %w", err))
 		}
 		return apierrors.NewAlreadyExists(schema.GroupResource{}, filepath)
 	}
 
-	if safepath.IsDir(fpath) {
+	if safepath.IsDir(filepath) {
 		if data != nil {
 			return apierrors.NewBadRequest("data cannot be provided for a directory")
 		}
 
-		if err := os.MkdirAll(fpath, 0700); err != nil {
+		if err := root.MkdirAll(name, 0700); err != nil {
 			return apierrors.NewInternalError(fmt.Errorf("failed to create path: %w", err))
 		}
 
 		return nil
 	}
 
-	if err := os.MkdirAll(path.Dir(fpath), 0700); err != nil {
+	if err := root.MkdirAll(path.Dir(name), 0700); err != nil {
 		return apierrors.NewInternalError(fmt.Errorf("failed to create path: %w", err))
 	}
 
-	return os.WriteFile(fpath, data, 0600)
+	err = writeRegularFile(root, name, filepath, data, os.O_CREATE|os.O_EXCL)
+	if errors.Is(err, fs.ErrExist) {
+		return apierrors.NewAlreadyExists(schema.GroupResource{}, filepath)
+	}
+	return err
 }
 
 func (r *localRepository) Update(ctx context.Context, path string, ref string, data []byte, comment string) (err error) {
@@ -346,7 +526,7 @@ func (r *localRepository) Update(ctx context.Context, path string, ref string, d
 		return err
 	}
 
-	path, err = r.resolvePath(path)
+	name, err := r.resolvePath(path)
 	if err != nil {
 		return err
 	}
@@ -354,15 +534,19 @@ func (r *localRepository) Update(ctx context.Context, path string, ref string, d
 		return apierrors.NewBadRequest("cannot update a directory")
 	}
 
-	f, err := os.Stat(path)
-	if err != nil && errors.Is(err, os.ErrNotExist) {
+	root, err := r.openRoot(false)
+	if errors.Is(err, fs.ErrNotExist) {
+		return repository.ErrFileNotFound
+	} else if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+
+	err = writeRegularFile(root, name, path, data, 0)
+	if errors.Is(err, fs.ErrNotExist) {
 		return repository.ErrFileNotFound
 	}
-	if f.IsDir() {
-		return apierrors.NewBadRequest("path exists but it is a directory")
-	}
-
-	return os.WriteFile(path, data, 0600)
+	return err
 }
 
 func (r *localRepository) Write(ctx context.Context, fpath, ref string, data []byte, comment string) (err error) {
@@ -373,19 +557,25 @@ func (r *localRepository) Write(ctx context.Context, fpath, ref string, data []b
 		return err
 	}
 
-	fpath, err = r.resolvePath(fpath)
+	name, err := r.resolvePath(fpath)
 	if err != nil {
 		return err
 	}
+	root, err := r.openRoot(true)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+
 	if safepath.IsDir(fpath) {
-		return os.MkdirAll(fpath, 0700)
+		return root.MkdirAll(name, 0700)
 	}
 
-	if err := os.MkdirAll(path.Dir(fpath), 0700); err != nil {
+	if err := root.MkdirAll(path.Dir(name), 0700); err != nil {
 		return apierrors.NewInternalError(fmt.Errorf("failed to create path: %w", err))
 	}
 
-	return os.WriteFile(fpath, data, 0600)
+	return writeRegularFile(root, name, fpath, data, os.O_CREATE)
 }
 
 func (r *localRepository) Delete(ctx context.Context, path string, ref string, comment string) (err error) {
@@ -396,16 +586,26 @@ func (r *localRepository) Delete(ctx context.Context, path string, ref string, c
 		return err
 	}
 
-	fullPath, err := r.resolvePath(path)
+	name, err := r.resolvePath(path)
 	if err != nil {
 		return err
 	}
+	root, err := r.openRoot(false)
+	if errors.Is(err, fs.ErrNotExist) {
+		return repository.ErrFileNotFound
+	} else if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
 
-	if safepath.IsDir(path) {
+	switch {
+	case safepath.IsDir(path) && name == ".":
+		err = removeContents(root)
+	case safepath.IsDir(path):
 		// if it is a folder, delete all of its contents
-		err = os.RemoveAll(fullPath)
-	} else {
-		err = os.Remove(fullPath)
+		err = root.RemoveAll(name)
+	default:
+		err = root.Remove(name)
 	}
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -425,25 +625,32 @@ func (r *localRepository) Move(ctx context.Context, oldPath, newPath, ref, comme
 		return err
 	}
 
-	oldFullPath, err := r.resolvePath(oldPath)
+	oldName, err := r.resolvePath(oldPath)
 	if err != nil {
 		return err
 	}
-	newFullPath, err := r.resolvePath(newPath)
+	newName, err := r.resolvePath(newPath)
 	if err != nil {
 		return err
 	}
+	root, err := r.openRoot(false)
+	if errors.Is(err, fs.ErrNotExist) {
+		return repository.ErrFileNotFound
+	} else if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
 
 	// Check if source exists
-	sourceInfo, err := os.Stat(oldFullPath)
-	if errors.Is(err, os.ErrNotExist) {
+	sourceInfo, err := root.Stat(oldName)
+	if errors.Is(err, fs.ErrNotExist) {
 		return repository.ErrFileNotFound
 	} else if err != nil {
 		return fmt.Errorf("check source: %w", err)
 	}
 
 	// Check if destination already exists
-	if _, err := os.Stat(newFullPath); !errors.Is(err, os.ErrNotExist) {
+	if _, err := root.Lstat(newName); !errors.Is(err, fs.ErrNotExist) {
 		if err != nil {
 			return fmt.Errorf("check destination: %w", err)
 		}
@@ -458,30 +665,32 @@ func (r *localRepository) Move(ctx context.Context, oldPath, newPath, ref, comme
 		return apierrors.NewBadRequest("cannot move between file and directory types")
 	}
 
-	// Create destination directory if needed
-	if !sourceIsDir {
-		// For file moves, create the directory containing the file
-		destParent := path.Dir(newFullPath)
-		if err := os.MkdirAll(destParent, 0700); err != nil {
+	// Create the parent directory of the destination, but not the destination
+	// itself (Rename will create it)
+	if destParent := path.Dir(newName); destParent != "." {
+		if err := root.MkdirAll(destParent, 0700); err != nil {
 			return fmt.Errorf("create destination directory: %w", err)
-		}
-	} else {
-		// For directory moves, create the parent directory of the destination
-		// but not the destination directory itself (os.Rename will create it)
-		// We need to be careful with trailing slashes in directory paths
-		cleanNewPath := strings.TrimSuffix(newFullPath, "/")
-		destParent := path.Dir(cleanNewPath)
-		if destParent != "." && destParent != "/" && destParent != r.path {
-			if err := os.MkdirAll(destParent, 0700); err != nil {
-				return fmt.Errorf("create destination parent directory: %w", err)
-			}
 		}
 	}
 
 	// Move the file or directory
-	if err := os.Rename(oldFullPath, newFullPath); err != nil {
+	if err := root.Rename(oldName, newName); err != nil {
 		return fmt.Errorf("move: %w", err)
 	}
 
+	return nil
+}
+
+// removeContents deletes everything inside root while keeping root itself.
+func removeContents(root *os.Root) error {
+	entries, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := root.RemoveAll(entry.Name()); err != nil {
+			return err
+		}
+	}
 	return nil
 }
