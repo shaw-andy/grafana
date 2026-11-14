@@ -21,7 +21,13 @@ import { RawFrameEditor } from './components/RawFrameEditor';
 import { SimulationQueryEditor } from './components/SimulationQueryEditor';
 import { StreamingClientEditor } from './components/StreamingClientEditor';
 import { USAQueryEditor, usaQueryModes } from './components/USAQueryEditor';
-import { defaultCSVWaveQuery, defaultExemplarLabels, defaultPulseQuery, defaultQuery } from './constants';
+import {
+  defaultCSVWaveQuery,
+  defaultExemplarLabels,
+  defaultPulseQuery,
+  defaultQuery,
+  MAX_TRACE_SPAN_COUNT,
+} from './constants';
 import {
   type CSVWave,
   type ExemplarLabel,
@@ -170,6 +176,11 @@ export const QueryEditor = ({ query, datasource, onChange, onRunQuery }: Props) 
     }
 
     onUpdate({ ...query, [name]: newValue });
+  };
+
+  const onSpanCountChange = (e: FormEvent<HTMLInputElement>) => {
+    const spanCount = Number(e.currentTarget.value);
+    onUpdate({ ...query, spanCount: Math.min(spanCount, MAX_TRACE_SPAN_COUNT) });
   };
 
   const onFieldChange = (field: string) => (e: { target: { name: string; value: string; type: string } }) => {
@@ -413,7 +424,8 @@ export const QueryEditor = ({ query, datasource, onChange, onRunQuery }: Props) 
             name="spanCount"
             value={query.spanCount}
             width={32}
-            onChange={onInputChange}
+            max={MAX_TRACE_SPAN_COUNT}
+            onChange={onSpanCountChange}
             placeholder="10"
           />
         </InlineField>

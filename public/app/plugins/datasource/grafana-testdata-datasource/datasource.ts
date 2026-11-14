@@ -28,7 +28,7 @@ import {
   type TemplateSrv,
 } from '@grafana/runtime';
 
-import { DATAPLANE_LABEL_TYPES_NAME } from './constants';
+import { DATAPLANE_LABEL_TYPES_NAME, DEFAULT_TRACE_SPAN_COUNT, MAX_TRACE_SPAN_COUNT } from './constants';
 import { type Scenario, type TestDataDataQuery, TestDataQueryType } from './dataquery';
 import { queryMetricTree } from './metricTree';
 import { generateRandomEdges, generateRandomNodes, generateShowcaseData, savedNodesResponse } from './nodeGraphUtils';
@@ -131,7 +131,7 @@ export class TestDataDataSource
           streams.push(this.stepsQuery(target));
           break;
         case 'trace':
-          streams.push(this.trace(options));
+          streams.push(this.trace(target));
           break;
         case 'raw_frame':
           streams.push(this.rawFrameQuery(target, options));
@@ -300,7 +300,7 @@ export class TestDataDataSource
     return of({ data: [{ ...data, refId: target.refId }] }).pipe(delay(100));
   }
 
-  trace(options: DataQueryRequest<TestDataDataQuery>): Observable<DataQueryResponse> {
+  trace(target: TestDataDataQuery): Observable<DataQueryResponse> {
     const frame = new MutableDataFrame({
       meta: {
         preferredVisualisationType: 'trace',
@@ -323,7 +323,7 @@ export class TestDataDataSource
         { name: 'stackTraces' },
       ],
     });
-    const numberOfSpans = options.targets[0].spanCount || 10;
+    const numberOfSpans = getTraceSpanCount(target.spanCount);
     const spanIdPrefix = '75c665dfb68';
     const start = Date.now() - 1000 * 60 * 30;
     const kinds = ['client', 'server', ''];
@@ -483,6 +483,15 @@ export class TestDataDataSource
 
     return null;
   }
+}
+
+// spanCount comes from the saved dashboard JSON, so it may not be a number at all.
+export function getTraceSpanCount(spanCount: unknown): number {
+  const count = Math.floor(Number(spanCount));
+  if (!Number.isFinite(count) || count < 1) {
+    return DEFAULT_TRACE_SPAN_COUNT;
+  }
+  return Math.min(count, MAX_TRACE_SPAN_COUNT);
 }
 
 function runGrafanaAPI(
