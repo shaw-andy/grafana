@@ -131,6 +131,37 @@ describe('Test Datasource Query Editor', () => {
     expect(screen.getByRole('button', { name: 'Add exemplar label' })).toBeInTheDocument();
   });
 
+  it('caps the annotations count input at 10000', async () => {
+    setup({
+      query: {
+        ...defaultQuery,
+        scenarioId: TestDataQueryType.Annotations,
+        lines: 10,
+      },
+    });
+
+    const count = await screen.findByRole('spinbutton', { name: 'Count' });
+    expect(count).toHaveAttribute('max', '10000');
+    expect(count).toHaveValue(10);
+  });
+
+  it('stores at most 10000 when the annotations count is set higher', async () => {
+    setup({
+      query: {
+        ...defaultQuery,
+        scenarioId: TestDataQueryType.Annotations,
+        lines: 10,
+      },
+    });
+
+    const count = await screen.findByRole('spinbutton', { name: 'Count' });
+    fireEvent.change(count, { target: { value: '25000' } });
+
+    expect(mockOnChange).toHaveBeenCalledWith(
+      expect.objectContaining({ lines: 10000, scenarioId: TestDataQueryType.Annotations })
+    );
+  });
+
   it('persists the datasource from the query when switching scenario', async () => {
     const mockDatasource = {
       type: 'test',
