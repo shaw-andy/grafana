@@ -13,16 +13,31 @@ jobs:
       contents: read
       id-token: write
     steps:
+      # These are the steps of grafana/grafana-github-actions/crowdin-create-tasks. That action checks out
+      # the default branch of grafana-github-actions at run time regardless of the ref it is used at, so the
+      # script that receives the Crowdin token is checked out here at a fixed commit instead.
+      - name: Checkout grafana-github-actions
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: grafana/grafana-github-actions
+          ref: af3213823a725b60b60947211de51d0fa3959391
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: '.nvmrc'
+      - name: Yarn install
+        run: yarn install --immutable --check-cache
       - name: 'Get vault secrets'
         id: vault-secrets
-        uses: grafana/shared-workflows/actions/get-vault-secrets@main
+        uses: grafana/shared-workflows/actions/get-vault-secrets@2f1ddaf3ce1aa677356243d0dd584be33cfa35e3 # get-vault-secrets/v2.1.0
         with:
             # Vault secret paths:
             # - ci/repo/grafana/grafana/grafana-frontend-crowdin-token
             repo_secrets: |
                 CROWDIN_TOKEN=grafana-frontend-crowdin-token:access_token
       - name: Create tasks in Crowdin
-        uses: grafana/grafana-github-actions/crowdin-create-tasks@main
-        with:
-          crowdin_token: ${{ fromJSON(steps.vault-secrets.outputs.secrets).CROWDIN_TOKEN }}
-          crowdin_project_id: 5
+        env:
+          CROWDIN_PROJECT_ID: 5
+          CROWDIN_PERSONAL_TOKEN: ${{ fromJSON(steps.vault-secrets.outputs.secrets).CROWDIN_TOKEN }}
+        run: node --experimental-strip-types ./crowdin-create-tasks/create-tasks.ts
