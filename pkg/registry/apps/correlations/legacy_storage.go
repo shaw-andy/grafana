@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -32,6 +33,7 @@ type legacyStorage struct {
 	service        correlations.Service
 	namespacer     request.NamespaceMapper
 	tableConverter rest.TableConvertor
+	access         *correlationAccess
 }
 
 func (s *legacyStorage) New() runtime.Object {
@@ -121,6 +123,7 @@ func (s *legacyStorage) List(ctx context.Context, options *internalversion.ListO
 		Items: make([]correlationsV0.Correlation, 0, len(rsp.Correlations)),
 	}
 
+	readable := make(map[string]bool)
 	for i, orig := range rsp.Correlations {
 		if i >= int(limit) {
 			remaining := rsp.TotalCount - (page * limit) - int64(len(list.Items))
@@ -130,6 +133,19 @@ func (s *legacyStorage) List(ctx context.Context, options *internalversion.ListO
 
 			list.Continue = encodeContinueToken(page+1, limit)
 			break
+		}
+
+		canRead, checked := readable[orig.SourceUID]
+		if !checked {
+			err := s.access.checkRead(ctx, orgID, orig.UID, orig.SourceUID)
+			if err != nil && !apierrors.IsForbidden(err) {
+				return nil, err
+			}
+			canRead = err == nil
+			readable[orig.SourceUID] = canRead
+		}
+		if !canRead {
+			continue
 		}
 
 		c, err := correlations.ToResource(orig)
@@ -153,7 +169,21 @@ func (s *legacyStorage) Get(ctx context.Context, name string, options *metav1.Ge
 	if err != nil {
 		return nil, err
 	}
+	if err := s.access.checkRead(ctx, orgID, name, c.SourceUID); err != nil {
+		return nil, err
+	}
 
+	return correlations.ToResource(c)
+}
+
+func (s *legacyStorage) getResource(ctx context.Context, orgID int64, name string) (runtime.Object, error) {
+	c, err := s.service.GetCorrelation(ctx, correlations.GetCorrelationQuery{
+		UID:   name,
+		OrgId: orgID,
+	})
+	if err != nil {
+		return nil, err
+	}
 	return correlations.ToResource(c)
 }
 
@@ -166,9 +196,19 @@ func (s *legacyStorage) Create(ctx context.Context,
 	if !ok {
 		return nil, fmt.Errorf("expected correlation")
 	}
+	orgID, err := request.OrgIDForList(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	cmd, err := correlations.ToCreateCorrelationCommand(resource)
 	if err != nil {
+		return nil, err
+	}
+	if cmd.OrgId != orgID {
+		return nil, apierrors.NewBadRequest("namespace of the correlation does not match the request")
+	}
+	if err := s.access.checkWrite(ctx, orgID, resource.Name, cmd.SourceUID); err != nil {
 		return nil, err
 	}
 
@@ -176,7 +216,7 @@ func (s *legacyStorage) Create(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	return s.Get(ctx, out.UID, &metav1.GetOptions{})
+	return s.getResource(ctx, orgID, out.UID)
 }
 
 func (s *legacyStorage) Update(ctx context.Context,
@@ -187,7 +227,22 @@ func (s *legacyStorage) Update(ctx context.Context,
 	forceAllowCreate bool,
 	options *metav1.UpdateOptions,
 ) (runtime.Object, bool, error) {
-	before, err := s.Get(ctx, name, &metav1.GetOptions{})
+	orgID, err := request.OrgIDForList(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	current, err := s.service.GetCorrelation(ctx, correlations.GetCorrelationQuery{
+		UID:   name,
+		OrgId: orgID,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if err := s.access.checkWrite(ctx, orgID, name, current.SourceUID); err != nil {
+		return nil, false, err
+	}
+
+	before, err := correlations.ToResource(current)
 	if err != nil {
 		return nil, false, err
 	}
@@ -205,12 +260,19 @@ func (s *legacyStorage) Update(ctx context.Context,
 	if err != nil {
 		return nil, false, err
 	}
+	if cmd.OrgId != orgID || cmd.UID != current.UID {
+		return nil, false, apierrors.NewBadRequest("name and namespace of the correlation cannot be changed")
+	}
+	// The update only matches rows whose source is still the one authorized above.
+	if cmd.SourceUID != current.SourceUID {
+		return nil, false, apierrors.NewBadRequest("spec.source cannot be changed")
+	}
 
 	out, err := s.service.UpdateCorrelation(ctx, *cmd)
 	if err != nil {
 		return nil, false, err
 	}
-	obj, err = s.Get(ctx, out.UID, &metav1.GetOptions{})
+	obj, err = s.getResource(ctx, orgID, out.UID)
 	return obj, false, err
 }
 
@@ -220,9 +282,21 @@ func (s *legacyStorage) Delete(ctx context.Context, name string, deleteValidatio
 	if err != nil {
 		return nil, false, err
 	}
-	err = s.service.DeleteCorrelation(ctx, correlations.DeleteCorrelationCommand{
-		OrgId: orgID,
+	current, err := s.service.GetCorrelation(ctx, correlations.GetCorrelationQuery{
 		UID:   name,
+		OrgId: orgID,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if err := s.access.checkWrite(ctx, orgID, name, current.SourceUID); err != nil {
+		return nil, false, err
+	}
+	// Passing the authorized source restricts the delete to rows that still belong to it.
+	err = s.service.DeleteCorrelation(ctx, correlations.DeleteCorrelationCommand{
+		OrgId:     orgID,
+		UID:       name,
+		SourceUID: current.SourceUID,
 	})
 	return nil, (err == nil), err
 }
@@ -251,8 +325,11 @@ func (s *legacyStorage) DeleteCollection(ctx context.Context, deleteValidation r
 		}
 	}
 	labelSelector, _ := listOptions.LabelSelector.Requirements()
-	if labelSelector[0].Key() == "correlations.grafana.app/sourceDSProv-ref" {
+	if len(labelSelector) > 0 && labelSelector[0].Key() == "correlations.grafana.app/sourceDSProv-ref" {
 		datasourceData := strings.Split(labelSelector[0].Values().List()[0], ".")
+		if len(datasourceData) != 3 {
+			return nil, fmt.Errorf("deleteCollection to legacy passed invalid label selector")
+		}
 		datasourceToDelete["group"] = datasourceData[0]
 		datasourceToDelete["name"] = datasourceData[1]
 		datasourceToDelete["provisioned"] = datasourceData[2]
@@ -260,6 +337,9 @@ func (s *legacyStorage) DeleteCollection(ctx context.Context, deleteValidation r
 
 	if datasourceToDelete["name"] == "" || datasourceToDelete["group"] == "" {
 		return nil, fmt.Errorf("deleteCollection to legacy passed invalid field or label selectors")
+	}
+	if err := s.access.checkCollectionDelete(ctx, orgID, datasourceToDelete["name"], isSourceDelete); err != nil {
+		return nil, err
 	}
 
 	if isSourceDelete {

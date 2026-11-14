@@ -836,7 +836,7 @@ func Initialize(ctx context.Context, cfg *setting.Cfg, opts server.Options, apiO
 	if err != nil {
 		return nil, err
 	}
-	correlationsAppInstaller, err := correlations2.RegisterAppInstaller(cfg, featureToggles, correlationsCorrelationsService)
+	correlationsAppInstaller, err := correlations2.RegisterAppInstaller(cfg, featureToggles, correlationsCorrelationsService, accessControl)
 	if err != nil {
 		return nil, err
 	}
@@ -1612,7 +1612,7 @@ func InitializeForTest(ctx context.Context, t sqlutil.ITestDB, testingT interfac
 	if err != nil {
 		return nil, err
 	}
-	correlationsAppInstaller, err := correlations2.RegisterAppInstaller(cfg, featureToggles, correlationsCorrelationsService)
+	correlationsAppInstaller, err := correlations2.RegisterAppInstaller(cfg, featureToggles, correlationsCorrelationsService, accessControl)
 	if err != nil {
 		return nil, err
 	}
