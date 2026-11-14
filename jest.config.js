@@ -39,6 +39,14 @@ const esModules = [
   '@react-hookz/web',
   '@ver0/deep-equal',
   '@marcbachmann/cel-js',
+  // Mermaid and the ESM dependencies its flowchart renderer imports. The
+  // security tests execute this library instead of mocking it.
+  'mermaid',
+  '@mermaid-js',
+  '@iconify',
+  '@upsetjs',
+  'dagre-d3-es',
+  'khroma',
 ].join('|');
 
 module.exports = {
@@ -52,6 +60,8 @@ module.exports = {
     customExportConditions: ['@grafana-app/source', 'browser'],
   },
   transform: {
+    'node_modules/(?:mermaid|@mermaid-js|@iconify|@upsetjs|dagre-d3-es|khroma)/.+\\.(?:mjs|js)$':
+      '<rootDir>/public/test/transform-esm.js',
     '^.+\\.(ts|tsx|js|jsx)$': [require.resolve('ts-jest')],
   },
   transformIgnorePatterns: [
