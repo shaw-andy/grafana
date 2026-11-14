@@ -26,7 +26,7 @@ import { migrateDatasourceNameToRef } from 'app/features/dashboard/state/Dashboa
 import { getDashboardSrv } from '../../../features/dashboard/services/DashboardSrv';
 
 import AnnotationQueryEditor from './components/AnnotationQueryEditor';
-import { randomWalk } from './randomWalk';
+import { MAX_SERIES_COUNT, randomWalk } from './randomWalk';
 import { doTimeRegionQuery } from './timeRegions';
 import { type GrafanaAnnotationQuery, GrafanaAnnotationType, type GrafanaQuery, GrafanaQueryType } from './types';
 
@@ -77,6 +77,7 @@ export class GrafanaDatasource extends DataSourceWithBackend<GrafanaQuery> {
     const results: Array<Observable<DataQueryResponse>> = [];
     const targets: GrafanaQuery[] = [];
     const templateSrv = getTemplateSrv();
+    let randomWalkSeriesBudget = MAX_SERIES_COUNT;
     for (const target of request.targets) {
       if (target.queryType === GrafanaQueryType.Annotations) {
         return from(
@@ -143,10 +144,12 @@ export class GrafanaDatasource extends DataSourceWithBackend<GrafanaQuery> {
           })
         );
       } else if (target.queryType === GrafanaQueryType.RandomWalk || !target.queryType) {
+        const frames = randomWalk(target, request, randomWalkSeriesBudget);
+        randomWalkSeriesBudget -= frames.length;
         results.push(
           of({
             key: target.refId,
-            data: randomWalk(target, request),
+            data: frames,
             state: LoadingState.Done,
           })
         );

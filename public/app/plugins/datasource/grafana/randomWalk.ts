@@ -4,12 +4,28 @@ import { type GrafanaQuery } from './types';
 
 const MAX_POINTS = 10000;
 
+// Series are generated in the viewer's browser from saved query JSON, so the count must stay bounded.
+export const MAX_SERIES_COUNT = 500;
+
+function getSeriesCount(value: unknown, maxSeries: number): number {
+  const count = Math.floor(Number(value ?? 1));
+  const limit = Math.max(0, Math.min(maxSeries, MAX_SERIES_COUNT));
+  if (Number.isNaN(count)) {
+    return Math.min(1, limit);
+  }
+  return Math.max(0, Math.min(count, limit));
+}
+
 /**
  * Generate random walk time series data client-side.
  * Port of pkg/tsdb/grafana-testdata-datasource/scenarios.go RandomWalk().
  */
-export function randomWalk(query: GrafanaQuery, request: DataQueryRequest<GrafanaQuery>): DataFrame[] {
-  const seriesCount = query.seriesCount ?? 1;
+export function randomWalk(
+  query: GrafanaQuery,
+  request: DataQueryRequest<GrafanaQuery>,
+  maxSeries = MAX_SERIES_COUNT
+): DataFrame[] {
+  const seriesCount = getSeriesCount(query.seriesCount, maxSeries);
   const spread = query.spread ?? 1;
   const startValue = query.startValue ?? Math.random() * 100;
   const noise = query.noise ?? 0;
