@@ -31,6 +31,29 @@ export const defaultStreamQuery: StreamingQuery = {
   bands: 1,
 };
 
+const MIN_STREAM_SPEED_MS = 10;
+// Browsers treat any setTimeout delay above a signed 32-bit int as 1ms.
+const MAX_STREAM_SPEED_MS = 2 ** 31 - 1;
+const MAX_STREAM_BANDS = 100;
+
+// Saved dashboard JSON bypasses the editor's input limits, so speed and bands
+// must be bounded here before they drive timers and per-frame loops.
+function getStreamSpeed(speed: unknown): number {
+  const value = Number(speed);
+  if (!Number.isFinite(value)) {
+    return MIN_STREAM_SPEED_MS;
+  }
+  return Math.min(Math.max(value, MIN_STREAM_SPEED_MS), MAX_STREAM_SPEED_MS);
+}
+
+function getStreamBands(bands: unknown): number {
+  const value = Math.floor(Number(bands));
+  if (Number.isNaN(value) || value < 0) {
+    return 0;
+  }
+  return Math.min(value, MAX_STREAM_BANDS);
+}
+
 export function runStream(
   target: TestDataDataQuery,
   req: DataQueryRequest<TestDataDataQuery>
@@ -68,7 +91,9 @@ function runSignalStream(
       ],
     };
 
-    const { spread, speed, bands = 0, noise } = query;
+    const { spread, noise } = query;
+    const speed = getStreamSpeed(query.speed);
+    const bands = getStreamBands(query.bands);
     for (let i = 0; i < bands; i++) {
       const suffix = bands > 1 ? ` ${i + 1}` : '';
       schema.fields.push({ name: 'Min' + suffix, type: FieldType.number });
@@ -150,7 +175,7 @@ function runLogsStream(
     data.addField({ name: 'time', type: FieldType.time });
     data.meta = { preferredVisualisationType: 'logs' };
 
-    const { speed } = query;
+    const speed = getStreamSpeed(query.speed);
 
     let timeoutId: ReturnType<typeof setTimeout>;
 
@@ -212,7 +237,7 @@ function runWatchStream(
         params: {
           count: req.maxDataPoints || 1000, // connection will close when done
           format: 'json',
-          speed: `${query.speed ?? 250}ms`,
+          speed: `${getStreamSpeed(query.speed ?? 250)}ms`,
           flush: 85, // 85% (eg, sometimes send a few at a time)
         },
       })
@@ -348,6 +373,7 @@ function runTracesStream(
   return new Observable<DataQueryResponse>((subscriber) => {
     const streamId = `traces-${req.panelId || 'explore'}-${target.refId}`;
     const data = createMainTraceFrame(target, req.maxDataPoints);
+    const speed = getStreamSpeed(query.speed);
     let timeoutId: ReturnType<typeof setTimeout>;
 
     const pushNextEvent = () => {
@@ -361,7 +387,7 @@ function runTracesStream(
         state: LoadingState.Streaming,
       });
 
-      timeoutId = setTimeout(pushNextEvent, query.speed);
+      timeoutId = setTimeout(pushNextEvent, speed);
     };
 
     // Send first event in 5ms
