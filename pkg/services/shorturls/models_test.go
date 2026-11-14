@@ -106,4 +106,25 @@ func TestValidateRelativePath(t *testing.T) {
 		require.Error(t, err)
 		require.True(t, ErrShortURLInvalidPath.Is(err))
 	})
+
+	// Keep this list aligned with apps/shorturl/pkg/app/validate_test.go.
+	// Both copies of the check must refuse GET routes that change session or data.
+	sessionChangingPaths := []string{
+		"logout",
+		"logout?continue=1",
+		"  logout",
+		"profile/switch-org/2",
+		"profile/switch-org/2?foo=1",
+		"user/auth-tokens/rotate",
+		"user/auth-tokens/rotate?redirectTo=/",
+		"api/snapshots-delete/example-delete-key",
+		"user/email/update?code=example",
+		"api/user/invite/complete",
+	}
+	for _, p := range sessionChangingPaths {
+		t.Run("rejects session-changing path: "+p, func(t *testing.T) {
+			err := ValidateRelativePath(p)
+			require.Error(t, err)
+		})
+	}
 }
