@@ -611,7 +611,7 @@ func TestIntegrationAnnotations(t *testing.T) {
 			result, err := store.GetTags(context.Background(), annotations.TagsQuery{
 				OrgID: 1,
 				Tag:   "SeRvEr", // Use mixed-case to test LIKE case-insensitivity
-			})
+			}, &annotation_ac.AccessResources{SkipAccessControlFilter: true})
 			require.NoError(t, err)
 			require.Len(t, result.Tags, 1)
 			require.Equal(t, "server:server-1", result.Tags[0].Tag)
@@ -622,7 +622,7 @@ func TestIntegrationAnnotations(t *testing.T) {
 			result, err := store.GetTags(context.Background(), annotations.TagsQuery{
 				OrgID: 1,
 				Tag:   "Outage", // Use mixed-case to test LIKE case-insensitivity
-			})
+			}, &annotation_ac.AccessResources{SkipAccessControlFilter: true})
 			require.NoError(t, err)
 			require.Len(t, result.Tags, 2)
 			require.Equal(t, "outage", result.Tags[0].Tag)
@@ -647,7 +647,7 @@ func TestIntegrationAnnotations(t *testing.T) {
 			})
 
 			byTag := func(query annotations.TagsQuery) map[string]int64 {
-				result, err := store.GetTags(context.Background(), query)
+				result, err := store.GetTags(context.Background(), query, &annotation_ac.AccessResources{SkipAccessControlFilter: true})
 				require.NoError(t, err)
 				counts := map[string]int64{}
 				for _, tag := range result.Tags {
@@ -676,7 +676,7 @@ func TestIntegrationAnnotations(t *testing.T) {
 			result, err := store.GetTags(context.Background(), annotations.TagsQuery{
 				OrgID: 0,
 				Tag:   "server-1",
-			})
+			}, &annotation_ac.AccessResources{SkipAccessControlFilter: true})
 			require.NoError(t, err)
 			require.Len(t, result.Tags, 0)
 		})
@@ -685,7 +685,7 @@ func TestIntegrationAnnotations(t *testing.T) {
 			result, err := store.GetTags(context.Background(), annotations.TagsQuery{
 				OrgID: 0,
 				Tag:   "unknown:tag",
-			})
+			}, &annotation_ac.AccessResources{SkipAccessControlFilter: true})
 			require.NoError(t, err)
 			require.Len(t, result.Tags, 0)
 		})
@@ -796,7 +796,7 @@ func benchmarkFindTags(b *testing.B, numAnnotations int) {
 		result, err := store.GetTags(context.Background(), annotations.TagsQuery{
 			OrgID: 1,
 			Tag:   "outage",
-		})
+		}, &annotation_ac.AccessResources{SkipAccessControlFilter: true})
 		require.NoError(b, err)
 		require.Len(b, result.Tags, 2)
 		require.Equal(b, "outage", result.Tags[0].Tag)

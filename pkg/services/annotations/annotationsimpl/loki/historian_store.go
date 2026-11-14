@@ -196,7 +196,7 @@ func (r *LokiHistorianStore) annotationsFromStream(stream lokiclient.Stream, ac 
 	return items
 }
 
-func (r *LokiHistorianStore) GetTags(ctx context.Context, query annotations.TagsQuery) (annotations.FindTagsResult, error) {
+func (r *LokiHistorianStore) GetTags(ctx context.Context, query annotations.TagsQuery, accessResources *accesscontrol.AccessResources) (annotations.FindTagsResult, error) {
 	return annotations.FindTagsResult{Tags: []*annotations.TagsDTO{}}, nil
 }
 

@@ -57,13 +57,13 @@ func (c *CompositeStore) Get(ctx context.Context, query annotations.ItemQuery, a
 }
 
 // GetTags returns tags from all stores, and combines the results.
-func (c *CompositeStore) GetTags(ctx context.Context, query annotations.TagsQuery) (annotations.FindTagsResult, error) {
+func (c *CompositeStore) GetTags(ctx context.Context, query annotations.TagsQuery, accessResources *accesscontrol.AccessResources) (annotations.FindTagsResult, error) {
 	resCh := make(chan annotations.FindTagsResult, len(c.readers))
 
 	err := concurrency.ForEachJob(ctx, len(c.readers), len(c.readers), func(ctx context.Context, i int) (err error) {
 		defer handleJobPanic(c.logger, c.readers[i].Type(), &err)
 
-		res, err := c.readers[i].GetTags(ctx, query)
+		res, err := c.readers[i].GetTags(ctx, query, accessResources)
 		resCh <- res
 		return err
 	})
