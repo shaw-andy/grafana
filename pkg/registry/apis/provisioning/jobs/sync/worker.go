@@ -196,7 +196,8 @@ func (r *SyncWorker) Process(ctx context.Context, repo repository.Repository, jo
 	}
 	syncSpan.End()
 
-	if syncStatus.State != provisioning.JobStateError && !isQuotaWarning {
+	_, scoped := pathScopeFrom(ctx)
+	if syncStatus.State != provisioning.JobStateError && !isQuotaWarning && !scoped {
 		syncStatus.LastRef = currentRef
 	} else {
 		if isQuotaWarning {
