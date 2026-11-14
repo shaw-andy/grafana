@@ -192,10 +192,8 @@ func (c *jobsConnector) handleCreateJob(ctx context.Context, r *http.Request, na
 	responder.Object(http.StatusAccepted, job)
 }
 
-// authorizeCreateJob runs every check a caller must pass before a job for the
-// named repository may be queued, and returns the repository configuration.
-// Jobs run later as the provisioning service identity, so this is the only
-// point where the caller's own permissions are applied.
+// authorizeCreateJob checks that a job may be queued for the named healthy
+// repository and returns the repository configuration.
 func (c *jobsConnector) authorizeCreateJob(ctx context.Context, name string, spec provisioning.JobSpec) (*provisioning.Repository, error) {
 	repo, err := c.repoGetter.GetHealthyRepository(ctx, name)
 	if err != nil {
@@ -212,21 +210,47 @@ func (c *jobsConnector) authorizeCreateJob(ctx context.Context, name string, spe
 		)
 	}
 
-	if spec.Action == provisioning.JobActionPull || spec.Action == provisioning.JobActionTest || syncsWholeRepository(spec) {
-		if err := c.authorizeAdminJob(ctx, cfg); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := c.validateWriteAccess(cfg, spec); err != nil {
-		return nil, err
-	}
-
-	if err := c.authorizeJob(ctx, repo, cfg, spec); err != nil {
+	if err := c.authorizeJobForRepository(ctx, repo, spec); err != nil {
 		return nil, err
 	}
 
 	return cfg, nil
+}
+
+// authorizeStoredJob applies the caller's permissions to a Job object written
+// to the jobs resource. A job for a repository that does not exist yet would
+// run against whichever repository later takes that name, so it requires the
+// same admin permission as creating that repository.
+func (c *jobsConnector) authorizeStoredJob(ctx context.Context, namespace string, spec provisioning.JobSpec) error {
+	repo, err := c.repoGetter.GetRepository(ctx, spec.Repository)
+	if apierrors.IsNotFound(err) {
+		return c.authorizeAdminJob(ctx, &provisioning.Repository{
+			ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+		})
+	}
+	if err != nil {
+		return err
+	}
+	return c.authorizeJobForRepository(ctx, repo, spec)
+}
+
+// authorizeJobForRepository runs the permission checks a caller must pass for
+// a job on repo. Jobs run later as the provisioning service identity, so this
+// is the only point where the caller's own permissions are applied.
+func (c *jobsConnector) authorizeJobForRepository(ctx context.Context, repo repository.Repository, spec provisioning.JobSpec) error {
+	cfg := repo.Config()
+
+	if spec.Action == provisioning.JobActionPull || spec.Action == provisioning.JobActionTest || syncsWholeRepository(spec) {
+		if err := c.authorizeAdminJob(ctx, cfg); err != nil {
+			return err
+		}
+	}
+
+	if err := c.validateWriteAccess(cfg, spec); err != nil {
+		return err
+	}
+
+	return c.authorizeJob(ctx, repo, cfg, spec)
 }
 
 // syncsWholeRepository reports whether a delete or move job names no paths or

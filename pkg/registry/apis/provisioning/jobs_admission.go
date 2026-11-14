@@ -37,8 +37,7 @@ func (v *jobAdmissionValidator) Validate(ctx context.Context, a admission.Attrib
 		if jobs.IsOrphanCleanupAction(job.Spec.Action) {
 			return v.connector.authorizeOrphanCleanupJob(ctx, a.GetNamespace(), job.Spec.Repository)
 		}
-		_, err := v.connector.authorizeCreateJob(ctx, job.Spec.Repository, job.Spec)
-		return err
+		return v.connector.authorizeStoredJob(ctx, a.GetNamespace(), job.Spec)
 	case admission.Update:
 		job, ok := a.GetObject().(*provisioning.Job)
 		if !ok {
