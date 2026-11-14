@@ -17,6 +17,7 @@ import { t } from '@grafana/i18n';
 import { config } from '@grafana/runtime';
 import { TooltipDisplayMode } from '@grafana/schema';
 import { ConfirmModal, VariablesInputModal } from '@grafana/ui';
+import { OneClickLinkConfirmModal } from '@grafana/ui/internal';
 import { type LayerElement } from 'app/core/components/Layers/types';
 import { notFoundItem } from 'app/features/canvas/elements/notFound';
 import { type DimensionContext } from 'app/features/dimensions/context';
@@ -70,6 +71,7 @@ export class ElementState implements LayerElement {
   // cached for tooltips/mousemove
   oneClickMode = OneClickMode.Off;
   showActionConfirmation = false;
+  pendingOneClickLink?: LinkModel;
 
   showActionVarsModal = false;
   actionVars: ActionVariableInput = {};
@@ -984,9 +986,10 @@ export class ElementState implements LayerElement {
   onElementClick = (event: React.MouseEvent) => {
     // If one-click access is enabled, open the primary link
     if (this.oneClickMode === OneClickMode.Link) {
-      let primaryDataLink = this.getPrimaryDataLink();
+      const primaryDataLink = this.getPrimaryDataLink();
       if (primaryDataLink) {
-        window.open(primaryDataLink.href, primaryDataLink.target ?? '_self');
+        this.pendingOneClickLink = primaryDataLink;
+        this.forceUpdate();
       }
     } else if (this.oneClickMode === OneClickMode.Action) {
       const primaryAction = this.getPrimaryAction();
@@ -1110,6 +1113,15 @@ export class ElementState implements LayerElement {
         >
           <item.display key={this.UID} config={this.options.config} data={this.data} isSelected={isSelected} />
         </div>
+        {this.pendingOneClickLink && (
+          <OneClickLinkConfirmModal
+            link={this.pendingOneClickLink}
+            onDismiss={() => {
+              this.pendingOneClickLink = undefined;
+              this.forceUpdate();
+            }}
+          />
+        )}
         {this.showActionConfirmation && this.renderActionsConfirmModal(this.getPrimaryAction())}
         {this.showActionVarsModal && this.renderVariablesInputModal(this.getPrimaryAction())}
       </>
