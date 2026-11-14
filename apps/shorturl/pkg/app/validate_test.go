@@ -65,4 +65,25 @@ func TestValidateRelativePath(t *testing.T) {
 		require.Error(t, err)
 		require.True(t, errors.Is(err, ErrShortURLInvalidPath))
 	})
+
+	// These are same-server GET routes that change the caller's session or data.
+	// A short URL may only navigate to a read-only page.
+	sessionChangingPaths := []string{
+		"logout",
+		"logout?continue=1",
+		"  logout",
+		"profile/switch-org/2",
+		"profile/switch-org/2?foo=1",
+		"user/auth-tokens/rotate",
+		"user/auth-tokens/rotate?redirectTo=/",
+		"api/snapshots-delete/example-delete-key",
+		"user/email/update?code=example",
+		"api/user/invite/complete",
+	}
+	for _, p := range sessionChangingPaths {
+		t.Run("rejects session-changing path: "+p, func(t *testing.T) {
+			err := validateRelativePath(p)
+			require.Error(t, err)
+		})
+	}
 }
