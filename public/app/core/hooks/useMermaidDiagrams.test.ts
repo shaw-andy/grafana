@@ -5,7 +5,12 @@ import { useMermaidDiagrams } from './useMermaidDiagrams';
 
 jest.mock('mermaid', () => ({
   __esModule: true,
-  default: { initialize: jest.fn(), parse: jest.fn().mockResolvedValue(true), render: jest.fn() },
+  default: {
+    initialize: jest.fn(),
+    parse: jest.fn().mockResolvedValue(true),
+    render: jest.fn(),
+    mermaidAPI: { defaultConfig: {}, getDiagramFromText: jest.fn().mockResolvedValue({ db: {} }) },
+  },
 }));
 
 const mermaidRender = jest.mocked(mermaid.render);

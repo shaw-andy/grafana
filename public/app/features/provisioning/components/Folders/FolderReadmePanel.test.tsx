@@ -25,7 +25,12 @@ jest.mock('../../hooks/useFolderReadme');
 // rendered diagram wiring without pulling in its full runtime.
 jest.mock('mermaid', () => ({
   __esModule: true,
-  default: { initialize: jest.fn(), parse: jest.fn().mockResolvedValue(true), render: jest.fn() },
+  default: {
+    initialize: jest.fn(),
+    parse: jest.fn().mockResolvedValue(true),
+    render: jest.fn(),
+    mermaidAPI: { defaultConfig: {}, getDiagramFromText: jest.fn().mockResolvedValue({ db: {} }) },
+  },
 }));
 
 setupProvisioningMswServer();

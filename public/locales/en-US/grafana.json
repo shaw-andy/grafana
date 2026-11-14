@@ -12338,6 +12338,7 @@
     "unknown-error": "Unknown error"
   },
   "mermaid": {
+    "external-resource": "diagrams cannot load images or other external resources",
     "invalid-syntax": "invalid diagram syntax",
     "render-error": "Diagram error: {{message}}"
   },
