@@ -40,7 +40,7 @@ jobs:
           github_app: grafana-pr-automation
 
       - name: Run Commands
-        uses: grafana/grafana-github-actions/commands@main
+        uses: grafana/grafana-github-actions/commands@af3213823a725b60b60947211de51d0fa3959391 # main
         with:
           token: ${{ steps.get-github-app-token.outputs.token }}
           configPath: "issue-opened"
