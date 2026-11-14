@@ -133,14 +133,14 @@ jobs:
             echo "WORK_BRANCH=release/${RUN_NUMBER}/${VERSION}"
           } >> "$GITHUB_ENV"
       - name: Checkout Grafana target branch #checkout the target branch to base the release branch on
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           token: ${{ steps.get-writer-app-token.outputs.token }} # used only for fetching; commits go via kminehart API
           ref: ${{ env.RELEASE_BRANCH }}
           fetch-tags: true
           fetch-depth: 0
       - name: Checkout Grafana (main)
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           token: ${{ github.token }}
           ref: main
@@ -154,7 +154,7 @@ jobs:
       # workspace (the release-branch checkout). That subtree may lag main and miss the action,
       # failing the step. Mirror cache-build:false behavior (no GOCACHE; modules via actions/cache).
       - name: Setup Go
-        uses: actions/setup-go@v7.0.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: .grafana-main/go.mod
           cache: false
