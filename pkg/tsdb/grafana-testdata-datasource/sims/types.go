@@ -49,3 +49,17 @@ type Simulation interface {
 	NewFrame(size int) *data.Frame
 	GetValues(t time.Time) map[string]any
 }
+
+// checkedValueSim is implemented by simulations whose config can leave them
+// unable to compute values. The config is read once per call, so the check
+// and the computation always use the same values.
+type checkedValueSim interface {
+	getCheckedValues(t time.Time) (map[string]any, error)
+}
+
+func getSimValues(sim Simulation, t time.Time) (map[string]any, error) {
+	if c, ok := sim.(checkedValueSim); ok {
+		return c.getCheckedValues(t)
+	}
+	return sim.GetValues(t), nil
+}

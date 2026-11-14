@@ -1,6 +1,7 @@
 package sims
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"time"
@@ -15,7 +16,8 @@ type waveformSim struct {
 }
 
 var (
-	_ Simulation = (*waveformSim)(nil)
+	_ Simulation      = (*waveformSim)(nil)
+	_ checkedValueSim = (*waveformSim)(nil)
 )
 
 type waveformConfig struct {
@@ -48,16 +50,29 @@ func (s *waveformSim) NewFrame(size int) *data.Frame {
 }
 
 func (s *waveformSim) GetValues(t time.Time) map[string]any {
+	vals, err := s.getCheckedValues(t)
+	if err != nil {
+		return nil
+	}
+	return vals
+}
+
+func (s *waveformSim) getCheckedValues(t time.Time) (map[string]any, error) {
+	cfg := s.cfg
 	x := 0.0
-	if s.cfg.Period > 0 {
-		periodMS := s.cfg.Period * 1000
-		ms := t.UnixMilli() % int64(periodMS)
+	if cfg.Period > 0 {
+		periodMS := cfg.Period * 1000
+		divisor, err := cfg.periodMillis()
+		if err != nil {
+			return nil, err
+		}
+		ms := t.UnixMilli() % divisor
 		x = ((float64(ms) / periodMS) * 2 * math.Pi) // 0 >> 2Pi
 	}
 
-	v := s.calculator(x, &s.cfg)
+	v := s.calculator(x, &cfg)
 
-	noise := s.cfg.Noise
+	noise := cfg.Noise
 	if noise > 0 {
 		gen := rand.New(rand.NewSource(t.UnixMilli())) // consistent for the value
 		v += (gen.Float64() * 2.0 * noise) - noise
@@ -66,7 +81,28 @@ func (s *waveformSim) GetValues(t time.Time) map[string]any {
 	return map[string]any{
 		data.TimeSeriesTimeFieldName:  t,
 		data.TimeSeriesValueFieldName: v,
+	}, nil
+}
+
+// A period that is not positive is valid and produces a flat line.
+func (c *waveformConfig) validate() error {
+	if c.Period > 0 {
+		_, err := c.periodMillis()
+		return err
 	}
+	return nil
+}
+
+// periodMillis returns the period as the whole number of milliseconds that
+// GetValues divides by.
+func (c *waveformConfig) periodMillis() (int64, error) {
+	ms := c.Period * 1000
+	// Range check the float itself: converting an out of range float to int64
+	// is implementation defined, and a positive period can still truncate to 0.
+	if !(ms >= 1 && ms < math.MaxInt64) {
+		return 0, fmt.Errorf("invalid waveform period %v: must be at least one millisecond", c.Period)
+	}
+	return int64(ms), nil
 }
 
 func (s *waveformSim) Close() error {
@@ -105,6 +141,9 @@ func newSinewaveInfo() simulationInfo {
 				calculator: sinewaveCalculator,
 			}
 			err := updateConfigObjectFromJSON(&s.cfg, cfg.Config) // override any fields
+			if err == nil {
+				err = s.cfg.validate()
+			}
 			return s, err
 		},
 	}
