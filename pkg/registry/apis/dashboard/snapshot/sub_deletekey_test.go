@@ -13,8 +13,10 @@ import (
 
 	authlib "github.com/grafana/authlib/types"
 	dashv0 "github.com/grafana/grafana/apps/dashboard/pkg/apis/dashboard/v0alpha1"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/components/simplejson"
 	"github.com/grafana/grafana/pkg/services/dashboardsnapshots"
+	"github.com/grafana/grafana/pkg/services/user"
 )
 
 // capturingResponder records the object/error passed by the subresource handler.
@@ -34,6 +36,7 @@ func newDeleteKeyREST(t *testing.T) *deleteKeyREST {
 			Key:       "snap-1",
 			DeleteKey: "secret-delete-key",
 			OrgID:     1,
+			UserID:    7,
 			Dashboard: simplejson.New(),
 		}, nil)
 
@@ -49,8 +52,9 @@ func TestDeleteKeyREST_Connect_SameOrg(t *testing.T) {
 	r := newDeleteKeyREST(t)
 	responder := &capturingResponder{}
 
-	// Caller in org 1, snapshot owned by org 1.
-	handler, err := r.Connect(ctxForOrg(1), "snap-1", nil, responder)
+	// Creator in org 1, snapshot owned by org 1.
+	ctx := identity.WithRequester(ctxForOrg(1), &user.SignedInUser{UserID: 7, OrgID: 1, OrgRole: identity.RoleEditor})
+	handler, err := r.Connect(ctx, "snap-1", nil, responder)
 	require.NoError(t, err)
 	require.NotNil(t, handler)
 

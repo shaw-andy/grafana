@@ -74,6 +74,13 @@ func (s *SnapshotLegacyStore) Delete(ctx context.Context, name string, deleteVal
 		return nil, false, s.ResourceInfo.NewNotFound(name)
 	}
 
+	// Validate the snapshot loaded above; everything below acts on it and does not load again.
+	if deleteValidation != nil {
+		if err := deleteValidation(ctx, convertSnapshotToK8sResource(snap, s.Namespacer)); err != nil {
+			return nil, false, err
+		}
+	}
+
 	// Delete the external one first. The stored ExternalDeleteURL may have an outdated
 	// path format (e.g. created with externalSnapshotsK8SAPIPush in the opposite
 	// state), so each branch extracts the host and rebuilds the URL with the

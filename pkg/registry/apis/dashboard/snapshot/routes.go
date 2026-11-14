@@ -2,7 +2,9 @@ package snapshot
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
 	k8srequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/registry/rest"
 	"k8s.io/klog/v2"
@@ -489,7 +492,16 @@ func GetRoutes(options dashv0.SnapshotSharingOptions, accessControl ac.AccessCon
 						return
 					}
 
-					_, _, err = deleter.Delete(ctx, snapshotName, nil, &metav1.DeleteOptions{})
+					// The delete key is what authorizes this request, so refuse to delete
+					// whatever the store loads by name unless it still holds that key.
+					matchesDeleteKey := func(_ context.Context, obj runtime.Object) error {
+						snap, ok := obj.(*dashv0.Snapshot)
+						if !ok || snap.Spec.DeleteKey == nil || *snap.Spec.DeleteKey != deleteKey {
+							return apierrors.NewConflict(dashv0.SnapshotResourceInfo.GroupResource(), snapshotName, errors.New("snapshot changed during delete"))
+						}
+						return nil
+					}
+					_, _, err = deleter.Delete(ctx, snapshotName, matchesDeleteKey, &metav1.DeleteOptions{})
 					if err != nil {
 						errhttp.Write(ctx, fmt.Errorf("failed to delete snapshot: %w", err), w)
 						return

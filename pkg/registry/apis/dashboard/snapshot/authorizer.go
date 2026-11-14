@@ -2,11 +2,17 @@ package snapshot
 
 import (
 	"context"
+	"errors"
+	"strconv"
 
 	"github.com/open-feature/go-sdk/openfeature"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
 
+	claims "github.com/grafana/authlib/types"
+	dashv0 "github.com/grafana/grafana/apps/dashboard/pkg/apis/dashboard/v0alpha1"
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
+	"github.com/grafana/grafana/pkg/apimachinery/utils"
 	ac "github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/dashboards"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
@@ -104,4 +110,53 @@ func NewSnapshotAuthorizer(accessControl ac.AccessControl) authorizer.Authorizer
 			}
 			return authorizer.DecisionAllow, "", nil
 		})
+}
+
+// authorizeSnapshotOwner allows the snapshot's creator or an admin of the org that owns it.
+// The snapshot key is public and snapshots:delete is not scoped to a snapshot, so the
+// authorizer above cannot tell whose snapshot is being deleted or whose delete key is read.
+func authorizeSnapshotOwner(ctx context.Context, snap *dashv0.Snapshot) error {
+	gr := dashv0.SnapshotResourceInfo.GroupResource()
+	requester, err := identity.GetRequester(ctx)
+	if err != nil {
+		return apierrors.NewUnauthorized("valid user is required")
+	}
+	ns, err := claims.ParseNamespace(snap.Namespace)
+	if err != nil || ns.OrgID != requester.GetOrgID() {
+		return apierrors.NewNotFound(gr, snap.Name)
+	}
+	if requester.HasRole(identity.RoleAdmin) || isSnapshotCreator(requester, snapshotCreatedBy(snap)) {
+		return nil
+	}
+	return apierrors.NewForbidden(gr, snap.Name, errors.New("only the snapshot creator or an org admin can do this"))
+}
+
+// snapshotCreatedBy reads grafana.app/createdBy, which unified storage sets on create, and
+// falls back to the generated grafana.com/createdBy accessor used by the snapshot migrator.
+func snapshotCreatedBy(snap *dashv0.Snapshot) string {
+	if meta, err := utils.MetaAccessor(snap); err == nil {
+		if createdBy := meta.GetCreatedBy(); createdBy != "" {
+			return createdBy
+		}
+	}
+	return snap.GetCreatedBy()
+}
+
+// isSnapshotCreator accepts both createdBy forms: the requester UID written by unified
+// storage, and user:<internal id> written for legacy SQL rows, which only store user_id.
+func isSnapshotCreator(requester identity.Requester, createdBy string) bool {
+	if createdBy == "" {
+		return false
+	}
+	if createdBy == requester.GetUID() {
+		return true
+	}
+	if !requester.IsIdentityType(claims.TypeUser, claims.TypeServiceAccount) {
+		return false
+	}
+	id, err := requester.GetInternalID()
+	if err != nil || id <= 0 {
+		return false
+	}
+	return createdBy == claims.NewTypeID(claims.TypeUser, strconv.FormatInt(id, 10))
 }

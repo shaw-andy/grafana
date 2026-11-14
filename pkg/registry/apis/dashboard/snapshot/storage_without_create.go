@@ -3,20 +3,24 @@ package snapshot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/open-feature/go-sdk/openfeature"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/registry/rest"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 
 	dashv0 "github.com/grafana/grafana/apps/dashboard/pkg/apis/dashboard/v0alpha1"
 	"github.com/grafana/grafana/pkg/services/dashboardsnapshots"
@@ -76,38 +80,65 @@ func (n *storageWrapper) List(ctx context.Context, options *internalversion.List
 	return stripSensitiveFieldsFromList(obj), nil
 }
 func (n *storageWrapper) Delete(ctx context.Context, name string, deleteValidation rest.ValidateObjectFunc, options *metav1.DeleteOptions) (runtime.Object, bool, error) {
-	// GET the snapshot from inner storage (retains deleteKey, same as the deletekey subresource)
-	// to check if it's external and retrieve the deleteKey before deleting.
-	obj, err := n.inner.(rest.Getter).Get(ctx, name, &metav1.GetOptions{})
-	if err != nil {
-		return nil, false, err
-	}
-	snap, ok := obj.(*dashv0.Snapshot)
-	if !ok {
-		return nil, false, fmt.Errorf("expected Snapshot, got %T", obj)
+	// Authorize inside the inner stores' delete validation so the check runs on the
+	// object each store is about to delete, then reuse that object for the external
+	// delete. The dual writer validates once per store, so a second store holding a
+	// different snapshot under this name is refused.
+	var (
+		mu   sync.Mutex
+		snap *dashv0.Snapshot
+	)
+	validate := func(ctx context.Context, obj runtime.Object) error {
+		s, ok := obj.(*dashv0.Snapshot)
+		if !ok {
+			return fmt.Errorf("expected Snapshot, got %T", obj)
+		}
+		if err := authorizeSnapshotOwner(ctx, s); err != nil {
+			return err
+		}
+		if deleteValidation != nil {
+			if err := deleteValidation(ctx, obj); err != nil {
+				return err
+			}
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if snap == nil {
+			snap = s.DeepCopy()
+			return nil
+		}
+		if s.Name != snap.Name || ptr.Deref(s.Spec.DeleteKey, "") != ptr.Deref(snap.Spec.DeleteKey, "") {
+			return apierrors.NewConflict(dashv0.SnapshotResourceInfo.GroupResource(), name, errors.New("snapshot changed during delete"))
+		}
+		return nil
 	}
 
-	// Delete the local snapshot
-	result, deleted, err := n.inner.(rest.GracefulDeleter).Delete(ctx, name, deleteValidation, options)
+	result, deleted, err := n.inner.(rest.GracefulDeleter).Delete(ctx, name, validate, options)
 	if err != nil {
 		return nil, false, err
+	}
+	mu.Lock()
+	authorized := snap
+	mu.Unlock()
+	if authorized == nil {
+		return result, deleted, nil
 	}
 
 	// If external, send a DELETE to the external server. The endpoint is gated on
 	// externalSnapshotsK8SAPIPush: when on, use the K8s delete subresource; when
 	// off, use the legacy GET /api/snapshots-delete/{key} endpoint.
-	if snap.Spec.External != nil && *snap.Spec.External &&
-		snap.Spec.DeleteKey != nil && n.options.ExternalSnapshotURL != "" {
+	if authorized.Spec.External != nil && *authorized.Spec.External &&
+		authorized.Spec.DeleteKey != nil && n.options.ExternalSnapshotURL != "" {
 		if openfeature.NewDefaultClient().Boolean(ctx, featuremgmt.FlagExternalSnapshotsK8SAPIPush, false, openfeature.TransactionContext(ctx)) {
 			prefix := dashv0.SnapshotResourceInfo.GroupResource().Resource
 			deleteURL := strings.TrimRight(n.options.ExternalSnapshotURL, "/") +
 				"/apis/" + dashv0.GROUP + "/" + dashv0.VERSION + "/namespaces/default/" +
-				prefix + "/delete/" + *snap.Spec.DeleteKey
+				prefix + "/delete/" + *authorized.Spec.DeleteKey
 			if err := deleteExternalSnapshot(deleteURL, n.options.ExternalSnapshotToken); err != nil {
 				return nil, false, err
 			}
 		} else {
-			deleteURL := strings.TrimRight(n.options.ExternalSnapshotURL, "/") + "/api/snapshots-delete/" + *snap.Spec.DeleteKey
+			deleteURL := strings.TrimRight(n.options.ExternalSnapshotURL, "/") + "/api/snapshots-delete/" + *authorized.Spec.DeleteKey
 			if err := deleteExternalSnapshotLegacy(deleteURL); err != nil {
 				return nil, false, err
 			}
