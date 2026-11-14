@@ -135,10 +135,15 @@ func NewAppInstaller(
 		logger:         logger,
 	}
 	// Create the tags handler
-	tagProvider, ok := store.(TagProvider)
-	if !ok {
+	var tagProvider TagProvider
+	switch s := store.(type) {
+	case TagProvider:
+		tagProvider = s
+	case DashboardTagCounter:
+		tagProvider = newAuthorizedTagProvider(s, installer.tracer, accessClient, folderResolver)
+	default:
 		// We could consider combining the TagProvider with the Store interface to avoid this type assertion?
-		return nil, fmt.Errorf("store does not implement TagProvider, cannot serve tags API")
+		return nil, fmt.Errorf("store does not implement TagProvider or DashboardTagCounter, cannot serve tags API")
 	}
 	tagHandler := withAPIStatusErrorResponse(newTagsHandler(tagProvider, installer.tracer, accessClient, installer.metrics, logger))
 

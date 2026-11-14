@@ -66,8 +66,16 @@ type LifecycleManager interface {
 	Cleanup(ctx context.Context, before time.Time) (int64, error)
 }
 
+// TagProvider counts tags over the annotations the requester in ctx is allowed to read.
 type TagProvider interface {
 	ListTags(ctx context.Context, namespace string, opts TagListOptions) ([]Tag, error)
+}
+
+// DashboardTagCounter counts tags per dashboard without checking access. Its counts must
+// only be exposed after dropping the dashboards the requester cannot read.
+type DashboardTagCounter interface {
+	// ListDashboardTags returns at most opts.Limit rows, or every row when opts.Limit is 0.
+	ListDashboardTags(ctx context.Context, namespace string, opts TagListOptions) ([]DashboardTag, error)
 }
 
 type TagListOptions struct {
@@ -79,4 +87,11 @@ type TagListOptions struct {
 type Tag struct {
 	Name  string
 	Count int64
+}
+
+type DashboardTag struct {
+	// DashboardUID is empty for organization annotations.
+	DashboardUID string
+	Name         string
+	Count        int64
 }

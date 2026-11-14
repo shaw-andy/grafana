@@ -27,6 +27,11 @@ service AnnotationStore {
 
   // ListTags retrieves all tags with their counts for a namespace
   rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
+
+  // ListDashboardTags retrieves tag counts for a namespace, split by the dashboard the
+  // counted annotations belong to, so the caller can drop dashboards the requester cannot read.
+  // A limit of 0 returns every row.
+  rpc ListDashboardTags(ListTagsRequest) returns (ListDashboardTagsResponse);
 }
 
 // Annotation represents a simplified annotation for CRUD operations
@@ -147,4 +152,15 @@ message ListTagsResponse {
 message Tag {
   string name = 1;
   int64 count = 2;
+}
+
+message ListDashboardTagsResponse {
+  repeated DashboardTag tags = 1;
+}
+
+message DashboardTag {
+  // Empty for organization annotations.
+  string dashboard_uid = 1;
+  string name = 2;
+  int64 count = 3;
 }

@@ -21,9 +21,9 @@ import (
 
 // mockGRPCServer implements the gRPC AnnotationStore service for testing
 type mockGRPCServer struct {
-	store       Store
-	tagProvider TagProvider
-	lifecycle   LifecycleManager
+	store      Store
+	tagCounter DashboardTagCounter
+	lifecycle  LifecycleManager
 	storev1.UnimplementedAnnotationStoreServer
 }
 
@@ -34,8 +34,8 @@ func newMockGRPCServer(store Store) *mockGRPCServer {
 		store: store,
 	}
 
-	if tp, ok := store.(TagProvider); ok {
-		server.tagProvider = tp
+	if tc, ok := store.(DashboardTagCounter); ok {
+		server.tagCounter = tc
 	}
 	if lm, ok := store.(LifecycleManager); ok {
 		server.lifecycle = lm
@@ -125,27 +125,28 @@ func (s *mockGRPCServer) Cleanup(ctx context.Context, req *storev1.CleanupReques
 	}, nil
 }
 
-func (s *mockGRPCServer) ListTags(ctx context.Context, req *storev1.ListTagsRequest) (*storev1.ListTagsResponse, error) {
-	if s.tagProvider == nil {
+func (s *mockGRPCServer) ListDashboardTags(ctx context.Context, req *storev1.ListTagsRequest) (*storev1.ListDashboardTagsResponse, error) {
+	if s.tagCounter == nil {
 		return nil, status.Error(codes.Unimplemented, "tag listing not supported")
 	}
 
 	opts := fromProtoTagListOptions(req.Options)
 
-	tags, err := s.tagProvider.ListTags(ctx, req.Namespace, opts)
+	tags, err := s.tagCounter.ListDashboardTags(ctx, req.Namespace, opts)
 	if err != nil {
 		return nil, mapToGRPCStatus(err)
 	}
 
-	protoTags := make([]*storev1.Tag, 0, len(tags))
+	protoTags := make([]*storev1.DashboardTag, 0, len(tags))
 	for _, tag := range tags {
-		protoTags = append(protoTags, &storev1.Tag{
-			Name:  tag.Name,
-			Count: tag.Count,
+		protoTags = append(protoTags, &storev1.DashboardTag{
+			DashboardUid: tag.DashboardUID,
+			Name:         tag.Name,
+			Count:        tag.Count,
 		})
 	}
 
-	return &storev1.ListTagsResponse{
+	return &storev1.ListDashboardTagsResponse{
 		Tags: protoTags,
 	}, nil
 }
@@ -462,7 +463,7 @@ func TestGRPCStore_ListTags(t *testing.T) {
 
 	// List all tags
 	grpcStore := store.(*storeGRPC)
-	tags, err := grpcStore.ListTags(ctx, namespace, TagListOptions{})
+	tags, err := grpcStore.ListDashboardTags(ctx, namespace, TagListOptions{})
 	require.NoError(t, err)
 	assert.Len(t, tags, 4) // prod, error, warning, dev
 

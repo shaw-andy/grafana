@@ -71,7 +71,7 @@ type PostgreSQLStore struct {
 }
 
 var _ Store = (*PostgreSQLStore)(nil)
-var _ TagProvider = (*PostgreSQLStore)(nil)
+var _ DashboardTagCounter = (*PostgreSQLStore)(nil)
 var _ LifecycleManager = (*PostgreSQLStore)(nil)
 
 // NewPostgreSQLStore creates a new PostgreSQL-backed annotation store
