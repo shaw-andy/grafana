@@ -96,6 +96,13 @@ jobs:
           if [[ "$WORK_BRANCH" == '' ]]; then
             WORK_BRANCH="changelog/${RUN_ID}/${VERSION}"
           fi
+          # Each line written to GITHUB_ENV becomes a job variable, so the branch name
+          # (built from caller inputs) must be a single line of ASCII branch-safe characters.
+          LC_ALL=C
+          if ! [[ "$WORK_BRANCH" =~ ^[0-9A-Za-z._+-]+(/[0-9A-Za-z._+-]+)*$ ]]; then
+            echo "::error::work_branch/version must be a single-line branch name"
+            exit 1
+          fi
           # Persist the resolved branch name for later steps.
           echo "WORK_BRANCH=$WORK_BRANCH" >> "$GITHUB_ENV"
 
