@@ -21976,7 +21976,7 @@
     },
     "/query-history": {
       "get": {
-        "description": "Returns a list of queries in the query history that matches the search criteria.\nQuery history search supports pagination. Use the `limit` parameter to control the maximum number of queries returned; the default limit is 100.\nYou can also use the `page` query parameter to fetch queries from any page other than the first one.",
+        "description": "Returns a list of queries in the query history that matches the search criteria.\nQuery history search supports pagination. Use the `limit` parameter to control the maximum number of queries returned; the default and maximum limit is 100.\nYou can also use the `page` query parameter to fetch queries from any page other than the first one.",
         "operationId": "searchQueries",
         "parameters": [
           {

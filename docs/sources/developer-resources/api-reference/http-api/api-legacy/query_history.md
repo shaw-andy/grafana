@@ -57,7 +57,7 @@ Authorization: Bearer <SERVICE_ACCOUNT_TOKEN>
 JSON body schema:
 
 - **datasourceUid** – Data source uid.
-- **queries** – JSON of query or queries.
+- **queries** – JSON of query or queries. The encoded JSON can be at most 65,535 bytes.
 
 **Example response:**
 
@@ -98,7 +98,7 @@ Status codes:
 
 `GET /api/query-history`
 
-Returns a list of queries in the query history that matches the search criteria. Query history search supports pagination. Use the `limit` parameter to control the maximum number of queries returned; the default limit is 100. You can also use the `page` query parameter to fetch queries from any page other than the first one.
+Returns a list of queries in the query history that matches the search criteria. Query history search supports pagination. Use the `limit` parameter to control the maximum number of queries returned; the default and maximum limit is 100. You can also use the `page` query parameter to fetch queries from any page other than the first one.
 
 Query parameters:
 
@@ -107,7 +107,7 @@ Query parameters:
 - **sort** - Specify the sorting order. Sorting can be `time-asc` or `time-desc`. The default is `time-desc`.
 - **onlyStarred** - Search for queries that are starred. Defaults to `false`.
 - **page** - Search supports pagination. Specify which page number to return. Use the limit parameter to specify the number of queries per page.
-- **limit** - Limits the number of returned query history items per page. The default is 100 queries per page.
+- **limit** - Limits the number of returned query history items per page. The default and maximum is 100 queries per page.
 - **from/to** - Specifies time range for the query history search. The time can be either epoch timestamps in milliseconds or relative using Grafana time units. For example, now-5m.
 
 **Example request for query history search**:
@@ -198,7 +198,7 @@ Updates comment of a query with a specific uid that is stored in the query histo
 
 Query parameters:
 
-- **comment** – New comment that will be added to the specified query.
+- **comment** – New comment that will be added to the specified query. The comment can be at most 65,535 bytes.
 
 **Example Request**:
 
