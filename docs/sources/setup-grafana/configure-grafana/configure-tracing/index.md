@@ -29,19 +29,23 @@ The `grafana-server` can be started with the command-line option `-profile` to e
 
 Running Grafana with profiling enabled and without block and mutex profiling enabled should only add a fraction of overhead and is suitable for [continuous profiling](https://grafana.com/oss/pyroscope/). Adding a small fraction of block and mutex profiling, such as 10-5 (10%-20%) should in general be fine.
 
-Enable profiling:
+Every request to the profiling endpoints must present a token, either as an `Authorization: Bearer <TOKEN>` header or as the password in HTTP basic authentication. Use `-profile-token-file` to point Grafana at a file that holds the token. The token must be at least 16 characters. If you don't set a token file, Grafana generates a random token at startup, writes it to a new file in the temporary directory that only the Grafana user can read, and prints the file path.
+
+Grafana only serves profiling on a loopback address, such as `localhost` or `127.0.0.1`, unless you set `-profile-token-file`. Profiling traffic isn't encrypted, so only expose it on a network you trust.
+
+Enable profiling on `localhost`:
 
 ```bash
-./grafana server -profile -profile-addr=0.0.0.0 -profile-port=8080
+./grafana server -profile -profile-port=8080
 ```
 
-Enable profiling with block and mutex profiling enabled with a fraction of 20%:
+Enable profiling on all interfaces with block and mutex profiling enabled with a fraction of 20%:
 
 ```bash
-./grafana server -profile -profile-addr=0.0.0.0 -profile-port=8080 -profile-block-rate=5 -profile-mutex-rate=5
+./grafana server -profile -profile-addr=0.0.0.0 -profile-port=8080 -profile-token-file=/etc/grafana/profiling-token -profile-block-rate=5 -profile-mutex-rate=5
 ```
 
-Note that `pprof` debugging endpoints are served on a different port than the Grafana HTTP server. Check what debugging endpoints are available by browsing `http://<profile-addr><profile-port>/debug/pprof`.
+Note that `pprof` debugging endpoints are served on a different port than the Grafana HTTP server. Check what debugging endpoints are available by browsing `http://<profile-addr>:<profile-port>/debug/pprof/` and entering the token as the password.
 
 There are some additional [godeltaprof](https://github.com/grafana/pyroscope-go/tree/main/godeltaprof) endpoints available which are more suitable in a continuous profiling scenario. These endpoints are `/debug/pprof/delta_heap`, `/debug/pprof/delta_block`, `/debug/pprof/delta_mutex`.
 
@@ -51,6 +55,7 @@ You can configure or override profiling settings using environment variables:
 export GF_DIAGNOSTICS_PROFILING_ENABLED=true
 export GF_DIAGNOSTICS_PROFILING_ADDR=0.0.0.0
 export GF_DIAGNOSTICS_PROFILING_PORT=8080
+export GF_DIAGNOSTICS_PROFILING_TOKEN_FILE=/etc/grafana/profiling-token
 export GF_DIAGNOSTICS_PROFILING_BLOCK_RATE=5
 export GF_DIAGNOSTICS_PROFILING_MUTEX_RATE=5
 ```
@@ -62,10 +67,13 @@ In general, you use the [Go command pprof](https://golang.org/cmd/pprof/) to bot
 When experiencing high memory usage or potential memory leaks it's useful to collect several heap profiles and later when analyzing, compare them. It's a good idea to wait some time, e.g. 30 seconds, between collecting each profile to allow memory consumption to increase.
 
 ```bash
-curl http://<profile-addr>:<profile-port>/debug/pprof/heap > heap1.pprof
+TOKEN=$(cat <TOKEN_FILE>)
+curl -H "Authorization: Bearer $TOKEN" http://<profile-addr>:<profile-port>/debug/pprof/heap > heap1.pprof
 sleep 30
-curl http://<profile-addr>:<profile-port>/debug/pprof/heap > heap2.pprof
+curl -H "Authorization: Bearer $TOKEN" http://<profile-addr>:<profile-port>/debug/pprof/heap > heap2.pprof
 ```
+
+Replace _`<TOKEN_FILE>`_ with the path set in `-profile-token-file`, or with the path Grafana printed at startup.
 
 You can then use pprof tool to compare two heap profiles:
 
@@ -78,7 +86,7 @@ go tool pprof -http=localhost:8081 --base heap1.pprof heap2.pprof
 When experiencing high CPU usage it's suggested to collect CPU profiles over a period of time, e.g. 30 seconds.
 
 ```bash
-curl 'http://<profile-addr>:<profile-port>/debug/pprof/profile?seconds=30' > profile.pprof
+curl -H "Authorization: Bearer $TOKEN" 'http://<profile-addr>:<profile-port>/debug/pprof/profile?seconds=30' > profile.pprof
 ```
 
 You can then use pprof tool to analyze the collected CPU profile:
