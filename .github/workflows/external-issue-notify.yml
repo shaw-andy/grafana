@@ -32,8 +32,9 @@ jobs:
       !contains(github.event.issue.labels.*.name, 'issue/auto-triaged') &&
       !contains(github.event.issue.labels.*.name, 'type/feature-request') &&
       (
-        github.event.action == 'opened'
-        || (github.event.action == 'labeled' && (startsWith(github.event.label.name, 'area/') || github.event.label.name == 'community/champion'))
+        github.event.action != 'labeled'
+        || startsWith(github.event.label.name, 'area/')
+        || github.event.label.name == 'community/champion'
       )
 
     steps:
