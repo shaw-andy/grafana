@@ -6,6 +6,8 @@ rules:
         actions/*: any
         github/*: any
         grafana/*: any
+        # Receives Vault secrets and the job's OIDC token.
+        grafana/shared-workflows/actions/get-vault-secrets: hash-pin
   forbidden-uses:
     config:
       deny:
