@@ -21,7 +21,7 @@ jobs:
     if: github.event.pull_request.draft == false
     steps:
       - name: Run PR Checks
-        uses: grafana/grafana-github-actions/pr-checks@main
+        uses: grafana/grafana-github-actions/pr-checks@af3213823a725b60b60947211de51d0fa3959391 # main
         with:
           token: ${{secrets.GITHUB_TOKEN}}
           configPath: pr-checks
