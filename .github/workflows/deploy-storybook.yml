@@ -34,7 +34,7 @@ jobs:
     outputs:
       changed-frontend-packages: ${{ steps.detect-changes.outputs.frontend-packages }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: true # required to get more history in the changed-files action
           fetch-depth: 0
@@ -60,7 +60,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           ref: ${{ inputs.version }}
@@ -88,7 +88,7 @@ jobs:
 
       - name: Log in to GCS
         id: login-to-gcs
-        uses: grafana/shared-workflows/actions/login-to-gcs@main
+        uses: grafana/shared-workflows/actions/login-to-gcs@1f02013f3a8a0c29e3cb7dc6793158defe914569 # login-to-gcs/v0.3.1
         with:
           environment: prod
           service_account: github-gf-storybook-deploy@grafanalabs-workload-identity.iam.gserviceaccount.com
@@ -100,7 +100,7 @@ jobs:
 
       - name: Upload new storybook
         id: upload-new-storybook
-        uses: grafana/shared-workflows/actions/push-to-gcs@main
+        uses: grafana/shared-workflows/actions/push-to-gcs@088e23a5f09be7b85cedbf89f119244125878ad9 # push-to-gcs/v0.3.2
         with:
           environment: prod
           bucket: ${{ env.BUCKET_NAME }}
