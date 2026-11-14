@@ -19,8 +19,12 @@ jobs:
       pull-requests: write # Create or update PR comments.
       statuses: write # Update GitHub status check with deploy preview link.
     if: "!github.event.pull_request.head.repo.fork"
-    uses: grafana/writers-toolkit/.github/workflows/deploy-preview.yml@main # zizmor: ignore[unpinned-uses]
+    uses: grafana/writers-toolkit/.github/workflows/deploy-preview.yml@572ac47761fd6ca2a8f801d1f4700f7a596e5938 # main
     with:
+      # The reusable workflow checks out its helper scripts from writers-toolkit main and
+      # builds with grafana/docs-base:latest unless these inputs pin them.
+      toolkit_ref: 572ac47761fd6ca2a8f801d1f4700f7a596e5938
+      image: grafana/docs-base@sha256:460ce538d54bcbc5b0bbbbeea5e14d1fb9c922f08cf376e30785d785a0ae8c03 # latest
       branch: ${{ github.head_ref }}
       event_number: ${{ github.event.number }}
       repo: grafana
