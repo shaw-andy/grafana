@@ -20,8 +20,9 @@ import (
 // The usage of strings.ToLower is because the server would convert `FromAlert` to `Fromalert`. So the make matching
 // easier, we just match all headers in lower case.
 //
-// the headers X-Real-IP and X-Forwarded-For are used by the HostedGrafanaACHeaderMiddleware at
-// https://github.com/grafana/grafana/blob/f191acf8114ab79609fc631e0f01fe2b47371188/pkg/services/pluginsintegration/clientmiddleware/grafana_request_id_header_middleware.go#L107
+// the headers X-Real-IP and X-Forwarded-For are caller-controlled. The HostedGrafanaACHeaderMiddleware
+// never uses X-Real-IP, and only follows X-Forwarded-For when the connection comes from a proxy listed
+// in [datasources.ip_range_security] trusted_proxies.
 //
 // the Cookie header is used by the CookiesMiddleware at
 // https://github.com/grafana/grafana/blob/326d374266077fbacc28c740f276748c636774f5/pkg/services/pluginsintegration/clientmiddleware/cookies_middleware.go#L60
