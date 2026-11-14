@@ -2,6 +2,7 @@ package logsdrilldown
 
 import (
 	"context"
+	"path"
 
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
@@ -75,6 +76,23 @@ func GetAuthorizer() authorizer.Authorizer {
 			return authorizer.DecisionDeny, "no permissions", nil
 		}
 
+		// Each LogsDrilldown belongs to one user, so these checks run before
+		// deferring to the default authorizer, which only looks at the org role.
+		switch attr.GetVerb() {
+		case "get", "delete", "patch", "update":
+			// Only allow the user to access their own settings
+			if !compareResourceNameAndUserUID(attr.GetName(), u) {
+				return authorizer.DecisionDeny, "forbidden", nil
+			}
+		case "list", "watch":
+			// Only the collection endpoint's storage filters items down to the
+			// caller's own; search and list-keys are restated as list but read
+			// the index directly.
+			if path.Base(attr.GetPath()) != attr.GetResource() {
+				return authorizer.DecisionDeny, "forbidden", nil
+			}
+		}
+
 		_, ok := p[accesscontrol.ActionDatasourcesExplore]
 		if !ok {
 			// defer to the default authorizer if datasources:explore is not present
@@ -83,19 +101,12 @@ func GetAuthorizer() authorizer.Authorizer {
 
 		switch attr.GetVerb() {
 		case "list":
-			// Allow everyone to list logsdrilldowns
+			// Storage filters the result to the caller's own settings
 			return authorizer.DecisionAllow, "", nil
-		case "get":
-			// Allow everyone to get individual logsdrilldowns
+		case "get", "delete", "patch", "update":
 			return authorizer.DecisionAllow, "", nil
 		case "create":
-			// Create requests are validated later since we don't have access to the resource name
-			return authorizer.DecisionAllow, "", nil
-		case "delete", "patch", "update":
-			// Only allow the user to access their own settings
-			if !compareResourceNameAndUserUID(attr.GetName(), u) {
-				return authorizer.DecisionDeny, "forbidden", nil
-			}
+			// Create requests are validated in storage since we don't have access to the resource name
 			return authorizer.DecisionAllow, "", nil
 		default:
 			// Forbid the rest
