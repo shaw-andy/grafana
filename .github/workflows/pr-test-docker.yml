@@ -81,7 +81,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
       - uses: docker/setup-docker-action@77e84dbf09b47d1e29270283c22f16145aa85ca1 # v4
@@ -89,7 +89,7 @@ jobs:
         run: docker buildx create --use
       - name: Login to DockerHub
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
-        uses: grafana/shared-workflows/actions/dockerhub-login@dockerhub-login/v1.0.4
+        uses: grafana/shared-workflows/actions/dockerhub-login@ef3a62a3ca4c1a15505b4235a5a51493194da3c7 # dockerhub-login/v1.0.4
       - name: Build alpine (full source)
         run: make build-docker-full DOCKER_BUILD_ARGS=--load
 
