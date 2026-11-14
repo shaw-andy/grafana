@@ -51,7 +51,7 @@ jobs:
         codeowner: ${{ fromJSON(needs.setup.outputs.opted-in-teams) }}
     steps:
       - name: Checkout main branch
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: main
           persist-credentials: false
@@ -92,7 +92,7 @@ jobs:
 
       - name: Get Vault secrets
         id: get-secrets
-        uses: grafana/shared-workflows/actions/get-vault-secrets@main
+        uses: grafana/shared-workflows/actions/get-vault-secrets@2f1ddaf3ce1aa677356243d0dd584be33cfa35e3 # get-vault-secrets/v2.1.0
         with:
           repo_secrets: |
             PROMETHEUS_URL=frontend_perf_tests:prometheus_push_url
