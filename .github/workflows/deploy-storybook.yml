@@ -88,7 +88,7 @@ jobs:
 
       - name: Log in to GCS
         id: login-to-gcs
-        uses: grafana/shared-workflows/actions/login-to-gcs@main
+        uses: grafana/shared-workflows/actions/login-to-gcs@6a943082408bb241a26b14661e446220c3e62b16 # main
         with:
           environment: prod
           service_account: github-gf-storybook-deploy@grafanalabs-workload-identity.iam.gserviceaccount.com
@@ -100,7 +100,7 @@ jobs:
 
       - name: Upload new storybook
         id: upload-new-storybook
-        uses: grafana/shared-workflows/actions/push-to-gcs@main
+        uses: grafana/shared-workflows/actions/push-to-gcs@6a943082408bb241a26b14661e446220c3e62b16 # main
         with:
           environment: prod
           bucket: ${{ env.BUCKET_NAME }}

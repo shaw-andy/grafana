@@ -187,7 +187,7 @@ jobs:
           mv public/build/assets-manifest*.json preview-manifest/
 
       - name: Upload assets (manifests excluded)
-        uses: grafana/shared-workflows/actions/push-to-gcs@main
+        uses: grafana/shared-workflows/actions/push-to-gcs@6a943082408bb241a26b14661e446220c3e62b16 # main
         with:
           environment: dev
           bucket: ${{ env.BUCKET_NAME }}
@@ -202,7 +202,7 @@ jobs:
           predefinedAcl: ""
 
       - name: Upload fonts
-        uses: grafana/shared-workflows/actions/push-to-gcs@main
+        uses: grafana/shared-workflows/actions/push-to-gcs@6a943082408bb241a26b14661e446220c3e62b16 # main
         with:
           environment: dev
           bucket: ${{ env.BUCKET_NAME }}
@@ -213,7 +213,7 @@ jobs:
           predefinedAcl: ""
 
       - name: Upload manifests to switch the preview to this build
-        uses: grafana/shared-workflows/actions/push-to-gcs@main
+        uses: grafana/shared-workflows/actions/push-to-gcs@6a943082408bb241a26b14661e446220c3e62b16 # main
         with:
           environment: dev
           bucket: ${{ env.BUCKET_NAME }}

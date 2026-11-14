@@ -114,9 +114,9 @@ jobs:
       id-token: write
 
     steps:
-      - uses: grafana/shared-workflows/actions/dockerhub-login@main
+      - uses: grafana/shared-workflows/actions/dockerhub-login@6a943082408bb241a26b14661e446220c3e62b16 # main
         if: github.event.pull_request.head.repo.fork == false
-      - uses: grafana/shared-workflows/actions/login-to-gar@main
+      - uses: grafana/shared-workflows/actions/login-to-gar@6a943082408bb241a26b14661e446220c3e62b16 # main
         if: github.event.pull_request.head.repo.fork == false
 
       - name: Checkout code
@@ -386,7 +386,7 @@ jobs:
     runs-on: ubuntu-x64-small
     steps:
       - id: vault-secrets
-        uses: grafana/shared-workflows/actions/get-vault-secrets@main
+        uses: grafana/shared-workflows/actions/get-vault-secrets@6a943082408bb241a26b14661e446220c3e62b16 # main
         with:
           repo_secrets: |
             GRAFANA_MISC_STATS_API_KEY=grafana-misc-stats:api_key
