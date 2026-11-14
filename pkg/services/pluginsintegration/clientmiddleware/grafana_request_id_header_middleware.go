@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -82,6 +83,12 @@ func IsRequestURLInAllowList(url *url.URL, cfg *setting.Cfg) bool {
 }
 
 func GetGrafanaRequestIDHeaders(req *http.Request, cfg *setting.Cfg, logger log.Logger) map[string]string {
+	// An empty key yields a signature anyone can reproduce, which would let callers forge internal requests.
+	if cfg == nil || strings.TrimSpace(cfg.IPRangeACSecretKey) == "" {
+		logger.Debug("IP range access control secret key is not set, not signing request")
+		return nil
+	}
+
 	// Generate a new Grafana request ID and sign it with the secret key
 	uid, err := uuid.NewRandom()
 	if err != nil {
