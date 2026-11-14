@@ -133,28 +133,33 @@ jobs:
             echo "WORK_BRANCH=release/${RUN_NUMBER}/${VERSION}"
           } >> "$GITHUB_ENV"
       - name: Checkout Grafana target branch #checkout the target branch to base the release branch on
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           token: ${{ steps.get-writer-app-token.outputs.token }} # used only for fetching; commits go via kminehart API
           ref: ${{ env.RELEASE_BRANCH }}
           fetch-tags: true
           fetch-depth: 0
       - name: Checkout Grafana (main)
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           token: ${{ github.token }}
           ref: main
           path: .grafana-main
 
+      # Use actions/setup-node directly instead of ./.github/actions/setup-node: the composite
+      # resolves from the release-branch checkout, whose copy may not pin its action ref, and
+      # this job holds the grafana-writer token.
       - name: Setup Node.js
         if: ${{ !contains(inputs.version, '+security') }}
-        uses: ./.github/actions/setup-node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: .nvmrc
       # Use actions/setup-go directly instead of ./.github/actions/setup-go: the composite
       # references ./.github/actions/report-go-cache-sizes, which resolves from this job's
       # workspace (the release-branch checkout). That subtree may lag main and miss the action,
       # failing the step. Mirror cache-build:false behavior (no GOCACHE; modules via actions/cache).
       - name: Setup Go
-        uses: actions/setup-go@v7.0.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: .grafana-main/go.mod
           cache: false
