@@ -21,7 +21,13 @@ import { RawFrameEditor } from './components/RawFrameEditor';
 import { SimulationQueryEditor } from './components/SimulationQueryEditor';
 import { StreamingClientEditor } from './components/StreamingClientEditor';
 import { USAQueryEditor, usaQueryModes } from './components/USAQueryEditor';
-import { defaultCSVWaveQuery, defaultExemplarLabels, defaultPulseQuery, defaultQuery } from './constants';
+import {
+  defaultCSVWaveQuery,
+  defaultExemplarLabels,
+  defaultPulseQuery,
+  defaultQuery,
+  MAX_ANNOTATION_EVENTS,
+} from './constants';
 import {
   type CSVWave,
   type ExemplarLabel,
@@ -170,6 +176,10 @@ export const QueryEditor = ({ query, datasource, onChange, onRunQuery }: Props) 
     }
 
     onUpdate({ ...query, [name]: newValue });
+  };
+
+  const onAnnotationCountChange = (e: FormEvent<HTMLInputElement>) => {
+    onUpdate({ ...query, lines: Math.min(Number(e.currentTarget.value), MAX_ANNOTATION_EVENTS) });
   };
 
   const onFieldChange = (field: string) => (e: { target: { name: string; value: string; type: string } }) => {
@@ -351,9 +361,11 @@ export const QueryEditor = ({ query, datasource, onChange, onRunQuery }: Props) 
             <Input
               type="number"
               name="lines"
+              min={0}
+              max={MAX_ANNOTATION_EVENTS}
               value={query.lines}
               width={32}
-              onChange={onInputChange}
+              onChange={onAnnotationCountChange}
               placeholder="10"
             />
           </InlineField>

@@ -33,5 +33,8 @@ export const defaultQuery: TestDataDataQuery = {
   refId: '',
 };
 
+// Matches the backend cap on `lines` for the logs scenario.
+export const MAX_ANNOTATION_EVENTS = 10000;
+
 // @todo export from logs model
 export const DATAPLANE_LABEL_TYPES_NAME = 'labelTypes';
