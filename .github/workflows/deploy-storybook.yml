@@ -25,8 +25,9 @@ permissions: {}
 
 jobs:
   detect-changes:
-    # Only run on push to main (not needed for workflow_call releases)
-    if: github.repository == 'grafana/grafana' && github.event_name == 'push'
+    # Change detection only applies to pushes to main. The job still runs (with no steps) for
+    # releases so that it is never skipped: a skipped ancestor would skip the deploy job too.
+    if: github.repository == 'grafana/grafana'
     name: Detect whether code changed
     runs-on: ubuntu-arm64-small
     permissions:
@@ -35,21 +36,138 @@ jobs:
       changed-frontend-packages: ${{ steps.detect-changes.outputs.frontend-packages }}
     steps:
       - uses: actions/checkout@v5
+        if: github.event_name == 'push'
         with:
           persist-credentials: true # required to get more history in the changed-files action
           fetch-depth: 0
           filter: blob:none
       - name: Detect changes
+        if: github.event_name == 'push'
         id: detect-changes
         uses: ./.github/actions/change-detection
         with:
           self: .github/workflows/deploy-storybook.yml
+
+  # Pins the commit to build. A version must be a stable release tag whose commit is on main or on
+  # its release branch; both are protected, while tags and same-named branches can be pushed by
+  # anyone with write access.
+  resolve-ref:
+    name: Resolve Storybook commit
+    runs-on: ubuntu-arm64-small
+    needs: detect-changes
+    if: github.repository == 'grafana/grafana' && (needs.detect-changes.outputs.changed-frontend-packages == 'true' || inputs.version != '')
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - name: Checkout workflow commit
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Resolve commit
+        id: resolve
+        env:
+          VERSION: ${{ inputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # A rejected ref leaves `sha` unset, which skips the build and deploy jobs.
+          reject() {
+            echo "::error::Not deploying Storybook: $1"
+            echo "Not deploying Storybook: $1" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            exit 0
+          }
+
+          remote_has_ref() {
+            git ls-remote origin "$1" | awk -v ref="$1" '$2 == ref { found = 1 } END { exit !found }'
+          }
+
+          if [[ -z "$VERSION" ]]; then
+            if [[ "$EVENT_NAME" != "push" || "$EVENT_REF" != "refs/heads/main" ]]; then
+              reject "a version is required unless this is a push to main"
+            fi
+            echo "sha=${EVENT_SHA}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(\+security-[0-9]+)?$ ]]; then
+            reject "version '${VERSION}' is not a release tag (expected vX.Y.Z or vX.Y.Z+security-NN)"
+          fi
+
+          # actions/checkout resolves an unqualified ref to a branch before a tag.
+          if remote_has_ref "refs/heads/${VERSION}"; then
+            reject "a branch named '${VERSION}' exists, so the version is ambiguous"
+          fi
+
+          tag_ref="refs/tags/${VERSION}"
+          if ! remote_has_ref "$tag_ref"; then
+            reject "tag '${VERSION}' does not exist"
+          fi
+          git fetch --no-tags --depth=1 origin "+${tag_ref}:${tag_ref}"
+          if ! sha=$(git rev-parse --verify --quiet "${tag_ref}^{commit}"); then
+            reject "tag '${VERSION}' does not point to a commit"
+          fi
+
+          # Release tags are created on the release PR's merge commit, so they sit at or near the tip.
+          for branch in main "release-${VERSION#v}"; do
+            if ! remote_has_ref "refs/heads/${branch}"; then
+              continue
+            fi
+            git fetch --no-tags --filter=tree:0 --depth=500 origin "+refs/heads/${branch}:refs/remotes/origin/${branch}"
+            if git merge-base --is-ancestor "$sha" "refs/remotes/origin/${branch}"; then
+              echo "Tag ${VERSION} is ${sha}, contained in ${branch}"
+              echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          reject "tag '${VERSION}' (${sha}) is not in the last 500 commits of main or release-${VERSION#v}"
+
+  # Runs repository code, so it must not be able to request an OIDC token.
+  build-storybook:
+    name: Build Storybook
+    runs-on: ubuntu-x64
+    needs: resolve-ref
+    if: needs.resolve-ref.outputs.sha != ''
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          ref: ${{ needs.resolve-ref.outputs.sha }}
+
+      - name: Setup Node.js
+        uses: ./.github/actions/setup-node
+
+      - name: Install yarn dependencies
+        uses: ./.github/actions/yarn-install
+
+      - name: Build storybook
+        run: yarn storybook:build
+
+      - name: Upload storybook artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: storybook
+          path: packages/grafana-ui/dist/storybook
+          if-no-files-found: error
+          retention-days: 1
+
+  # Holds the production credentials. It must not run any code from the checkout (no local actions,
+  # no yarn); it only publishes the artifact built from the resolved commit.
   deploy-storybook:
     name: Deploy Storybook
     runs-on: ubuntu-x64
-    needs: detect-changes
-    # Only run in grafana/grafana
-    if: ${{ !cancelled() && github.repository == 'grafana/grafana' && (needs.detect-changes.outputs.changed-frontend-packages == 'true' || inputs.version != '') }}
+    needs:
+      - resolve-ref
+      - build-storybook
+    if: github.repository == 'grafana/grafana'
     permissions:
       contents: read
       id-token: write
@@ -65,14 +183,23 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.version }}
 
-      - name: Setup Node.js
-        uses: ./.github/actions/setup-node
+      # The tag or branch may have moved since resolve-ref; never publish under a ref that no
+      # longer names the commit the artifact was built from.
+      - name: Verify ref still points to the built commit
+        env:
+          EXPECTED_SHA: ${{ needs.resolve-ref.outputs.sha }}
+        run: |
+          actual_sha=$(git rev-parse HEAD)
+          if [[ -z "$EXPECTED_SHA" || "$actual_sha" != "$EXPECTED_SHA" ]]; then
+            echo "::error::Ref '${VERSION}' now resolves to ${actual_sha}, but Storybook was built from '${EXPECTED_SHA}'"
+            exit 1
+          fi
 
-      - name: Install yarn dependencies
-        uses: ./.github/actions/yarn-install
-
-      - name: Build storybook
-        run: yarn storybook:build
+      - name: Download storybook artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: storybook
+          path: packages/grafana-ui/dist/storybook
 
       # Create the GCS folder name
       # "latest" when triggered from the latest release
