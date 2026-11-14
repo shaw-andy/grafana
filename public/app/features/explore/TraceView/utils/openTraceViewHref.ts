@@ -43,27 +43,29 @@ function resolveTraceViewHref(href: string): ResolvedTraceViewHref | undefined {
     return undefined;
   }
 
-  // Same-tab only for Grafana paths. Reject protocol-relative URLs (`//…`).
-  if (sanitized.startsWith('/') && !sanitized.startsWith('//')) {
-    return { href: sanitized, sameTab: true };
-  }
-
-  const absolute = sanitized.startsWith('//') ? `${window.location.protocol}${sanitized}` : sanitized;
-
+  // Resolve exactly as the anchor would, so `/\host`, `\\host` and stripped tabs/newlines cannot
+  // reach another host while looking like a Grafana path.
+  let url: URL;
   try {
-    const url = new URL(absolute);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      return undefined;
-    }
-    if (url.origin === window.location.origin) {
-      return { href: `${url.pathname}${url.search}${url.hash}`, sameTab: true };
-    }
-    return { href: url.href, sameTab: false };
+    url = new URL(sanitized, document.baseURI);
   } catch {
-    // Schemeless leftovers such as "explore" stay same-tab; anything with a colon is rejected.
-    if (!sanitized.includes(':')) {
-      return { href: sanitized, sameTab: true };
-    }
     return undefined;
   }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return undefined;
+  }
+  if (url.origin !== window.location.origin) {
+    return { href: url.href, sameTab: false };
+  }
+
+  // A same-origin URL whose path starts with `//` or `/\` is protocol-relative once the origin is dropped.
+  const path = `${url.pathname}${url.search}${url.hash}`;
+  if (!isSingleSlashPath(path)) {
+    return undefined;
+  }
+  return { href: path, sameTab: true };
+}
+
+function isSingleSlashPath(path: string): boolean {
+  return path.startsWith('/') && path[1] !== '/' && path[1] !== '\\';
 }
