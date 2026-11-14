@@ -33,5 +33,9 @@ export const defaultQuery: TestDataDataQuery = {
   refId: '',
 };
 
+export const DEFAULT_TRACE_SPAN_COUNT = 10;
+// Trace spans are built on the browser main thread when the panel loads.
+export const MAX_TRACE_SPAN_COUNT = 100;
+
 // @todo export from logs model
 export const DATAPLANE_LABEL_TYPES_NAME = 'labelTypes';
