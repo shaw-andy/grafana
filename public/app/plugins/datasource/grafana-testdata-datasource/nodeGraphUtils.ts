@@ -10,10 +10,12 @@ import {
   addRow,
 } from '@grafana/data';
 
+import { MAX_NODE_GRAPH_COUNT } from './nodeGraphCount';
 import * as serviceMapResponseSmall from './testData/serviceMapResponse';
 import * as serviceMapResponsMedium from './testData/serviceMapResponseMedium';
 
-export function generateRandomNodes(count = 10, seed?: number) {
+export function generateRandomNodes(requestedCount = 10, seed?: number) {
+  const count = Math.min(requestedCount, MAX_NODE_GRAPH_COUNT);
   const nodes = [];
   const edges: string[] = [];
   const rand = randomLcg(seed);
