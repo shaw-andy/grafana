@@ -156,7 +156,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: grafana/shared-workflows/actions/dockerhub-login@dockerhub-login/v1.0.2
+      - uses: grafana/shared-workflows/actions/dockerhub-login@c6d954f7cd9c0022018982e01268de6cb75b913c # dockerhub-login/v1.0.2
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
       - uses: actions/checkout@v6
         with:

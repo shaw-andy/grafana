@@ -145,7 +145,7 @@ jobs:
       pull-requests: write
       statuses: read
     steps:
-      - uses: grafana/shared-workflows/actions/dockerhub-login@dockerhub-login/v1.0.2
+      - uses: grafana/shared-workflows/actions/dockerhub-login@c6d954f7cd9c0022018982e01268de6cb75b913c # dockerhub-login/v1.0.2
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
@@ -199,7 +199,7 @@ jobs:
         if: steps.meticulous-eligibility.outputs.run == 'true'
         id: vault-secrets
         continue-on-error: true
-        uses: grafana/shared-workflows/actions/get-vault-secrets@main
+        uses: grafana/shared-workflows/actions/get-vault-secrets@2f1ddaf3ce1aa677356243d0dd584be33cfa35e3 # get-vault-secrets/v2.1.0
         with:
           repo_secrets: |
             METICULOUS_API_TOKEN=meticulous-ui:api-token
@@ -237,7 +237,7 @@ jobs:
       id-token: write
     runs-on: ubuntu-x64
     steps:
-      - uses: grafana/shared-workflows/actions/login-to-gar@main
+      - uses: grafana/shared-workflows/actions/login-to-gar@afad5c7621e788905e6417f05b492972685ab1eb # login-to-gar/v1.0.4
         id: login-to-gar
         with:
           registry: 'us-docker.pkg.dev'
