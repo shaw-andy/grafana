@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/grafana/grafana/pkg/api/response"
@@ -10,8 +11,15 @@ import (
 )
 
 func (hs *HTTPServer) PostFrontendMetrics(c *contextmodel.ReqContext) response.Response {
+	if c.Req.Body != nil {
+		c.Req.Body = http.MaxBytesReader(c.Resp, c.Req.Body, metrics.MaxFrontendMetricsBodyBytes)
+	}
 	cmd := metrics.PostFrontendMetricsCommand{}
 	if err := web.Bind(c.Req, &cmd); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return response.Error(http.StatusRequestEntityTooLarge, "request body too large", err)
+		}
 		return response.Error(http.StatusBadRequest, "bad request data", err)
 	}
 	for _, event := range cmd.Events {
