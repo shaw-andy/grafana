@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Runs translate-secrets.bash, then the vault-action selector.
+# Arguments: <repo_secrets mapping> <owner/repo>
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "usage: vault-select <repo_secrets> <owner/repo>" >&2
+  exit 64
+fi
+
+translated="$(mktemp)"
+trap 'rm -f "$translated"' EXIT
+
+GITHUB_OUTPUT="$translated" \
+  REPO_SECRETS="$1" \
+  REPO="$2" \
+  REPO_OWNER="${2%%/*}" \
+  VERSION="${VERSION:-v1}" \
+  bash "$TRANSLATE_SECRETS" >/dev/null
+
+VAULT_INSTANCE="${VAULT_INSTANCE:-ops}" \
+  node "$VAULT_DRIVER" "$translated" "$VAULT_BODY"
