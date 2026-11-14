@@ -1,6 +1,7 @@
 import { lastValueFrom, of } from 'rxjs';
 
 import {
+  type CustomVariableModel,
   type DataQueryRequest,
   type DataQueryResponse,
   type Field,
@@ -17,6 +18,7 @@ import {
   LogsQueryLanguage,
 } from '../dataquery.gen';
 import { logGroupNamesVariable, regionVariable } from '../mocks/CloudWatchDataSource';
+import { initialCustomVariableModelState } from '../mocks/CloudWatchVariables';
 import { setupMockedLogsQueryRunner } from '../mocks/LogsQueryRunner';
 import { LogsRequestMock } from '../mocks/Request';
 import { validLogsQuery } from '../mocks/queries';
@@ -958,6 +960,146 @@ describe('CloudWatchLogsQueryRunner', () => {
         key: 'test-key',
         state: 'Done',
       });
+    });
+  });
+
+  describe('substituted log selection sent to StartQuery', () => {
+    const breakout = 'selected`], source=[lg:`injected-log-group`] | fields `@message` -- ';
+
+    function variable(name: string, value: string): CustomVariableModel {
+      return {
+        ...initialCustomVariableModelState,
+        id: name,
+        name,
+        current: { value, text: value, selected: true },
+      };
+    }
+
+    async function startQuery(runnerArgs: {
+      variableValue: string;
+      variableName: string;
+      query: CloudWatchLogsQuery;
+    }) {
+      const { runner } = setupMockedLogsQueryRunner({
+        variables: [variable(runnerArgs.variableName, runnerArgs.variableValue)],
+      });
+      const options: DataQueryRequest<CloudWatchLogsQuery> = {
+        ...LogsRequestMock,
+        targets: [runnerArgs.query],
+      };
+      const queryFn = jest
+        .fn()
+        .mockReturnValueOnce(of(startQuerySuccessResponseStub))
+        .mockReturnValueOnce(of(getQuerySuccessResponseStub));
+      let rejected = false;
+      try {
+        await lastValueFrom(runner.handleLogQueries([runnerArgs.query], options, queryFn));
+      } catch {
+        rejected = true;
+      }
+      return { queryFn, rejected };
+    }
+
+    it('does not start a PPL query when a log group variable closes the source identifier', async () => {
+      const { queryFn, rejected } = await startQuery({
+        variableName: 'groups',
+        variableValue: breakout,
+        query: {
+          ...validLogsQuery,
+          queryLanguage: LogsQueryLanguage.PPL,
+          expression: 'fields `@timestamp`',
+          logGroups: [{ arn: '$groups', name: '$groups' }],
+          logDataSources: [{ name: 'amazon_vpc', type: 'flow' }],
+        },
+      });
+
+      expect(JSON.stringify(queryFn.mock.calls)).not.toContain('injected-log-group');
+      expect(JSON.stringify(queryFn.mock.calls)).not.toContain('`]');
+      expect(rejected).toBe(true);
+    });
+
+    it.each(['app`extra', 'app|extra', 'app[extra', 'app]extra'])(
+      'does not start a PPL query when a log group variable expands to %s',
+      async (variableValue) => {
+        const { queryFn, rejected } = await startQuery({
+          variableName: 'groups',
+          variableValue,
+          query: {
+            ...validLogsQuery,
+            queryLanguage: LogsQueryLanguage.PPL,
+            expression: 'fields `@timestamp`',
+            logGroups: [{ arn: '$groups', name: '$groups' }],
+            logDataSources: [{ name: 'amazon_vpc', type: 'flow' }],
+          },
+        });
+
+        expect(JSON.stringify(queryFn.mock.calls)).not.toContain(variableValue);
+        expect(rejected).toBe(true);
+      }
+    );
+
+    it('still starts a PPL query when the log group variable is a plain name', async () => {
+      const { queryFn, rejected } = await startQuery({
+        variableName: 'groups',
+        variableValue: '/aws/lambda/selected',
+        query: {
+          ...validLogsQuery,
+          queryLanguage: LogsQueryLanguage.PPL,
+          expression: 'fields `@timestamp`',
+          logGroups: [{ arn: '$groups', name: '$groups' }],
+          logDataSources: [{ name: 'amazon_vpc', type: 'flow' }],
+        },
+      });
+
+      expect(rejected).toBe(false);
+      expect(queryFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          targets: expect.arrayContaining([
+            expect.objectContaining({
+              subtype: 'StartQuery',
+              queryString: 'fields `@timestamp`',
+              logGroups: [{ arn: '/aws/lambda/selected', name: '/aws/lambda/selected' }],
+              logDataSources: [{ name: 'amazon_vpc', type: 'flow' }],
+            }),
+          ]),
+        })
+      );
+    });
+
+    it('does not start a CWLI query when a prefix variable closes the SOURCE quote', async () => {
+      const prefix = "abc']) | SOURCE logGroups(logGroupIdentifier: ['injected-log-group']) | fields @message -- ";
+      const { queryFn, rejected } = await startQuery({
+        variableName: 'prefix',
+        variableValue: prefix,
+        query: {
+          ...validLogsQuery,
+          queryLanguage: LogsQueryLanguage.CWLI,
+          logsQueryScope: 'namePrefix',
+          logGroups: [],
+          logGroupPrefixes: ['$prefix'],
+        },
+      });
+
+      expect(JSON.stringify(queryFn.mock.calls)).not.toContain('injected-log-group');
+      expect(rejected).toBe(true);
+    });
+
+    it('does not start a CWLI query when an account variable closes the SOURCE quote', async () => {
+      const account = "123']) | SOURCE logGroups(logGroupIdentifier: ['injected-log-group']) | fields @message -- ";
+      const { queryFn, rejected } = await startQuery({
+        variableName: 'account',
+        variableValue: account,
+        query: {
+          ...validLogsQuery,
+          queryLanguage: LogsQueryLanguage.CWLI,
+          logsQueryScope: 'allLogGroups',
+          logGroups: [],
+          selectedAccountIds: ['$account'],
+        },
+      });
+
+      expect(JSON.stringify(queryFn.mock.calls)).not.toContain('injected-log-group');
+      expect(rejected).toBe(true);
     });
   });
 
