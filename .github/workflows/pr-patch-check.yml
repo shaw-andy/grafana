@@ -49,17 +49,44 @@ jobs:
           github_app: grafana-releases-oss
 
       - name: "Dispatch job"
+        id: dispatch
         uses: actions/github-script@v8
         with:
           github-token: ${{ steps.get-github-app-token.outputs.token }}
           script: |
             const {HEAD_REF, BASE_REF, REPO, SENDER, SHA, PR_COMMIT_SHA} = process.env;
+            const runName = `${REPO} ${HEAD_REF}`;
 
-            await github.rest.actions.createWorkflowDispatch({
+            // Workflow run created_at values only have one-second resolution.
+            const dispatchedAfter = new Date(Math.floor(Date.now() / 1000) * 1000).toISOString();
+
+            const preexistingRunIds = [];
+            for (let page = 1; ; page++) {
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                owner: 'grafana',
+                repo: 'security-patch-actions',
+                workflow_id: 'test-patches-event.yml',
+                branch: 'main',
+                created: `>=${dispatchedAfter}`,
+                per_page: 100,
+                page,
+              });
+              for (const run of data.workflow_runs) {
+                if (run.name === runName) {
+                  preexistingRunIds.push(run.id);
+                }
+              }
+              if (data.workflow_runs.length < 100) {
+                break;
+              }
+            }
+
+            const { data } = await github.rest.actions.createWorkflowDispatch({
                 owner: 'grafana',
                 repo: 'security-patch-actions',
                 workflow_id: 'test-patches-event.yml',
                 ref: 'main',
+                return_run_details: true,
                 inputs: {
                   src_repo: REPO,
                   src_ref: HEAD_REF,
@@ -71,24 +98,46 @@ jobs:
                 }
             })
 
+            core.setOutput('run_id', data && data.workflow_run_id ? String(data.workflow_run_id) : '');
+            core.setOutput('dispatched_after', dispatchedAfter);
+            core.setOutput('preexisting_run_ids', preexistingRunIds.join(','));
+
       - name: "Wait for success"
         # Only run metadata reads (status/conclusion) — never fetch logs or artifacts,
         # since the security-patch-actions workflow output must not be exposed.
         uses: actions/github-script@v8
+        env:
+          RUN_ID: ${{ steps.dispatch.outputs.run_id }}
+          DISPATCHED_AFTER: ${{ steps.dispatch.outputs.dispatched_after }}
+          PREEXISTING_RUN_IDS: ${{ steps.dispatch.outputs.preexisting_run_ids }}
         with:
           github-token: ${{ steps.get-github-app-token.outputs.token }}
           script: |
-            const {HEAD_REF, REPO} = process.env;
+            const {HEAD_REF, REPO, RUN_ID, DISPATCHED_AFTER, PREEXISTING_RUN_IDS} = process.env;
+            const runName = `${REPO} ${HEAD_REF}`;
+            const preexistingRunIds = new Set((PREEXISTING_RUN_IDS || '').split(',').filter(Boolean).map(Number));
 
             const maxWaitMs = 10 * 60 * 1000;
             const pollIntervalMs = 15 * 1000;
+            // Without a run id from the dispatch response, give runs created around the
+            // dispatch time to show up in the list before deciding which one is ours.
+            const listSettleMs = 60 * 1000;
             const startTime = Date.now();
-            // Include a 60s lookback buffer to cover the time spent in the dispatch step.
-            const createdAfter = new Date(startTime - 60 * 1000).toISOString();
 
             const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-            let runId = null;
+            let runId = RUN_ID ? Number(RUN_ID) : null;
+            let loggedRun = false;
+            if (!runId && !DISPATCHED_AFTER) {
+              core.setFailed('Dispatch step did not record when the patch check was dispatched');
+              return;
+            }
+            if (!runId) {
+              const settleUntil = Date.parse(DISPATCHED_AFTER) + listSettleMs;
+              if (Date.now() < settleUntil) {
+                await sleep(settleUntil - Date.now());
+              }
+            }
 
             while (true) {
               if (Date.now() - startTime >= maxWaitMs) {
@@ -97,25 +146,42 @@ jobs:
               }
 
               if (!runId) {
-                const { data } = await github.rest.actions.listWorkflowRuns({
-                  owner: 'grafana',
-                  repo: 'security-patch-actions',
-                  workflow_id: 'test-patches-event.yml',
-                  branch: 'main',
-                  created: `>${createdAfter}`,
-                  per_page: 5,
-                });
+                // Branch and repository names cannot contain spaces, so only an exact name
+                // match is a run of this branch.
+                const candidates = [];
+                for (let page = 1; ; page++) {
+                  const { data } = await github.rest.actions.listWorkflowRuns({
+                    owner: 'grafana',
+                    repo: 'security-patch-actions',
+                    workflow_id: 'test-patches-event.yml',
+                    branch: 'main',
+                    created: `>=${DISPATCHED_AFTER}`,
+                    per_page: 100,
+                    page,
+                  });
+                  candidates.push(...data.workflow_runs.filter(run =>
+                    run.name === runName &&
+                    !preexistingRunIds.has(run.id) &&
+                    Date.parse(run.created_at) >= Date.parse(DISPATCHED_AFTER)
+                  ));
+                  if (data.workflow_runs.length < 100) {
+                    break;
+                  }
+                }
 
-                const matchingRun = data.workflow_runs.find(
-                  run => run.name && run.name.includes(REPO) && run.name.includes(HEAD_REF)
-                );
-                if (matchingRun) {
-                  runId = matchingRun.id;
-                  console.log(`Dispatched workflow run: ${matchingRun.html_url}`);
-                } else {
+                if (candidates.length > 1) {
+                  core.setFailed(`Found ${candidates.length} patch check runs named "${runName}" since this dispatch; cannot tell which one it created`);
+                  return;
+                }
+                if (candidates.length === 0) {
                   await sleep(pollIntervalMs);
                   continue;
                 }
+                runId = candidates[0].id;
+              }
+              if (!loggedRun) {
+                console.log(`Dispatched workflow run: https://github.com/grafana/security-patch-actions/actions/runs/${runId}`);
+                loggedRun = true;
               }
 
               const { data: run } = await github.rest.actions.getWorkflowRun({
