@@ -1556,7 +1556,8 @@ func TestBuildSourceClause(t *testing.T) {
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			result := buildSourceClause(tc.logsQuery, tc.includeAccounts, tc.logGroupIdentifiers, tc.dataSourceIdentifiers)
+			result, err := buildSourceClause(tc.logsQuery, tc.includeAccounts, tc.logGroupIdentifiers, tc.dataSourceIdentifiers)
+			require.NoError(t, err)
 			assert.Equal(t, tc.expected, result)
 		})
 	}
@@ -2350,7 +2351,8 @@ func TestFormatStringArrayForSource(t *testing.T) {
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			result := formatStringArrayForSource(tc.input)
+			result, err := formatStringArrayForSource(tc.input)
+			require.NoError(t, err)
 			assert.Equal(t, tc.expected, result)
 		})
 	}
