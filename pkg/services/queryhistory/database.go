@@ -2,10 +2,21 @@ package queryhistory
 
 import (
 	"context"
+	"math"
 
 	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/services/user"
 	"github.com/grafana/grafana/pkg/util"
+)
+
+const (
+	defaultSearchLimit = 100
+	// Every returned row is held in memory together with its queries and comment,
+	// so the page size and the stored text size together bound one search.
+	maxSearchLimit = 100
+	// Matches the MySQL TEXT columns that hold queries and comment, so no
+	// database accepts more than the smallest one can store.
+	maxStoredTextBytes = 65535
 )
 
 type Datasource struct {
@@ -20,6 +31,14 @@ type QueryHistoryDetails struct {
 
 // createQuery adds a query into query history
 func (s QueryHistoryService) createQuery(ctx context.Context, user *user.SignedInUser, cmd CreateQueryInQueryHistoryCommand) (QueryHistoryDTO, error) {
+	queries, err := cmd.Queries.ToDB()
+	if err != nil {
+		return QueryHistoryDTO{}, err
+	}
+	if len(queries) > maxStoredTextBytes {
+		return QueryHistoryDTO{}, ErrQueriesTooLarge
+	}
+
 	queryHistory := QueryHistory{
 		OrgID:         user.OrgID,
 		UID:           util.GenerateShortUID(),
@@ -30,7 +49,7 @@ func (s QueryHistoryService) createQuery(ctx context.Context, user *user.SignedI
 		Comment:       "",
 	}
 
-	err := s.store.WithDbSession(ctx, func(session *db.Session) error {
+	err = s.store.WithDbSession(ctx, func(session *db.Session) error {
 		_, err := session.Insert(&queryHistory)
 		return err
 	})
@@ -79,13 +98,16 @@ func (s QueryHistoryService) searchQueries(ctx context.Context, user *user.Signe
 		query.To = s.now().Unix()
 	}
 
+	if query.Limit <= 0 {
+		query.Limit = defaultSearchLimit
+	}
+	query.Limit = min(query.Limit, maxSearchLimit)
+
 	if query.Page <= 0 {
 		query.Page = 1
 	}
-
-	if query.Limit <= 0 {
-		query.Limit = 100
-	}
+	// Keeps the offset Limit*(Page-1) from overflowing.
+	query.Page = min(query.Page, math.MaxInt/query.Limit)
 
 	if query.Sort == "" {
 		query.Sort = "time-desc"
@@ -168,6 +190,10 @@ func (s QueryHistoryService) deleteQuery(ctx context.Context, user *user.SignedI
 
 // patchQueryComment searches updates comment for query in query history
 func (s QueryHistoryService) patchQueryComment(ctx context.Context, user *user.SignedInUser, UID string, cmd PatchQueryCommentInQueryHistoryCommand) (QueryHistoryDTO, error) {
+	if len(cmd.Comment) > maxStoredTextBytes {
+		return QueryHistoryDTO{}, ErrCommentTooLarge
+	}
+
 	var queryHistory QueryHistory
 	var isStarred bool
 

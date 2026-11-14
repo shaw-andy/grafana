@@ -1,6 +1,7 @@
 package queryhistory
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/gtime"
@@ -55,6 +56,9 @@ func (s *QueryHistoryService) createHandler(c *contextmodel.ReqContext) response
 	}
 
 	query, err := s.CreateQueryInQueryHistory(c.Req.Context(), c.SignedInUser, cmd)
+	if errors.Is(err, ErrQueriesTooLarge) {
+		return response.Error(http.StatusBadRequest, "Queries exceed the maximum size", err)
+	}
 	if err != nil {
 		return response.Error(http.StatusInternalServerError, "Failed to create query history", err)
 	}
@@ -67,7 +71,7 @@ func (s *QueryHistoryService) createHandler(c *contextmodel.ReqContext) response
 // Query history search.
 //
 // Returns a list of queries in the query history that matches the search criteria.
-// Query history search supports pagination. Use the `limit` parameter to control the maximum number of queries returned; the default limit is 100.
+// Query history search supports pagination. Use the `limit` parameter to control the maximum number of queries returned; the default and maximum limit is 100.
 // You can also use the `page` query parameter to fetch queries from any page other than the first one.
 //
 // Responses:
@@ -146,6 +150,9 @@ func (s *QueryHistoryService) patchCommentHandler(c *contextmodel.ReqContext) re
 	}
 
 	query, err := s.PatchQueryCommentInQueryHistory(c.Req.Context(), c.SignedInUser, queryUID, cmd)
+	if errors.Is(err, ErrCommentTooLarge) {
+		return response.Error(http.StatusBadRequest, "Comment exceeds the maximum size", err)
+	}
 	if err != nil {
 		return response.Error(http.StatusInternalServerError, "Failed to update comment of query in query history", err)
 	}

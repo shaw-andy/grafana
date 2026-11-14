@@ -10,6 +10,8 @@ var (
 	ErrQueryNotFound        = errors.New("query in query history not found")
 	ErrStarredQueryNotFound = errors.New("starred query not found")
 	ErrQueryAlreadyStarred  = errors.New("query was already starred")
+	ErrQueriesTooLarge      = errors.New("queries exceed the maximum size")
+	ErrCommentTooLarge      = errors.New("comment exceeds the maximum size")
 )
 
 // QueryHistory is the model for query history definitions

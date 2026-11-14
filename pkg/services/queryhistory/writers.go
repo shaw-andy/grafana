@@ -36,13 +36,15 @@ func writeStarredSQL(query SearchInQueryHistoryQuery, sqlStore db.DB, builder *d
 func writeFiltersSQL(query SearchInQueryHistoryQuery, user *user.SignedInUser, sqlStore db.DB, builder *db.SQLBuilder) {
 	queriesSQL, queriesParam := sqlStore.GetDialect().LikeOperator("query_history.queries", true, query.SearchString, true)
 	commentSQL, commentParam := sqlStore.GetDialect().LikeOperator("query_history.comment", true, query.SearchString, true)
-	params := []any{user.OrgID, user.UserID, query.From, query.To, queriesParam, commentParam}
+	params := []any{user.OrgID, user.UserID, query.From, query.To, queriesParam, commentParam, maxStoredTextBytes, maxStoredTextBytes}
 	var sql bytes.Buffer
 	sql.WriteString(" WHERE query_history.org_id = ? AND query_history.created_by = ? AND query_history.created_at >= ? AND query_history.created_at <= ? AND (")
 	sql.WriteString(queriesSQL)
 	sql.WriteString(" OR ")
 	sql.WriteString(commentSQL)
 	sql.WriteString(") ")
+	// Rows stored before the size cap was enforced can be far larger than it.
+	sql.WriteString(" AND LENGTH(query_history.queries) <= ? AND LENGTH(query_history.comment) <= ? ")
 
 	if len(query.DatasourceUIDs) > 0 {
 		q := "?" + strings.Repeat(",?", len(query.DatasourceUIDs)-1)
