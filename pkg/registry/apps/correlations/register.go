@@ -5,6 +5,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
 	restclient "k8s.io/client-go/rest"
 
@@ -16,8 +17,8 @@ import (
 	correlationsapp "github.com/grafana/grafana/apps/correlations/pkg/app"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
 	"github.com/grafana/grafana/pkg/apiserver/rest"
+	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/apiserver/appinstaller"
-	roleauthorizer "github.com/grafana/grafana/pkg/services/apiserver/auth/authorizer"
 	"github.com/grafana/grafana/pkg/services/apiserver/endpoints/request"
 	"github.com/grafana/grafana/pkg/services/correlations"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
@@ -33,14 +34,18 @@ type AppInstaller struct {
 	appsdkapiserver.AppInstaller
 
 	legacy *legacyStorage
+	access *correlationAccess
 }
 
 func RegisterAppInstaller(
 	cfg *setting.Cfg,
 	features featuremgmt.FeatureToggles,
 	legacyService *correlations.CorrelationsService,
+	accessControl accesscontrol.AccessControl,
 ) (*AppInstaller, error) {
-	installer := &AppInstaller{}
+	installer := &AppInstaller{
+		access: &correlationAccess{ac: accessControl},
+	}
 	provider := simple.NewAppProvider(apis.LocalManifest(), nil, correlationsapp.New)
 
 	appConfig := app.Config{
@@ -57,14 +62,18 @@ func RegisterAppInstaller(
 		installer.legacy = &legacyStorage{
 			service:    legacyService,
 			namespacer: request.GetNamespaceMapper(cfg),
+			access:     installer.access,
 		}
 	}
 	return installer, nil
 }
 
 func (a *AppInstaller) GetAuthorizer() authorizer.Authorizer {
-	//nolint:staticcheck // not yet migrated to Resource Authorizer
-	return roleauthorizer.NewRoleAuthorizer()
+	return authorizer.AuthorizerFunc(a.access.authorize)
+}
+
+func (a *AppInstaller) AdmissionPlugin() admission.Factory {
+	return chainAdmission(a.AppInstaller.AdmissionPlugin(), newAdmissionValidator(a.access))
 }
 
 func (a *AppInstaller) GetLegacyStorage(requested schema.GroupVersionResource) rest.Storage {
