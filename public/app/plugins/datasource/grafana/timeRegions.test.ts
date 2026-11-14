@@ -478,4 +478,32 @@ describe('grafana data source', () => {
       ]
     `);
   });
+
+  it('rejects an every-second cron instead of returning one row per second', () => {
+    expect(() =>
+      doTimeRegionQuery(
+        'every second',
+        { mode: 'cron', cronExpr: '* * * * * *', duration: '1s', timezone: 'utc' },
+        {
+          from: dateTime('2020-01-01T00:00:00.000Z'),
+          to: dateTime('2020-01-01T00:02:00.000Z'),
+          raw: { from: '2020-01-01T00:00:00.000Z', to: '2020-01-01T00:02:00.000Z' },
+        }
+      )
+    ).toThrow('Time region cron interval is shorter than 1 minute');
+  });
+
+  it('rejects an every-minute cron once the dashboard range passes 1000 ticks', () => {
+    expect(() =>
+      doTimeRegionQuery(
+        'every minute',
+        { mode: 'cron', cronExpr: '0 * * * * *', duration: '1s', timezone: 'utc' },
+        {
+          from: dateTime('2020-01-01T00:00:00.000Z'),
+          to: dateTime('2020-01-02T00:00:00.000Z'),
+          raw: { from: '2020-01-01T00:00:00.000Z', to: '2020-01-02T00:00:00.000Z' },
+        }
+      )
+    ).toThrow('Time region query exceeds the maximum of 1000 ranges');
+  });
 });
