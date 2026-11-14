@@ -1,4 +1,4 @@
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 
 import { config } from '@grafana/runtime';
 
@@ -68,6 +68,54 @@ describe('QueryEditor', () => {
         expect(document.querySelector('#randomWalk-startValue-A')).not.toBeInTheDocument();
         expect(document.querySelector('#randomWalk-spread-A')).not.toBeInTheDocument();
       });
+    });
+
+    it('stores a typed series count at or below 500', async () => {
+      config.featureToggles.dashboardTemplates = true;
+
+      const query: GrafanaQuery = {
+        refId: 'A',
+        queryType: GrafanaQueryType.RandomWalk,
+      };
+
+      render(
+        <QueryEditor datasource={mockDatasource} query={query} onChange={mockOnChange} onRunQuery={mockOnRunQuery} />
+      );
+
+      const input = await waitFor(() => {
+        const seriesCount = document.querySelector('#randomWalk-seriesCount-A');
+        expect(seriesCount).toBeInTheDocument();
+        return seriesCount as HTMLInputElement;
+      });
+
+      fireEvent.change(input, { target: { value: '2000' } });
+
+      const saved = mockOnChange.mock.calls.at(-1)?.[0] as GrafanaQuery;
+      expect(saved.seriesCount).toBeGreaterThan(0);
+      expect(saved.seriesCount).toBeLessThanOrEqual(500);
+    });
+
+    it('sets a maximum of at most 500 on the series count input', async () => {
+      config.featureToggles.dashboardTemplates = true;
+
+      const query: GrafanaQuery = {
+        refId: 'A',
+        queryType: GrafanaQueryType.RandomWalk,
+      };
+
+      render(
+        <QueryEditor datasource={mockDatasource} query={query} onChange={mockOnChange} onRunQuery={mockOnRunQuery} />
+      );
+
+      const input = await waitFor(() => {
+        const seriesCount = document.querySelector('#randomWalk-seriesCount-A');
+        expect(seriesCount).toBeInTheDocument();
+        return seriesCount as HTMLInputElement;
+      });
+
+      const max = Number(input.max);
+      expect(max).toBeGreaterThanOrEqual(1);
+      expect(max).toBeLessThanOrEqual(500);
     });
   });
 });

@@ -42,6 +42,19 @@ describe('randomWalk', () => {
     expect(frames).toHaveLength(3);
   });
 
+  // A saved series count has to stay within a few hundred frames. 500 is the ceiling.
+  it('does not allocate one frame per series when seriesCount is above 500', () => {
+    const frames = randomWalk(makeQuery({ seriesCount: 2000 }), makeRequest());
+    expect(frames.length).toBeGreaterThan(0);
+    expect(frames.length).toBeLessThanOrEqual(500);
+  });
+
+  it('does not allocate one frame per series when seriesCount is a numeric string', () => {
+    const frames = randomWalk(makeQuery({ seriesCount: '2000' as unknown as number }), makeRequest());
+    expect(frames.length).toBeGreaterThan(0);
+    expect(frames.length).toBeLessThanOrEqual(500);
+  });
+
   it('should have correct frame structure', () => {
     const frames = randomWalk(makeQuery(), makeRequest());
     const frame = frames[0];
