@@ -31,6 +31,7 @@ import {
 import { DATAPLANE_LABEL_TYPES_NAME } from './constants';
 import { type Scenario, type TestDataDataQuery, TestDataQueryType } from './dataquery';
 import { queryMetricTree } from './metricTree';
+import { parseNodeGraphCount } from './nodeGraphCount';
 import { generateRandomEdges, generateRandomNodes, generateShowcaseData, savedNodesResponse } from './nodeGraphUtils';
 import { runStream } from './runStreams';
 import { flameGraphData, flameGraphDataDiff } from './testData/flameGraphResponse';
@@ -277,7 +278,7 @@ export class TestDataDataSource
         frames = generateShowcaseData();
         break;
       case 'random':
-        frames = generateRandomNodes(target.nodes?.count, target.nodes?.seed);
+        frames = generateRandomNodes(parseNodeGraphCount(target.nodes?.count), target.nodes?.seed);
         break;
       case 'response_small':
         frames = savedNodesResponse('small');
@@ -286,7 +287,7 @@ export class TestDataDataSource
         frames = savedNodesResponse('medium');
         break;
       case 'random edges':
-        frames = [generateRandomEdges(target.nodes?.count, target.nodes?.seed)];
+        frames = [generateRandomEdges(parseNodeGraphCount(target.nodes?.count), target.nodes?.seed)];
         break;
       default:
         throw new Error(`Unknown node_graph sub type ${type}`);

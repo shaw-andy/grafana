@@ -1,6 +1,7 @@
 import { Input, InlineFieldRow, InlineField, Select } from '@grafana/ui';
 
 import { type NodesQuery, type TestDataDataQuery } from '../dataquery';
+import { clampNodeGraphCount, MAX_NODE_GRAPH_COUNT } from '../nodeGraphCount';
 
 export interface Props {
   onChange: (value: NodesQuery) => void;
@@ -27,10 +28,15 @@ export function NodeGraphEditor({ query, onChange }: Props) {
             <Input
               type="number"
               name="count"
+              min={1}
+              max={MAX_NODE_GRAPH_COUNT}
               value={query.nodes?.count}
               width={32}
               onChange={(e) =>
-                onChange({ ...query.nodes, count: e.currentTarget.value ? parseInt(e.currentTarget.value, 10) : 0 })
+                onChange({
+                  ...query.nodes,
+                  count: e.currentTarget.value ? clampNodeGraphCount(parseInt(e.currentTarget.value, 10)) : undefined,
+                })
               }
               placeholder="10"
             />
