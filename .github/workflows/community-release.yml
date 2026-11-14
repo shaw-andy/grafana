@@ -41,7 +41,7 @@ jobs:
             GRAFANABOT_FORUM_KEY=community_release:GRAFANABOT_FORUM_KEY
 
       - name: Run community-release (manually invoked)
-        uses: grafana/grafana-github-actions-go/community-release@main
+        uses: grafana/grafana-github-actions-go/community-release@015e217f58ce35182230e20ac721e8351258f0ad # main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           version: ${{ inputs.version }}
