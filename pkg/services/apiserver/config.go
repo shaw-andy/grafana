@@ -66,6 +66,7 @@ func applyGrafanaConfig(cfg *setting.Cfg, o *options.Options) error {
 	o.StorageOptions.StorageType = options.StorageType(apiserverCfg.Key("storage_type").MustString(string(options.StorageTypeUnified)))
 	o.StorageOptions.DataPath = apiserverCfg.Key("storage_path").MustString(filepath.Join(cfg.DataPath, "grafana-apiserver"))
 	o.StorageOptions.Address = apiserverCfg.Key("address").MustString(o.StorageOptions.Address)
+	o.StorageOptions.GrpcClientTLS = options.ReadGrpcClientTLSConfig(cfg)
 	o.StorageOptions.BlobStoreURL = apiserverCfg.Key("blob_url").MustString(o.StorageOptions.BlobStoreURL)
 	o.StorageOptions.BlobThresholdBytes = apiserverCfg.Key("blob_threshold_bytes").MustInt(o.StorageOptions.BlobThresholdBytes)
 
