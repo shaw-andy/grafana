@@ -21,6 +21,7 @@ var (
 	ProfileBlockRate     int
 	ProfileMutexFraction int
 	ProfileContention    bool
+	ProfileTokenFile     string
 	Tracing              bool
 	TracingFile          string
 )
@@ -93,6 +94,11 @@ var commonFlags = []cli.Flag{
 		Value:       runtime.SetMutexProfileFraction(-1),
 		Usage:       "Controls the fraction of mutex contention events that are reported in the mutex profile. On average 1/rate events are reported. To turn off mutex profiling entirely, use 0",
 		Destination: &ProfileMutexFraction,
+	},
+	&cli.StringFlag{
+		Name:        "profile-token-file",
+		Usage:       "Path to a file holding the token that profiling requests must present. Required to serve profiling on a non-loopback address. When unset, a random token is written to a new file in the temporary directory",
+		Destination: &ProfileTokenFile,
 	},
 	&cli.BoolFlag{
 		Name:        "tracing",
