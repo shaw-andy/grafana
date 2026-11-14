@@ -139,5 +139,47 @@ func (r *RepositoryImpl) Delete(ctx context.Context, params *annotations.DeleteP
 }
 
 func (r *RepositoryImpl) FindTags(ctx context.Context, query *annotations.TagsQuery) (annotations.FindTagsResult, error) {
-	return r.reader.GetTags(ctx, *query)
+	resources, err := r.authorizeTags(ctx, query)
+	if err != nil {
+		return annotations.FindTagsResult{Tags: []*annotations.TagsDTO{}}, err
+	}
+	return r.reader.GetTags(ctx, *query, resources)
+}
+
+// authorizeTags collects every dashboard the user can read annotations on. Unlike Find, tag counts are an
+// aggregate over all of them, so every page of the dashboard search is needed before querying.
+func (r *RepositoryImpl) authorizeTags(ctx context.Context, query *annotations.TagsQuery) (*accesscontrol.AccessResources, error) {
+	user := query.SignedInUser
+	if user == nil || user.IsNil() {
+		return nil, accesscontrol.ErrReadForbidden.Errorf("missing user")
+	}
+	// Dashboard UIDs are only unique within an org, so the readable set must come from the org being queried.
+	if user.GetOrgID() != query.OrgID {
+		return nil, accesscontrol.ErrReadForbidden.Errorf("user does not belong to the queried organization")
+	}
+
+	itemQuery := annotations.ItemQuery{
+		OrgID:        query.OrgID,
+		SignedInUser: user,
+	}
+	all := &accesscontrol.AccessResources{Dashboards: map[string]int64{}}
+	for page := int64(1); ; page++ {
+		itemQuery.Page = page
+		resources, err := r.authZ.Authorize(ctx, itemQuery)
+		if err != nil {
+			return nil, err
+		}
+		all.CanAccessOrgAnnotations = resources.CanAccessOrgAnnotations
+
+		added := 0
+		for uid, id := range resources.Dashboards {
+			if _, ok := all.Dashboards[uid]; !ok {
+				all.Dashboards[uid] = id
+				added++
+			}
+		}
+		if added == 0 {
+			return all, nil
+		}
+	}
 }

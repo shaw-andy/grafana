@@ -221,11 +221,12 @@ func (m *memoryStore) Delete(ctx context.Context, namespace, name string) error 
 	return nil
 }
 
-func (m *memoryStore) ListTags(ctx context.Context, namespace string, opts TagListOptions) ([]Tag, error) {
+func (m *memoryStore) ListDashboardTags(ctx context.Context, namespace string, opts TagListOptions) ([]DashboardTag, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	tagCounts := make(map[string]int64)
+	type tagKey struct{ dashboardUID, name string }
+	tagCounts := make(map[tagKey]int64)
 
 	for _, anno := range m.data {
 		if anno.Namespace != namespace {
@@ -234,28 +235,33 @@ func (m *memoryStore) ListTags(ctx context.Context, namespace string, opts TagLi
 		if anno.DeletionTimestamp != nil {
 			continue
 		}
+		dashboardUID := ""
+		if anno.Spec.DashboardUID != nil {
+			dashboardUID = *anno.Spec.DashboardUID
+		}
 		for _, tag := range anno.Spec.Tags {
+			key := tagKey{dashboardUID: dashboardUID, name: tag}
 			switch {
 			case opts.Prefix != "":
 				if strings.HasPrefix(tag, opts.Prefix) {
-					tagCounts[tag]++
+					tagCounts[key]++
 				}
 			case opts.Contains != "":
 				if strings.Contains(strings.ToLower(tag), strings.ToLower(opts.Contains)) {
-					tagCounts[tag]++
+					tagCounts[key]++
 				}
 			default:
-				tagCounts[tag]++
+				tagCounts[key]++
 			}
 		}
 	}
 
-	tags := make([]Tag, 0, len(tagCounts))
-	for name, count := range tagCounts {
-		tags = append(tags, Tag{Name: name, Count: count})
+	tags := make([]DashboardTag, 0, len(tagCounts))
+	for key, count := range tagCounts {
+		tags = append(tags, DashboardTag{DashboardUID: key.dashboardUID, Name: key.name, Count: count})
 	}
-	slices.SortFunc(tags, func(a, b Tag) int {
-		return cmp.Compare(a.Name, b.Name)
+	slices.SortFunc(tags, func(a, b DashboardTag) int {
+		return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.DashboardUID, b.DashboardUID))
 	})
 
 	if opts.Limit > 0 && len(tags) > opts.Limit {

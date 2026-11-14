@@ -23,7 +23,7 @@ type tagCache struct {
 
 // cachedTagResult holds cached tag results with expiration time
 type cachedTagResult struct {
-	tags      []Tag
+	tags      []DashboardTag
 	expiresAt time.Time
 }
 
@@ -41,7 +41,7 @@ func newTagCache(size int, ttl time.Duration) (*tagCache, error) {
 }
 
 // get retrieves tags from cache if valid
-func (c *tagCache) get(key string) ([]Tag, bool) {
+func (c *tagCache) get(key string) ([]DashboardTag, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -59,7 +59,7 @@ func (c *tagCache) get(key string) ([]Tag, bool) {
 }
 
 // set stores tags in cache with TTL
-func (c *tagCache) set(key string, tags []Tag) {
+func (c *tagCache) set(key string, tags []DashboardTag) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -74,9 +74,10 @@ func tagCacheKey(namespace, prefix, contains string, limit int) string {
 	return fmt.Sprintf("%s:%s:%s:%d", namespace, prefix, contains, limit)
 }
 
-// ListTags implements the TagProvider interface.
+// ListDashboardTags implements the DashboardTagCounter interface.
 // We use a cache here because tag queries can be expensive, and they don't change frequently.
-func (s *PostgreSQLStore) ListTags(ctx context.Context, namespace string, opts TagListOptions) ([]Tag, error) {
+// Cached rows are not filtered by access, so they are safe to share between requesters.
+func (s *PostgreSQLStore) ListDashboardTags(ctx context.Context, namespace string, opts TagListOptions) ([]DashboardTag, error) {
 	// Try cache first
 	cacheKey := tagCacheKey(namespace, opts.Prefix, opts.Contains, opts.Limit)
 	if cached, ok := s.tagCache.get(cacheKey); ok {
@@ -91,7 +92,7 @@ func (s *PostgreSQLStore) ListTags(ctx context.Context, namespace string, opts T
 
 	// Build query
 	query := `
-		SELECT tag, COUNT(*) as count
+		SELECT COALESCE(dashboard_uid, '') as dashboard_uid, tag, COUNT(*) as count
 		FROM annotations, unnest(tags) as tag
 		WHERE namespace = $1 AND deleted_at IS NULL
 	`
@@ -112,17 +113,14 @@ func (s *PostgreSQLStore) ListTags(ctx context.Context, namespace string, opts T
 	}
 
 	query += `
-		GROUP BY tag
-		ORDER BY tag
+		GROUP BY tag, COALESCE(dashboard_uid, '')
+		ORDER BY tag, COALESCE(dashboard_uid, '')
 	`
 
-	// Add limit
-	limit := opts.Limit
-	if limit == 0 {
-		limit = 100 // default
+	if opts.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d", argNum)
+		args = append(args, opts.Limit)
 	}
-	query += fmt.Sprintf(" LIMIT $%d", argNum)
-	args = append(args, limit)
 
 	// Execute query
 	rows, err := s.pool.Query(ctx, query, args...)
@@ -131,10 +129,10 @@ func (s *PostgreSQLStore) ListTags(ctx context.Context, namespace string, opts T
 	}
 	defer rows.Close()
 
-	var tags []Tag
+	var tags []DashboardTag
 	for rows.Next() {
-		var tag Tag
-		if err := rows.Scan(&tag.Name, &tag.Count); err != nil {
+		var tag DashboardTag
+		if err := rows.Scan(&tag.DashboardUID, &tag.Name, &tag.Count); err != nil {
 			return nil, fmt.Errorf("failed to scan tag row: %w", err)
 		}
 		tags = append(tags, tag)

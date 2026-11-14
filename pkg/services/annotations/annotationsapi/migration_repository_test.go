@@ -126,7 +126,7 @@ func (f *fakeReader) Type() string { return "fake" }
 func (f *fakeReader) Get(context.Context, annotations.ItemQuery, *accesscontrol.AccessResources) ([]*annotations.ItemDTO, error) {
 	return f.items, nil
 }
-func (f *fakeReader) GetTags(context.Context, annotations.TagsQuery) (annotations.FindTagsResult, error) {
+func (f *fakeReader) GetTags(context.Context, annotations.TagsQuery, *accesscontrol.AccessResources) (annotations.FindTagsResult, error) {
 	return annotations.FindTagsResult{}, nil
 }
 

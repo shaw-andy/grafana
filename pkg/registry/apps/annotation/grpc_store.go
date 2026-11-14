@@ -25,7 +25,7 @@ type storeGRPC struct {
 
 var _ Store = (*storeGRPC)(nil)
 var _ LifecycleManager = (*storeGRPC)(nil)
-var _ TagProvider = (*storeGRPC)(nil)
+var _ DashboardTagCounter = (*storeGRPC)(nil)
 
 // NewStoreGRPC creates a new gRPC-based annotation store client
 func NewStoreGRPC(conn *grpc.ClientConn) *storeGRPC {
@@ -132,22 +132,23 @@ func (s *storeGRPC) Cleanup(ctx context.Context, before time.Time) (int64, error
 	return resp.DeletedCount, nil
 }
 
-func (s *storeGRPC) ListTags(ctx context.Context, namespace string, opts TagListOptions) ([]Tag, error) {
+func (s *storeGRPC) ListDashboardTags(ctx context.Context, namespace string, opts TagListOptions) ([]DashboardTag, error) {
 	req := &storev1.ListTagsRequest{
 		Namespace: namespace,
 		Options:   toProtoTagListOptions(opts),
 	}
 
-	resp, err := s.client.ListTags(ctx, req)
+	resp, err := s.client.ListDashboardTags(ctx, req)
 	if err != nil {
 		return nil, mapGRPCError(err)
 	}
 
-	tags := make([]Tag, 0, len(resp.Tags))
+	tags := make([]DashboardTag, 0, len(resp.Tags))
 	for _, protoTag := range resp.Tags {
-		tags = append(tags, Tag{
-			Name:  protoTag.Name,
-			Count: protoTag.Count,
+		tags = append(tags, DashboardTag{
+			DashboardUID: protoTag.DashboardUid,
+			Name:         protoTag.Name,
+			Count:        protoTag.Count,
 		})
 	}
 

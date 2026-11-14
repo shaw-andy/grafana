@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -576,13 +577,120 @@ func (r *xormRepositoryImpl) Delete(ctx context.Context, params *annotations.Del
 	})
 }
 
-func (r *xormRepositoryImpl) GetTags(ctx context.Context, query annotations.TagsQuery) (annotations.FindTagsResult, error) {
+// tagsDashboardChunkSize bounds the number of dashboard UIDs bound into one tags query.
+const tagsDashboardChunkSize = 1000
+
+func (r *xormRepositoryImpl) GetTags(ctx context.Context, query annotations.TagsQuery, accessResources *accesscontrol.AccessResources) (annotations.FindTagsResult, error) {
+	empty := annotations.FindTagsResult{Tags: []*annotations.TagsDTO{}}
+	if accessResources == nil {
+		return empty, accesscontrol.ErrReadForbidden.Errorf("missing access resources")
+	}
+	if query.Limit == 0 {
+		query.Limit = 100
+	}
+
+	filters, filterParams := r.getTagsAccessControlFilters(accessResources)
+	if len(filters) == 0 {
+		return empty, nil
+	}
+
+	var items []*annotations.Tag
+	if len(filters) == 1 {
+		var err error
+		items, err = r.getTags(ctx, query, filters[0], filterParams[0], query.Limit)
+		if err != nil {
+			return empty, err
+		}
+	} else {
+		// Each annotation matches exactly one filter, so summing the per-filter counts is exact. The SQL limit is
+		// only applied when there is a single filter because the database collation may order keys differently from Go.
+		type tagKey struct{ key, value string }
+		counts := map[tagKey]int64{}
+		for i := range filters {
+			chunk, err := r.getTags(ctx, query, filters[i], filterParams[i], 0)
+			if err != nil {
+				return empty, err
+			}
+			for _, item := range chunk {
+				counts[tagKey{item.Key, item.Value}] += item.Count
+			}
+		}
+		items = make([]*annotations.Tag, 0, len(counts))
+		for k, count := range counts {
+			items = append(items, &annotations.Tag{Key: k.key, Value: k.value, Count: count})
+		}
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].Key != items[j].Key {
+				return items[i].Key < items[j].Key
+			}
+			return items[i].Value < items[j].Value
+		})
+		if int64(len(items)) > query.Limit {
+			items = items[:query.Limit]
+		}
+	}
+
+	tags := make([]*annotations.TagsDTO, 0, len(items))
+	for _, item := range items {
+		tag := item.Key
+		if len(item.Value) > 0 {
+			tag = item.Key + ":" + item.Value
+		}
+		tags = append(tags, &annotations.TagsDTO{
+			Tag:   tag,
+			Count: item.Count,
+		})
+	}
+
+	return annotations.FindTagsResult{Tags: tags}, nil
+}
+
+// getTagsAccessControlFilters returns disjoint filters that together match the annotations the access resources
+// allow. Organization annotations are those with no dashboard at all; an annotation that names a dashboard is only
+// counted when that dashboard is readable.
+func (r *xormRepositoryImpl) getTagsAccessControlFilters(accessResources *accesscontrol.AccessResources) ([]string, [][]any) {
+	if accessResources.SkipAccessControlFilter {
+		return []string{""}, [][]any{nil}
+	}
+
+	uids := make([]string, 0, len(accessResources.Dashboards))
+	for uid := range accessResources.Dashboards {
+		if uid != "" {
+			uids = append(uids, uid)
+		}
+	}
+	sort.Strings(uids)
+
+	var filters []string
+	var params [][]any
+	orgFilter := ""
+	if accessResources.CanAccessOrgAnnotations {
+		orgFilter = "(annotation.dashboard_id = 0 AND (annotation.dashboard_uid IS NULL OR annotation.dashboard_uid = ''))"
+	}
+	for start := 0; start < len(uids); start += tagsDashboardChunkSize {
+		chunk := uids[start:min(start+tagsDashboardChunkSize, len(uids))]
+		filter := fmt.Sprintf("annotation.dashboard_uid IN (%s)", strings.Repeat("?,", len(chunk)-1)+"?")
+		chunkParams := make([]any, 0, len(chunk))
+		for _, uid := range chunk {
+			chunkParams = append(chunkParams, uid)
+		}
+		if orgFilter != "" {
+			filter = orgFilter + " OR " + filter
+			orgFilter = ""
+		}
+		filters = append(filters, filter)
+		params = append(params, chunkParams)
+	}
+	if orgFilter != "" {
+		filters = append(filters, orgFilter)
+		params = append(params, nil)
+	}
+	return filters, params
+}
+
+func (r *xormRepositoryImpl) getTags(ctx context.Context, query annotations.TagsQuery, acFilter string, acParams []any, limit int64) ([]*annotations.Tag, error) {
 	var items []*annotations.Tag
 	err := r.db.WithDbSession(ctx, func(dbSession *db.Session) error {
-		if query.Limit == 0 {
-			query.Limit = 100
-		}
-
 		var sql bytes.Buffer
 		params := make([]interface{}, 0) //nolint:prealloc
 		tagKey := `tag.` + r.db.GetDialect().Quote("key")
@@ -608,6 +716,11 @@ func (r *xormRepositoryImpl) GetTags(ctx context.Context, query annotations.Tags
 			sql.WriteString(` AND annotation.alert_id = 0`)
 		}
 
+		if acFilter != "" {
+			sql.WriteString(` AND (` + acFilter + `)`)
+			params = append(params, acParams...)
+		}
+
 		sql.WriteString(` AND (`)
 		s, p := r.db.GetDialect().LikeOperator(tagKey, true, query.Tag, true)
 		sql.WriteString(s)
@@ -621,27 +734,13 @@ func (r *xormRepositoryImpl) GetTags(ctx context.Context, query annotations.Tags
 
 		sql.WriteString(` GROUP BY ` + tagKey + `,` + tagValue)
 		sql.WriteString(` ORDER BY ` + tagKey + `,` + tagValue)
-		sql.WriteString(` ` + r.db.GetDialect().Limit(query.Limit))
-
-		err := dbSession.SQL(sql.String(), params...).Find(&items)
-		return err
-	})
-	if err != nil {
-		return annotations.FindTagsResult{Tags: []*annotations.TagsDTO{}}, err
-	}
-	tags := make([]*annotations.TagsDTO, 0)
-	for _, item := range items {
-		tag := item.Key
-		if len(item.Value) > 0 {
-			tag = item.Key + ":" + item.Value
+		if limit > 0 {
+			sql.WriteString(` ` + r.db.GetDialect().Limit(limit))
 		}
-		tags = append(tags, &annotations.TagsDTO{
-			Tag:   tag,
-			Count: item.Count,
-		})
-	}
 
-	return annotations.FindTagsResult{Tags: tags}, nil
+		return dbSession.SQL(sql.String(), params...).Find(&items)
+	})
+	return items, err
 }
 
 func (r *xormRepositoryImpl) validateItem(item *annotations.Item) error {

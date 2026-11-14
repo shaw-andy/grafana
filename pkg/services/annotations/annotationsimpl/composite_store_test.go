@@ -56,7 +56,7 @@ func TestCompositeStore(t *testing.T) {
 				err: errGet,
 			},
 			{
-				f:   func() (any, error) { return store.GetTags(context.Background(), annotations.TagsQuery{}) },
+				f:   func() (any, error) { return store.GetTags(context.Background(), annotations.TagsQuery{}, nil) },
 				err: errGetTags,
 			},
 		}
@@ -123,7 +123,7 @@ func TestCompositeStore(t *testing.T) {
 			{Tag: "key2:val2"},
 		}
 
-		res, _ := store.GetTags(context.Background(), annotations.TagsQuery{})
+		res, _ := store.GetTags(context.Background(), annotations.TagsQuery{}, nil)
 		require.Equal(t, expected, res.Tags)
 	})
 
@@ -182,7 +182,7 @@ func (f *fakeReader) Get(ctx context.Context, query annotations.ItemQuery, acces
 	return f.items, nil
 }
 
-func (f *fakeReader) GetTags(ctx context.Context, query annotations.TagsQuery) (annotations.FindTagsResult, error) {
+func (f *fakeReader) GetTags(ctx context.Context, query annotations.TagsQuery, _ *accesscontrol.AccessResources) (annotations.FindTagsResult, error) {
 	if f.getTagFn != nil {
 		return f.getTagFn(ctx, query)
 	}

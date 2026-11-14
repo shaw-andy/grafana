@@ -19,13 +19,14 @@ import (
 const _ = grpc.SupportPackageIsVersion8
 
 const (
-	AnnotationStore_Get_FullMethodName      = "/annotation.store.v1.AnnotationStore/Get"
-	AnnotationStore_List_FullMethodName     = "/annotation.store.v1.AnnotationStore/List"
-	AnnotationStore_Create_FullMethodName   = "/annotation.store.v1.AnnotationStore/Create"
-	AnnotationStore_Update_FullMethodName   = "/annotation.store.v1.AnnotationStore/Update"
-	AnnotationStore_Delete_FullMethodName   = "/annotation.store.v1.AnnotationStore/Delete"
-	AnnotationStore_Cleanup_FullMethodName  = "/annotation.store.v1.AnnotationStore/Cleanup"
-	AnnotationStore_ListTags_FullMethodName = "/annotation.store.v1.AnnotationStore/ListTags"
+	AnnotationStore_Get_FullMethodName               = "/annotation.store.v1.AnnotationStore/Get"
+	AnnotationStore_List_FullMethodName              = "/annotation.store.v1.AnnotationStore/List"
+	AnnotationStore_Create_FullMethodName            = "/annotation.store.v1.AnnotationStore/Create"
+	AnnotationStore_Update_FullMethodName            = "/annotation.store.v1.AnnotationStore/Update"
+	AnnotationStore_Delete_FullMethodName            = "/annotation.store.v1.AnnotationStore/Delete"
+	AnnotationStore_Cleanup_FullMethodName           = "/annotation.store.v1.AnnotationStore/Cleanup"
+	AnnotationStore_ListTags_FullMethodName          = "/annotation.store.v1.AnnotationStore/ListTags"
+	AnnotationStore_ListDashboardTags_FullMethodName = "/annotation.store.v1.AnnotationStore/ListDashboardTags"
 )
 
 // AnnotationStoreClient is the client API for AnnotationStore service.
@@ -49,6 +50,10 @@ type AnnotationStoreClient interface {
 	Cleanup(ctx context.Context, in *CleanupRequest, opts ...grpc.CallOption) (*CleanupResponse, error)
 	// ListTags retrieves all tags with their counts for a namespace
 	ListTags(ctx context.Context, in *ListTagsRequest, opts ...grpc.CallOption) (*ListTagsResponse, error)
+	// ListDashboardTags retrieves tag counts for a namespace, split by the dashboard the
+	// counted annotations belong to, so the caller can drop dashboards the requester cannot read.
+	// A limit of 0 returns every row.
+	ListDashboardTags(ctx context.Context, in *ListTagsRequest, opts ...grpc.CallOption) (*ListDashboardTagsResponse, error)
 }
 
 type annotationStoreClient struct {
@@ -129,6 +134,16 @@ func (c *annotationStoreClient) ListTags(ctx context.Context, in *ListTagsReques
 	return out, nil
 }
 
+func (c *annotationStoreClient) ListDashboardTags(ctx context.Context, in *ListTagsRequest, opts ...grpc.CallOption) (*ListDashboardTagsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListDashboardTagsResponse)
+	err := c.cc.Invoke(ctx, AnnotationStore_ListDashboardTags_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AnnotationStoreServer is the server API for AnnotationStore service.
 // All implementations should embed UnimplementedAnnotationStoreServer
 // for forward compatibility
@@ -150,6 +165,10 @@ type AnnotationStoreServer interface {
 	Cleanup(context.Context, *CleanupRequest) (*CleanupResponse, error)
 	// ListTags retrieves all tags with their counts for a namespace
 	ListTags(context.Context, *ListTagsRequest) (*ListTagsResponse, error)
+	// ListDashboardTags retrieves tag counts for a namespace, split by the dashboard the
+	// counted annotations belong to, so the caller can drop dashboards the requester cannot read.
+	// A limit of 0 returns every row.
+	ListDashboardTags(context.Context, *ListTagsRequest) (*ListDashboardTagsResponse, error)
 }
 
 // UnimplementedAnnotationStoreServer should be embedded to have forward compatible implementations.
@@ -176,6 +195,9 @@ func (UnimplementedAnnotationStoreServer) Cleanup(context.Context, *CleanupReque
 }
 func (UnimplementedAnnotationStoreServer) ListTags(context.Context, *ListTagsRequest) (*ListTagsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTags not implemented")
+}
+func (UnimplementedAnnotationStoreServer) ListDashboardTags(context.Context, *ListTagsRequest) (*ListDashboardTagsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListDashboardTags not implemented")
 }
 
 // UnsafeAnnotationStoreServer may be embedded to opt out of forward compatibility for this service.
@@ -315,6 +337,24 @@ func _AnnotationStore_ListTags_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AnnotationStore_ListDashboardTags_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTagsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AnnotationStoreServer).ListDashboardTags(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AnnotationStore_ListDashboardTags_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AnnotationStoreServer).ListDashboardTags(ctx, req.(*ListTagsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AnnotationStore_ServiceDesc is the grpc.ServiceDesc for AnnotationStore service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -349,6 +389,10 @@ var AnnotationStore_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListTags",
 			Handler:    _AnnotationStore_ListTags_Handler,
+		},
+		{
+			MethodName: "ListDashboardTags",
+			Handler:    _AnnotationStore_ListDashboardTags_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
