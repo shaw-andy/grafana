@@ -1,6 +1,7 @@
 package logsdrilldown
 
 import (
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
 	restclient "k8s.io/client-go/rest"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/grafana/grafana-app-sdk/simple"
 	"github.com/grafana/grafana/apps/logsdrilldown/pkg/apis"
 	logsdrilldownapp "github.com/grafana/grafana/apps/logsdrilldown/pkg/app"
+	"github.com/grafana/grafana/pkg/services/apiserver/auth/authorizer/storewrapper"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	"github.com/grafana/grafana/pkg/setting"
 )
@@ -24,6 +26,13 @@ type LogsDrilldownAppInstaller struct {
 
 func (l *LogsDrilldownAppInstaller) GetAuthorizer() authorizer.Authorizer {
 	return GetAuthorizer()
+}
+
+func (l *LogsDrilldownAppInstaller) GetNamespaceScopedStorageAuthorizer(gr schema.GroupResource) storewrapper.ResourceStorageAuthorizer {
+	if gr == logsDrilldownResource {
+		return &ownerStorageAuthorizer{}
+	}
+	return nil
 }
 
 func RegisterAppInstaller(
