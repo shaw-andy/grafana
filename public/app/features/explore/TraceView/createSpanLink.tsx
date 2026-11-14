@@ -416,12 +416,40 @@ const getReferenceTitle = (reference: TraceSpanReference) => {
 };
 
 function getLinkForFeO11y(span: TraceSpan): string | undefined {
-  const feO11yAppId = span.process.tags.find((tag) => tag.key === feO11yTagKey)?.value;
-  const feO11ySessionId = span.tags.find((tag) => tag.key === 'session_id' || tag.key === 'session.id')?.value;
+  const feO11yAppId = toFeO11yPathSegment(span.process.tags.find((tag) => tag.key === feO11yTagKey)?.value);
+  const feO11ySessionId = toFeO11yPathSegment(
+    span.tags.find((tag) => tag.key === 'session_id' || tag.key === 'session.id')?.value
+  );
 
   return feO11yAppId && feO11ySessionId
     ? `/a/grafana-kowalski-app/apps/${feO11yAppId}/sessions/${feO11ySessionId}`
     : undefined;
+}
+
+// Tag values come from whoever writes the spans, so each one must stay a single path segment;
+// otherwise slash or dot segments let the same-origin link resolve outside the app (e.g. /logout).
+function toFeO11yPathSegment(value: unknown): string | undefined {
+  const raw = typeof value === 'number' && Number.isFinite(value) ? String(value) : value;
+  if (typeof raw !== 'string' || raw === '') {
+    return undefined;
+  }
+
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    // Malformed escapes are kept literal; encodeURIComponent below escapes their '%'.
+  }
+
+  if ([raw, decoded].some(isUnsafePathSegment)) {
+    return undefined;
+  }
+
+  return encodeURIComponent(raw);
+}
+
+function isUnsafePathSegment(segment: string): boolean {
+  return segment === '.' || segment === '..' || /[\/\\]/.test(segment);
 }
 
 /**
