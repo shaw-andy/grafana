@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-arm64-small
     steps:
       - name: Run PR Commands
-        uses: grafana/grafana-github-actions/commands@main
+        uses: grafana/grafana-github-actions/commands@af3213823a725b60b60947211de51d0fa3959391 # main
         with:
           token: ${{secrets.GITHUB_TOKEN}}
           configPath: pr-commands
