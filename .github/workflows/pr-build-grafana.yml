@@ -199,7 +199,7 @@ jobs:
         if: steps.meticulous-eligibility.outputs.run == 'true'
         id: vault-secrets
         continue-on-error: true
-        uses: grafana/shared-workflows/actions/get-vault-secrets@main
+        uses: grafana/shared-workflows/actions/get-vault-secrets@2f1ddaf3ce1aa677356243d0dd584be33cfa35e3 # get-vault-secrets/v2.1.0
         with:
           repo_secrets: |
             METICULOUS_API_TOKEN=meticulous-ui:api-token
