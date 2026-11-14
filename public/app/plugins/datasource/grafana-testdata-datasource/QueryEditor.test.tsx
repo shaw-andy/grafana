@@ -31,6 +31,19 @@ const setup = (testProps?: Partial<Props>) => {
   return render(<QueryEditor {...editorProps} />);
 };
 
+function traceEditorProps(): Partial<Props> {
+  return {
+    datasource: {
+      getScenarios: () =>
+        Promise.resolve([
+          ...scenarios,
+          { id: TestDataQueryType.Trace, name: 'Trace', description: '', stringInput: '' },
+        ]),
+    } as TestDataDataSource,
+    query: { ...defaultQuery, scenarioId: TestDataQueryType.Trace },
+  };
+}
+
 describe('Test Datasource Query Editor', () => {
   it('should render with default scenario', async () => {
     setup();
@@ -129,6 +142,33 @@ describe('Test Datasource Query Editor', () => {
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('traceID');
     expect(screen.getByRole('spinbutton', { name: 'Length' })).toHaveValue(16);
     expect(screen.getByRole('button', { name: 'Add exemplar label' })).toBeInTheDocument();
+  });
+
+  it('keeps a trace span count of 25', async () => {
+    setup(traceEditorProps());
+
+    const input = await screen.findByRole('spinbutton', { name: 'Span count' });
+    fireEvent.change(input, { target: { name: 'spanCount', value: '25', type: 'number' } });
+
+    expect(mockOnChange).toHaveBeenLastCalledWith(expect.objectContaining({ spanCount: 25 }));
+  });
+
+  it('stores a trace span count above 100 as 100', async () => {
+    setup(traceEditorProps());
+
+    const input = await screen.findByRole('spinbutton', { name: 'Span count' });
+    fireEvent.change(input, { target: { name: 'spanCount', value: '5000', type: 'number' } });
+
+    expect(mockOnChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ scenarioId: TestDataQueryType.Trace, spanCount: 100 })
+    );
+  });
+
+  it('sets the trace span count input maximum to 100', async () => {
+    setup(traceEditorProps());
+
+    const input = await screen.findByRole('spinbutton', { name: 'Span count' });
+    expect(input).toHaveAttribute('max', '100');
   });
 
   it('persists the datasource from the query when switching scenario', async () => {
