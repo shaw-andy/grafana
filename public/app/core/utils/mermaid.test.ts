@@ -5,6 +5,7 @@ import { renderMermaidDiagrams } from './mermaid';
 const parse = jest.fn();
 const render = jest.fn();
 const initialize = jest.fn();
+const getDiagramFromText = jest.fn();
 
 jest.mock('mermaid', () => ({
   __esModule: true,
@@ -12,6 +13,10 @@ jest.mock('mermaid', () => ({
     initialize: (...args: unknown[]) => initialize(...args),
     parse: (...args: unknown[]) => parse(...args),
     render: (...args: unknown[]) => render(...args),
+    mermaidAPI: {
+      defaultConfig: {},
+      getDiagramFromText: (...args: unknown[]) => getDiagramFromText(...args),
+    },
   },
 }));
 
@@ -40,6 +45,7 @@ async function redraw(el: HTMLElement) {
 beforeEach(() => {
   jest.clearAllMocks();
   parse.mockResolvedValue(true);
+  getDiagramFromText.mockResolvedValue({ db: {} });
   render.mockResolvedValue({ svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>Start</text></svg>' });
 });
 

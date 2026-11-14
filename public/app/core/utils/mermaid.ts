@@ -31,7 +31,7 @@ export async function renderMermaidDiagrams(container: HTMLElement, theme: Grafa
   let mermaid: Mermaid;
   try {
     ({ default: mermaid } = await import(/* webpackChunkName: "mermaid" */ 'mermaid'));
-    mermaid.initialize(getMermaidConfig(theme));
+    mermaid.initialize(getMermaidConfig(theme, Object.keys(mermaid.mermaidAPI.defaultConfig)));
   } catch (error) {
     diagrams.forEach(({ source, target }) => markFailed(target, source, asError(error), styles));
     return;
@@ -64,11 +64,96 @@ async function renderDiagram(mermaid: Mermaid, source: string): Promise<string |
     if (!(await mermaid.parse(source, { suppressErrors: true }))) {
       return new Error(t('mermaid.invalid-syntax', 'invalid diagram syntax'));
     }
+    // Mermaid requests these while it draws, with the viewer's cookies, so they
+    // have to be refused before render; sanitizing the SVG afterwards is too late.
+    const diagram = await mermaid.mermaidAPI.getDiagramFromText(source);
+    if (referencesImage(diagram.db) || referencesCssResource(source)) {
+      return new Error(t('mermaid.external-resource', 'diagrams cannot load images or other external resources'));
+    }
     const { svg } = await mermaid.render(`mermaid-diagram-${++diagramSeq}`, source);
     return svg;
   } catch (error) {
     return asError(error);
   }
+}
+
+interface DiagramModel {
+  // Flowchart nodes declared with `@{ img: ... }`.
+  getVertices?: () => unknown;
+  // Sequence participants given `properties` with an `icon`.
+  getActors?: () => unknown;
+}
+
+/** The only diagram features mermaid turns into an image request. */
+function referencesImage(db: object): boolean {
+  const model: DiagramModel = db;
+  const vertices = valuesOf<{ img?: unknown }>(model.getVertices?.());
+  const actors = valuesOf<{ properties?: { icon?: unknown } }>(model.getActors?.());
+  return vertices.some((vertex) => Boolean(vertex?.img)) || actors.some((actor) => Boolean(actor?.properties?.icon));
+}
+
+function valuesOf<T>(collection: unknown): T[] {
+  if (collection instanceof Map) {
+    return Array.from(collection.values());
+  }
+  return collection && typeof collection === 'object' ? Object.values(collection) : [];
+}
+
+// A function name only counts when it is not the tail of a longer identifier.
+const CSS_RESOURCE = /(?:^|[^a-z0-9_-])(?:-[a-z0-9]+-)?(?:url|src|image|image-set)\(|@import/;
+
+/**
+ * Style statements (`classDef`, `style`, `UpdateElementStyle`, ...) reach the page as
+ * inline styles and stylesheet rules, where a CSS url() is fetched with the viewer's
+ * cookies. Mermaid turns `#40;`-style escapes into HTML entities and the browser then
+ * resolves both those and CSS backslash escapes, so the check looks through each layer.
+ */
+function referencesCssResource(source: string): boolean {
+  return [source, unescapeBackslashes(source)].some((text) => {
+    const decoded = decodeEntities(text);
+    return [decoded, decodeCssEscapes(decoded)].some((css) => {
+      const lower = css.toLowerCase();
+      return CSS_RESOURCE.test(lower) || CSS_RESOURCE.test(lower.replace(/\s+/g, ''));
+    });
+  });
+}
+
+/** Undoes the `\x` and `\uXXXX` string escapes some diagram grammars apply. */
+function unescapeBackslashes(text: string): string {
+  return text.replace(/\\(?:u([0-9a-f]{4})|([\s\S]))/gi, (_, hex: string | undefined, char: string) =>
+    hex ? String.fromCharCode(parseInt(hex, 16)) : char
+  );
+}
+
+function decodeEntities(text: string): string {
+  // An inert document: nothing parsed into it can start a request.
+  const textarea = document.implementation.createHTMLDocument('').createElement('textarea');
+  let decoded = text;
+  for (let pass = 0; pass < 4; pass++) {
+    const html = decoded
+      .replace(/(?<!&)#(\d+);/g, '&#$1;')
+      .replace(/(?<!&)#([a-z]\w*);/gi, '&$1;')
+      .replace(/</g, '&lt;');
+    textarea.innerHTML = html;
+    const next = textarea.value;
+    if (next === decoded) {
+      break;
+    }
+    decoded = next;
+  }
+  return decoded;
+}
+
+function decodeCssEscapes(css: string): string {
+  return css.replace(/\\(?:([0-9a-f]{1,6})[ \t\n\r\f]?|([\s\S]))/gi, (_, hex: string | undefined, char: string) => {
+    if (!hex) {
+      return char === '\n' ? '' : char;
+    }
+    const codePoint = parseInt(hex, 16);
+    return codePoint > 0 && codePoint <= 0x10ffff && (codePoint < 0xd800 || codePoint > 0xdfff)
+      ? String.fromCodePoint(codePoint)
+      : '\ufffd';
+  });
 }
 
 function markFailed(target: Element, source: string, error: Error, styles: Styles) {
@@ -135,10 +220,21 @@ function getStyles(theme: GrafanaTheme2) {
   };
 }
 
-function getMermaidConfig(theme: GrafanaTheme2): MermaidConfig {
+function getMermaidConfig(theme: GrafanaTheme2, configKeys: string[]): MermaidConfig {
   return {
     startOnLoad: false,
     securityLevel: 'strict',
+    // Front matter and %%{init}%% directives may not override anything set here: several
+    // settings (htmlLabels, themeCSS, fontFamily, themeVariables, dompurifyConfig) would
+    // otherwise let diagram source put HTML or CSS that loads URLs into the page.
+    secure: configKeys,
+    // Mermaid sanitizes label HTML with this and inserts it into the page while it
+    // draws, including for diagrams that ignore htmlLabels. CSS url() is refused
+    // before render instead, because built-in icons need their style attributes.
+    dompurifyConfig: {
+      FORBID_TAGS: ['style', 'img', 'image', 'picture', 'source', 'video', 'audio', 'track', 'input', 'use', 'feimage'],
+      FORBID_ATTR: ['src', 'srcset', 'href', 'xlink:href', 'poster', 'background', 'data'],
+    },
     // sanitizeSVGContent drops <foreignObject>, where mermaid puts HTML labels,
     // so the shapes would survive with no text in them.
     htmlLabels: false,

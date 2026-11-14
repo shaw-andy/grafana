@@ -61,6 +61,7 @@ jest.mock('mermaid', () => ({
     initialize: jest.fn(),
     parse: jest.fn().mockResolvedValue(true),
     render: (...args: unknown[]) => mermaidRender(...args),
+    mermaidAPI: { defaultConfig: {}, getDiagramFromText: jest.fn().mockResolvedValue({ db: {} }) },
   },
 }));
 
