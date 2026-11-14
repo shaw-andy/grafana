@@ -18,12 +18,12 @@ jobs:
       contents: read
       pull-requests: write
     container:
-      image: grafana/vale:latest # zizmor: ignore[unpinned-images]
+      image: grafana/vale:572ac47761fd6ca2a8f801d1f4700f7a596e5938@sha256:bb6896be023b1bddc3c73674701e77d318a04ae6ec6b01325cd535c8ab2f8a67
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: grafana/writers-toolkit/vale-action@vale-action/v2 # zizmor: ignore[unpinned-uses]
+      - uses: grafana/writers-toolkit/vale-action@67d43d461804a3413c2e11fd7899ff01e05b2563 # vale-action/v2.1.0
         with:
           fail_on_error: "false"
           filter: '.Name in ["Grafana.GrafanaCom", "Grafana.WordList", "Grafana.Spelling", "Grafana.ProductPossessives"]'

@@ -19,8 +19,11 @@ jobs:
       pull-requests: write # Create or update PR comments.
       statuses: write # Update GitHub status check with deploy preview link.
     if: "!github.event.pull_request.head.repo.fork"
-    uses: grafana/writers-toolkit/.github/workflows/deploy-preview.yml@main # zizmor: ignore[unpinned-uses]
+    uses: grafana/writers-toolkit/.github/workflows/deploy-preview.yml@572ac47761fd6ca2a8f801d1f4700f7a596e5938 # main
     with:
+      # Must match the SHA in `uses`. The called workflow otherwise checks out and runs
+      # writers-toolkit helper scripts from main in jobs that hold id-token: write.
+      toolkit_ref: 572ac47761fd6ca2a8f801d1f4700f7a596e5938
       branch: ${{ github.head_ref }}
       event_number: ${{ github.event.number }}
       repo: grafana
