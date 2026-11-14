@@ -158,36 +158,8 @@ func (c *jobsConnector) handleGetJob(ctx context.Context, urlPath, name, prefix 
 
 // handleCreateJob handles POST requests to create a new job for a healthy repository.
 func (c *jobsConnector) handleCreateJob(ctx context.Context, r *http.Request, name string, spec provisioning.JobSpec, responder rest.Responder) {
-	repo, err := c.repoGetter.GetHealthyRepository(ctx, name)
+	cfg, err := c.authorizeCreateJob(ctx, name, spec)
 	if err != nil {
-		responder.Error(err)
-		return
-	}
-
-	cfg := repo.Config()
-
-	if cfg.DeletionTimestamp != nil && !cfg.DeletionTimestamp.IsZero() {
-		responder.Error(apierrors.NewConflict(
-			provisioning.RepositoryResourceInfo.GroupResource(),
-			"cannot create jobs for a repository marked for deletion",
-			fmt.Errorf("cannot create jobs for a repository marked for deletion"),
-		))
-		return
-	}
-
-	if spec.Action == provisioning.JobActionPull || spec.Action == provisioning.JobActionTest {
-		if err := c.authorizeAdminJob(ctx, cfg); err != nil {
-			responder.Error(err)
-			return
-		}
-	}
-
-	if err := c.validateWriteAccess(cfg, spec); err != nil {
-		responder.Error(err)
-		return
-	}
-
-	if err := c.authorizeJob(ctx, repo, cfg, spec); err != nil {
 		responder.Error(err)
 		return
 	}
@@ -218,6 +190,81 @@ func (c *jobsConnector) handleCreateJob(ctx context.Context, r *http.Request, na
 	}
 
 	responder.Object(http.StatusAccepted, job)
+}
+
+// authorizeCreateJob checks that a job may be queued for the named healthy
+// repository and returns the repository configuration.
+func (c *jobsConnector) authorizeCreateJob(ctx context.Context, name string, spec provisioning.JobSpec) (*provisioning.Repository, error) {
+	repo, err := c.repoGetter.GetHealthyRepository(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg := repo.Config()
+
+	if cfg.DeletionTimestamp != nil && !cfg.DeletionTimestamp.IsZero() {
+		return nil, apierrors.NewConflict(
+			provisioning.RepositoryResourceInfo.GroupResource(),
+			"cannot create jobs for a repository marked for deletion",
+			fmt.Errorf("cannot create jobs for a repository marked for deletion"),
+		)
+	}
+
+	if err := c.authorizeJobForRepository(ctx, repo, spec); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+// authorizeStoredJob applies the caller's permissions to a Job object written
+// to the jobs resource. A job for a repository that does not exist yet would
+// run against whichever repository later takes that name, so it requires the
+// same admin permission as creating that repository.
+func (c *jobsConnector) authorizeStoredJob(ctx context.Context, namespace string, spec provisioning.JobSpec) error {
+	repo, err := c.repoGetter.GetRepository(ctx, spec.Repository)
+	if apierrors.IsNotFound(err) {
+		return c.authorizeAdminJob(ctx, &provisioning.Repository{
+			ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+		})
+	}
+	if err != nil {
+		return err
+	}
+	return c.authorizeJobForRepository(ctx, repo, spec)
+}
+
+// authorizeJobForRepository runs the permission checks a caller must pass for
+// a job on repo. Jobs run later as the provisioning service identity, so this
+// is the only point where the caller's own permissions are applied.
+func (c *jobsConnector) authorizeJobForRepository(ctx context.Context, repo repository.Repository, spec provisioning.JobSpec) error {
+	cfg := repo.Config()
+
+	if spec.Action == provisioning.JobActionPull || spec.Action == provisioning.JobActionTest || syncsWholeRepository(spec) {
+		if err := c.authorizeAdminJob(ctx, cfg); err != nil {
+			return err
+		}
+	}
+
+	if err := c.validateWriteAccess(cfg, spec); err != nil {
+		return err
+	}
+
+	return c.authorizeJob(ctx, repo, cfg, spec)
+}
+
+// syncsWholeRepository reports whether a delete or move job names no paths or
+// resources. Such a job finishes with a sync of the whole repository, the
+// same work as a pull job; a job with targets only syncs those targets.
+func syncsWholeRepository(spec provisioning.JobSpec) bool {
+	switch spec.Action {
+	case provisioning.JobActionDelete:
+		return spec.Delete == nil || (len(spec.Delete.Paths) == 0 && len(spec.Delete.Resources) == 0)
+	case provisioning.JobActionMove:
+		return spec.Move == nil || (len(spec.Move.Paths) == 0 && len(spec.Move.Resources) == 0)
+	default:
+		return false
+	}
 }
 
 // validateWriteAccess checks if a write operation is allowed for the given
@@ -271,25 +318,7 @@ func (c *jobsConnector) handleOrphanCleanupJob(ctx context.Context, r *http.Requ
 		return
 	}
 
-	repo, err := c.repoGetter.GetRepository(ctx, name)
-	if err == nil {
-		cfg := repo.Config()
-		if cfg.DeletionTimestamp == nil || cfg.DeletionTimestamp.IsZero() {
-			responder.Error(apierrors.NewConflict(
-				provisioning.RepositoryResourceInfo.GroupResource(),
-				name,
-				fmt.Errorf("repository exists and is not being deleted; use the normal delete flow"),
-			))
-			return
-		}
-	} else if !apierrors.IsNotFound(err) {
-		responder.Error(err)
-		return
-	}
-
-	if err := c.authorizeAdminJob(ctx, &provisioning.Repository{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns},
-	}); err != nil {
+	if err := c.authorizeOrphanCleanupJob(ctx, ns, name); err != nil {
 		responder.Error(err)
 		return
 	}
@@ -300,6 +329,29 @@ func (c *jobsConnector) handleOrphanCleanupJob(ctx context.Context, r *http.Requ
 		return
 	}
 	responder.Object(http.StatusAccepted, job)
+}
+
+// authorizeOrphanCleanupJob checks that a releaseResources or deleteResources
+// job targets a repository that is gone or being deleted, and that the caller
+// is an admin.
+func (c *jobsConnector) authorizeOrphanCleanupJob(ctx context.Context, ns, name string) error {
+	repo, err := c.repoGetter.GetRepository(ctx, name)
+	if err == nil {
+		cfg := repo.Config()
+		if cfg.DeletionTimestamp == nil || cfg.DeletionTimestamp.IsZero() {
+			return apierrors.NewConflict(
+				provisioning.RepositoryResourceInfo.GroupResource(),
+				name,
+				fmt.Errorf("repository exists and is not being deleted; use the normal delete flow"),
+			)
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	return c.authorizeAdminJob(ctx, &provisioning.Repository{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns},
+	})
 }
 
 // authorizeJob dispatches pre-flight validation and authorization checks based on the job action.

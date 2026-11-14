@@ -15,6 +15,7 @@ import (
 	"github.com/grafana/grafana/apps/provisioning/pkg/safepath"
 	"github.com/grafana/grafana/pkg/infra/tracing"
 	"github.com/grafana/grafana/pkg/registry/apis/provisioning/jobs"
+	syncjob "github.com/grafana/grafana/pkg/registry/apis/provisioning/jobs/sync"
 	"github.com/grafana/grafana/pkg/registry/apis/provisioning/resources"
 )
 
@@ -120,6 +121,18 @@ func (w *Worker) Process(ctx context.Context, repo repository.Repository, job pr
 	}
 
 	if opts.Ref == "" {
+		syncCtx := ctx
+		if len(opts.Paths) > 0 || len(opts.Resources) > 0 {
+			// The job was authorized for these sources and targets only. A sync
+			// over the whole repository needs the pull permission, which only a
+			// job without targets is checked for.
+			scope := make([]string, 0, 2*len(paths))
+			for _, path := range paths {
+				scope = append(scope, path, w.constructTargetPath(opts.TargetPath, path))
+			}
+			syncCtx = syncjob.WithPathScope(ctx, scope)
+		}
+
 		progress.ResetResults(false)
 		progress.SetMessage(ctx, "pull resources")
 
@@ -132,7 +145,7 @@ func (w *Worker) Process(ctx context.Context, repo repository.Repository, job pr
 			},
 		}
 
-		if err := w.syncWorker.Process(ctx, repo, syncJob, progress); err != nil {
+		if err := w.syncWorker.Process(syncCtx, repo, syncJob, progress); err != nil {
 			logger.Error("failed to pull resources", "error", err)
 			return fmt.Errorf("pull resources: %w", err)
 		}

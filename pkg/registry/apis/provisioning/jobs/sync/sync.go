@@ -56,6 +56,12 @@ func (r *syncer) Sync(ctx context.Context, repo repository.ReaderWriter, options
 	cfg := repo.Config()
 	logger := logging.FromContext(ctx)
 
+	compare := r.compare
+	scope, scoped := pathScopeFrom(ctx)
+	if scoped {
+		compare = scopedCompare(compare, scope)
+	}
+
 	var currentRef string
 	versionedRepo, ok := repo.(repository.Versioned)
 	if ok && versionedRepo != nil {
@@ -65,7 +71,7 @@ func (r *syncer) Sync(ctx context.Context, repo repository.ReaderWriter, options
 			return "", fmt.Errorf("get latest ref: %w", err)
 		}
 
-		if cfg.Status.Sync.LastRef != "" && options.Incremental && !quotas.IsQuotaExceeded(cfg.Status.Conditions) {
+		if !scoped && cfg.Status.Sync.LastRef != "" && options.Incremental && !quotas.IsQuotaExceeded(cfg.Status.Conditions) {
 			progress.SetMessage(ctx, "incremental sync")
 			// Tag the job so the driver's throughput metric can split pull jobs by
 			// the sync variance that actually ran.
@@ -83,5 +89,5 @@ func (r *syncer) Sync(ctx context.Context, repo repository.ReaderWriter, options
 	}
 	progress.SetMessage(ctx, "full sync")
 	progress.SetVariance(jobs.SyncTypeFull.String())
-	return currentRef, r.fullSync(ctx, repo, r.compare, clients, currentRef, repositoryResources, progress, r.tracer, r.maxSyncWorkers, r.metrics, quotaTracker, r.folderMetadataEnabled, r.resourceTimeout)
+	return currentRef, r.fullSync(ctx, repo, compare, clients, currentRef, repositoryResources, progress, r.tracer, r.maxSyncWorkers, r.metrics, quotaTracker, r.folderMetadataEnabled, r.resourceTimeout)
 }
