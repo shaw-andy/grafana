@@ -1019,10 +1019,15 @@ export function trimDashboardForSnapshot(title: string, time: TimeRange, dash: D
     }
   }
 
-  // Remove links from all panels
+  // Remove links from all panels, including those nested inside collapsed rows
   result.panels?.forEach((panel) => {
     if ('links' in panel) {
       panel.links = [];
+    }
+    if (panel.type === 'row' && 'panels' in panel) {
+      panel.panels?.forEach((rowPanel) => {
+        rowPanel.links = [];
+      });
     }
   });
 

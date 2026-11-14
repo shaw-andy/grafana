@@ -148,12 +148,24 @@ export class ShareSnapshot extends PureComponent<Props, State> {
     // Remove links
     dash.links = [];
 
-    // remove panel queries & links
-    dash.panels.forEach((panel) => {
-      panel.targets = [];
-      panel.links = [];
-      panel.datasource = null;
-    });
+    // snapshot single panel
+    if (panel) {
+      const singlePanel = panel.getSaveModel();
+      singlePanel.gridPos.w = 24;
+      singlePanel.gridPos.x = 0;
+      singlePanel.gridPos.y = 0;
+      singlePanel.gridPos.h = 20;
+      dash.panels = [singlePanel];
+    }
+
+    // remove panel queries & links, including panels nested inside collapsed rows
+    const scrubPanel = (dashPanel: PanelModel) => {
+      dashPanel.targets = [];
+      dashPanel.links = [];
+      dashPanel.datasource = null;
+      dashPanel.panels?.forEach(scrubPanel);
+    };
+    dash.panels.forEach(scrubPanel);
 
     // remove annotation queries
     const annotations = dash.annotations.list.filter((annotation) => annotation.enable);
@@ -182,16 +194,6 @@ export class ShareSnapshot extends PureComponent<Props, State> {
         variable.refresh = VariableRefresh.never;
       }
     });
-
-    // snapshot single panel
-    if (panel) {
-      const singlePanel = panel.getSaveModel();
-      singlePanel.gridPos.w = 24;
-      singlePanel.gridPos.x = 0;
-      singlePanel.gridPos.y = 0;
-      singlePanel.gridPos.h = 20;
-      dash.panels = [singlePanel];
-    }
 
     // cleanup snapshotData
     delete this.dashboard.snapshot;
