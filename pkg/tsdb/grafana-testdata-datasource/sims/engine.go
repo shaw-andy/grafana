@@ -145,7 +145,10 @@ func (s *SimulationEngine) QueryData(ctx context.Context, req *backend.QueryData
 
 		frame := sim.NewFrame(0)
 		if sq.Last {
-			v := sim.GetValues(q.TimeRange.To)
+			v, err := getSimValues(sim, q.TimeRange.To)
+			if err != nil {
+				return nil, fmt.Errorf("error computing simulation values: %w", err)
+			}
 			appendFrameRow(frame, v)
 		} else {
 			timeWalkerMs := q.TimeRange.From.UnixNano() / int64(time.Millisecond)
@@ -155,7 +158,10 @@ func (s *SimulationEngine) QueryData(ctx context.Context, req *backend.QueryData
 			maxPoints := min(q.MaxDataPoints*2, 10000)
 			for i := int64(0); i < maxPoints && timeWalkerMs < to; i++ {
 				t := time.UnixMilli(timeWalkerMs).UTC()
-				vals := sim.GetValues(t)
+				vals, err := getSimValues(sim, t)
+				if err != nil {
+					return nil, fmt.Errorf("error computing simulation values: %w", err)
+				}
 				if vals != nil { // nil is returned when you ask for an invalid time
 					appendFrameRow(frame, vals)
 				}
@@ -261,8 +267,12 @@ func (s *SimulationEngine) SubscribeStream(ctx context.Context, req *backend.Sub
 		return nil, err
 	}
 
+	vals, err := getSimValues(sim, time.Now())
+	if err != nil {
+		return nil, err
+	}
 	frame := sim.NewFrame(1)
-	setFrameRow(frame, 0, sim.GetValues(time.Now()))
+	setFrameRow(frame, 0, vals)
 	initial, err := backend.NewInitialFrame(frame, data.IncludeAll)
 
 	return &backend.SubscribeStreamResponse{
@@ -291,8 +301,12 @@ func (s *SimulationEngine) RunStream(ctx context.Context, req *backend.RunStream
 			return ctx.Err()
 
 		case t := <-ticker.C:
-			setFrameRow(frame, 0, sim.GetValues(t))
-			err := sender.SendFrame(frame, mode)
+			vals, err := getSimValues(sim, t)
+			if err != nil {
+				return err
+			}
+			setFrameRow(frame, 0, vals)
+			err = sender.SendFrame(frame, mode)
 			if err != nil {
 				return err
 			}

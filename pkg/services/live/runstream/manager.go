@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -304,15 +305,11 @@ func (s *Manager) runStream(ctx context.Context, cancelFn func(), sr streamReque
 			pluginCtx = newPluginCtx
 		}
 
-		err := sr.StreamRunner.RunStream(
-			ctx,
-			&backend.RunStreamRequest{
-				PluginContext: pluginCtx,
-				Path:          sr.Path,
-				Data:          sr.Data,
-			},
-			backend.NewStreamSender(&packetSender{channelLocalPublisher: s.channelSender, channel: sr.Channel}),
-		)
+		err := s.runStreamOnce(ctx, sr, pluginCtx)
+		if errors.Is(err, errStreamPanic) {
+			logger.Error("Stream panicked, stopping it", "path", sr.Path, "error", err)
+			return
+		}
 		if err != nil {
 			if errors.Is(ctx.Err(), context.Canceled) {
 				logger.Debug("Stream cleanly finished", "path", sr.Path)
@@ -325,6 +322,27 @@ func (s *Manager) runStream(ctx context.Context, cancelFn func(), sr streamReque
 		logger.Debug("Stream finished without error, stopping it", "path", sr.Path)
 		return
 	}
+}
+
+var errStreamPanic = errors.New("stream runner panicked")
+
+// runStreamOnce converts a panic in the stream runner into an error: it runs on
+// a goroutine of its own, so an unrecovered panic would exit the process.
+func (s *Manager) runStreamOnce(ctx context.Context, sr streamRequest, pluginCtx backend.PluginContext) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%w: %v\n%s", errStreamPanic, r, debug.Stack())
+		}
+	}()
+	return sr.StreamRunner.RunStream(
+		ctx,
+		&backend.RunStreamRequest{
+			PluginContext: pluginCtx,
+			Path:          sr.Path,
+			Data:          sr.Data,
+		},
+		backend.NewStreamSender(&packetSender{channelLocalPublisher: s.channelSender, channel: sr.Channel}),
+	)
 }
 
 var errClosed = errors.New("stream manager closed")

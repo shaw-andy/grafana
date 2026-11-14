@@ -1,7 +1,9 @@
 package sims
 
 import (
+	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/data"
@@ -9,11 +11,16 @@ import (
 
 type flightSim struct {
 	key simulationKey
+
+	// cfg is shared by every query and stream using this key, and SetConfig
+	// can replace it while a stream is reading it.
+	mu  sync.RWMutex
 	cfg flightConfig
 }
 
 var (
-	_ Simulation = (*flightSim)(nil)
+	_ Simulation      = (*flightSim)(nil)
+	_ checkedValueSim = (*flightSim)(nil)
 )
 
 type flightDataPoint struct {
@@ -33,15 +40,32 @@ type flightConfig struct {
 	Period      float64 `json:"period"` // angular speed (seconds)
 }
 
+func (s *flightSim) config() flightConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg
+}
+
 func (s *flightSim) GetState() simulationState {
 	return simulationState{
 		Key:    s.key,
-		Config: s.cfg,
+		Config: s.config(),
 	}
 }
 
 func (s *flightSim) SetConfig(vals map[string]any) error {
-	return updateConfigObjectFromJSON(&s.cfg, vals)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := s.cfg
+	if err := updateConfigObjectFromJSON(&next, vals); err != nil {
+		return err
+	}
+	if err := next.validate(); err != nil {
+		return err
+	}
+	s.cfg = next
+	return nil
 }
 
 func (s *flightSim) NewFrame(size int) *data.Frame {
@@ -61,7 +85,19 @@ func (s *flightSim) NewFrame(size int) *data.Frame {
 }
 
 func (s *flightSim) GetValues(t time.Time) map[string]any {
-	p := s.cfg.getNextPoint(t)
+	vals, err := s.getCheckedValues(t)
+	if err != nil {
+		return nil
+	}
+	return vals
+}
+
+func (s *flightSim) getCheckedValues(t time.Time) (map[string]any, error) {
+	cfg := s.config()
+	p, err := cfg.getNextPoint(t)
+	if err != nil {
+		return nil, err
+	}
 
 	return map[string]any{
 		"time":     p.time,
@@ -69,7 +105,7 @@ func (s *flightSim) GetValues(t time.Time) map[string]any {
 		"lng":      p.lng,
 		"heading":  p.heading,
 		"altitude": p.altitude,
-	}
+	}, nil
 }
 
 func (s *flightSim) Close() error {
@@ -109,13 +145,36 @@ func newFlightSimInfo() simulationInfo {
 				cfg: sf, // default value
 			}
 			err := updateConfigObjectFromJSON(&s.cfg, cfg.Config) // override any fields
+			if err == nil {
+				err = s.cfg.validate()
+			}
 			return s, err
 		},
 	}
 }
 
-func (f *flightConfig) getNextPoint(t time.Time) flightDataPoint {
-	periodNS := int64(f.Period * float64(time.Second))
+func (f *flightConfig) validate() error {
+	_, err := f.periodNanos()
+	return err
+}
+
+// periodNanos returns the period as the whole number of nanoseconds that
+// getNextPoint divides by.
+func (f *flightConfig) periodNanos() (int64, error) {
+	ns := f.Period * float64(time.Second)
+	// Range check the float itself: converting an out of range float to int64
+	// is implementation defined, and a positive period can still truncate to 0.
+	if !(ns >= 1 && ns < math.MaxInt64) {
+		return 0, fmt.Errorf("invalid flight period %v: must be a positive number of seconds of at least one nanosecond", f.Period)
+	}
+	return int64(ns), nil
+}
+
+func (f *flightConfig) getNextPoint(t time.Time) (flightDataPoint, error) {
+	periodNS, err := f.periodNanos()
+	if err != nil {
+		return flightDataPoint{}, err
+	}
 	ms := t.UnixNano() % periodNS
 	per := float64(ms) / float64(periodNS)
 	rad := per * 2.0 * math.Pi // 0 >> 2Pi
@@ -127,5 +186,5 @@ func (f *flightConfig) getNextPoint(t time.Time) flightDataPoint {
 		lng:      f.CenterLng + math.Cos(rad)*f.Radius,
 		heading:  (rad * 180) / math.Pi,         // (math.Atanh(rad) * 180.0) / math.Pi, // in degrees
 		altitude: f.AltitudeMin + (delta * per), // clif
-	}
+	}, nil
 }
