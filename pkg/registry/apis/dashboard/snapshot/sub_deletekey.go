@@ -78,6 +78,9 @@ func (r *deleteKeyREST) Connect(ctx context.Context, name string, opts runtime.O
 	if snap.Namespace != ns.Value {
 		return nil, apierrors.NewNotFound(dashv0.SnapshotResourceInfo.GroupResource(), name)
 	}
+	if err := authorizeSnapshotOwner(ctx, snap); err != nil {
+		return nil, err
+	}
 
 	deleteKey := ""
 	if snap.Spec.DeleteKey != nil {
