@@ -22,6 +22,7 @@ import { type FolderDoc, FOLDER_DOC_TAB_PARAM, getDocTabLabel } from '../../util
 import { getRepoEditFileUrl, getRepoNewFileUrl } from '../../utils/git';
 import { RESOURCE_PATH_ATTR, rewriteRelativeMarkdownLinks } from '../../utils/markdownLinks';
 import { createGrafanaLinkResolver } from '../../utils/markdownResourceLinks';
+import { removeGrafanaHostResources } from '../../utils/readmeResources';
 import { splitPath } from '../utils/path';
 
 import { FolderReadmeEvents } from './analytics/main';
@@ -244,7 +245,7 @@ function RenderedMarkdown({
   // which preserves relative links.
   const html = renderMarkdown(markdown, { noSanitize: true });
   const rewritten = rewriteRelativeMarkdownLinks(html, { repository, baseDirInRepo });
-  const safe = textUtil.sanitize(rewritten);
+  const safe = removeGrafanaHostResources(textUtil.sanitize(rewritten));
   const containerRef = useRef<HTMLDivElement>(null);
   // Only the latest async (first-click) resolution navigates, so overlapping
   // clicks can't race and push an earlier link's destination after a later one.
