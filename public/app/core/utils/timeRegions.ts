@@ -106,6 +106,28 @@ export function convertToCron(
   return cronCfg;
 }
 
+export const MAX_TIME_REGION_RANGES = 1000;
+export const MIN_TIME_REGION_CRON_INTERVAL_MS = 60_000;
+
+export class TimeRegionLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TimeRegionLimitError';
+  }
+}
+
+// A seconds field matching more than one second makes two of any three consecutive runs fall in the
+// same minute, so checking the first three runs catches every sub-minute pattern.
+function assertMinimumInterval(job: Cron, fromDate: Date) {
+  const runs = job.nextRuns(3, fromDate);
+
+  for (let i = 1; i < runs.length; i++) {
+    if (+runs[i] - +runs[i - 1] < MIN_TIME_REGION_CRON_INTERVAL_MS) {
+      throw new TimeRegionLimitError('Time region cron interval is shorter than 1 minute');
+    }
+  }
+}
+
 export function calculateTimesWithin(cfg: TimeRegionConfig, tRange: TimeRange): AbsoluteTimeRange[] {
   const ranges: AbsoluteTimeRange[] = [];
 
@@ -142,7 +164,10 @@ export function calculateTimesWithin(cfg: TimeRegionConfig, tRange: TimeRange): 
     // get previous run that may overlap with start of timerange
     let fromDate: Date | null = new Date(tRange.from.valueOf() - durationMs);
 
+    assertMinimumInterval(job, fromDate);
+
     let toMs = tRange.to.valueOf();
+    let prevMs: number | undefined;
     let nextDate = job.nextRun(fromDate);
 
     while (nextDate != null) {
@@ -150,15 +175,24 @@ export function calculateTimesWithin(cfg: TimeRegionConfig, tRange: TimeRange): 
 
       if (nextMs > toMs) {
         break;
+      } else if (prevMs != null && nextMs - prevMs < MIN_TIME_REGION_CRON_INTERVAL_MS) {
+        throw new TimeRegionLimitError('Time region cron interval is shorter than 1 minute');
+      } else if (ranges.length >= MAX_TIME_REGION_RANGES) {
+        throw new TimeRegionLimitError(`Time region query exceeds the maximum of ${MAX_TIME_REGION_RANGES} ranges`);
       } else {
         ranges.push({
           from: nextMs,
           to: nextMs + durationMs,
         });
+        prevMs = nextMs;
         nextDate = job.nextRun(nextDate);
       }
     }
   } catch (e) {
+    if (e instanceof TimeRegionLimitError) {
+      throw e;
+    }
+
     // invalid expression
     console.error(e);
   }

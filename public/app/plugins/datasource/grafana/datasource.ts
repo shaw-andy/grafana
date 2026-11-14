@@ -79,12 +79,17 @@ export class GrafanaDatasource extends DataSourceWithBackend<GrafanaQuery> {
     const templateSrv = getTemplateSrv();
     for (const target of request.targets) {
       if (target.queryType === GrafanaQueryType.Annotations) {
+        const annotation = target as unknown as AnnotationQuery<GrafanaAnnotationQuery>;
+        if (annotation.target?.queryType === GrafanaQueryType.TimeRegions) {
+          const frame = doTimeRegionQuery(annotation.name, annotation.target.timeRegion!, request.range);
+          return of({ data: frame ? [frame] : [] });
+        }
         return from(
           this.getAnnotations(
             {
               range: request.range,
               rangeRaw: request.range.raw,
-              annotation: target as unknown as AnnotationQuery<GrafanaAnnotationQuery>,
+              annotation,
               dashboard: getDashboardSrv().getCurrent(),
             },
             request.scopes
