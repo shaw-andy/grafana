@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
@@ -29,7 +29,7 @@ jobs:
             FSPERF_PASSWORD=frontend_perf_tests:fsperf_password
 
       - name: Authenticate Docker
-        uses: grafana/shared-workflows/actions/login-to-gar@main
+        uses: grafana/shared-workflows/actions/login-to-gar@afad5c7621e788905e6417f05b492972685ab1eb # login-to-gar/v1.0.4
         id: login-to-gar
         with:
           registry: 'us-docker.pkg.dev'
