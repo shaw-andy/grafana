@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import React from 'react';
 import type uPlot from 'uplot';
 
@@ -247,7 +248,7 @@ describe('TooltipPlugin2', () => {
       expect(getDataLinks).toHaveBeenCalledWith(1, 5);
     });
 
-    it('oneClick', async () => {
+    it('oneClick opens the link only after the displayed address is confirmed', async () => {
       const windowOpen = jest.spyOn(window, 'open').mockImplementation(() => null);
 
       const getDataLinks = jest.fn(() => [
@@ -275,9 +276,21 @@ describe('TooltipPlugin2', () => {
         mockUPlot.over.dispatchEvent(new MouseEvent('click'));
       });
 
-      expect(windowOpen).toHaveBeenCalledWith('https://example.com/oneclick', '_blank');
-      expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
+      expect(windowOpen).not.toHaveBeenCalled();
       expect(getDataLinks).toHaveBeenCalledWith(1, 5);
+
+      const dialog = screen.getByRole('dialog', { name: 'Open link' });
+      expect(within(dialog).getByText('https://example.com/oneclick')).toBeVisible();
+      // the tooltip is not pinned, so the only close button belongs to the dialog
+      expect(screen.getAllByRole('button', { name: 'Close' })).toEqual([
+        within(dialog).getByRole('button', { name: 'Close' }),
+      ]);
+
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Open link' }));
+
+      expect(windowOpen).toHaveBeenCalledTimes(1);
+      expect(windowOpen).toHaveBeenCalledWith('https://example.com/oneclick', '_blank');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
       windowOpen.mockRestore();
     });

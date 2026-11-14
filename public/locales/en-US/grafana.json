@@ -10740,6 +10740,11 @@
       "text-color-swatch": "Text color",
       "transparent-swatch": "Transparent"
     },
+    "one-click-link-confirm-modal": {
+      "body": "This link opens the following address:",
+      "confirm": "Open link",
+      "title": "Open link"
+    },
     "page-loader": {
       "label": "Loading"
     },

@@ -87,6 +87,7 @@ export {
 export type { CodeEditorProps } from '../components/Monaco/types';
 export { type Props as InlineFieldProps } from '../components/Forms/InlineField';
 export { DataLinkSuggestions } from '../components/DataLinks/DataLinkSuggestions';
+export { OneClickLinkConfirmModal } from '../components/DataLinks/OneClickLinkConfirmModal';
 export { type Props as AlertProps } from '../components/Alert/Alert';
 export { type TooltipPlacement } from '../components/Tooltip/types';
 export { ConfirmContent, type ConfirmContentProps } from '../components/ConfirmModal/ConfirmContent';

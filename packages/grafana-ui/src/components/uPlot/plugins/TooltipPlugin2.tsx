@@ -1,5 +1,5 @@
 import { css, cx } from '@emotion/css';
-import { useLayoutEffect, useRef, useReducer, type CSSProperties } from 'react';
+import { useLayoutEffect, useRef, useReducer, useState, type CSSProperties } from 'react';
 import * as React from 'react';
 import { createPortal } from 'react-dom';
 import type uPlot from 'uplot';
@@ -8,6 +8,7 @@ import { type GrafanaTheme2, type LinkModel } from '@grafana/data';
 import { DashboardCursorSync } from '@grafana/schema';
 
 import { useStyles2 } from '../../../themes/ThemeContext';
+import { OneClickLinkConfirmModal } from '../../DataLinks/OneClickLinkConfirmModal';
 import { type RangeSelection1D, type RangeSelection2D, type OnSelectRangeCallback } from '../../PanelChrome';
 import { getPortalContainer } from '../../Portal/Portal';
 import { type AdHocFilterModel } from '../../VizTooltip';
@@ -134,6 +135,7 @@ export const TooltipPlugin2 = ({
   }
 
   const [{ isHovering, isPinned, contents, style, dismiss }, setState] = useReducer(mergeState, null, initState);
+  const [pendingOneClickLink, setPendingOneClickLink] = useState<LinkModel | null>(null);
 
   const sizeRef = useRef<TooltipContainerSize | undefined>(undefined);
   const styles = useStyles2(getStyles, maxWidth);
@@ -395,7 +397,7 @@ export const TooltipPlugin2 = ({
             const oneClickLink = dataLinks.find((dataLink) => dataLink.oneClick === true);
 
             if (oneClickLink != null) {
-              window.open(oneClickLink.href, oneClickLink.target ?? '_self');
+              setPendingOneClickLink(oneClickLink);
             } else {
               setTimeout(() => {
                 _isPinned = true;
@@ -755,23 +757,28 @@ export const TooltipPlugin2 = ({
     }
   }, [isHovering]);
 
-  if (plotRef.current && isHovering) {
-    return createPortal(
-      <div
-        className={cx(styles.tooltipWrapper, isPinned && styles.pinned)}
-        style={style}
-        aria-live="polite"
-        aria-atomic="true"
-        ref={domRef}
-      >
-        {isPinned && <CloseButton onClick={dismiss} />}
-        {contents}
-      </div>,
-      portalRoot.current
-    );
-  }
-
-  return null;
+  return (
+    <>
+      {plotRef.current &&
+        isHovering &&
+        createPortal(
+          <div
+            className={cx(styles.tooltipWrapper, isPinned && styles.pinned)}
+            style={style}
+            aria-live="polite"
+            aria-atomic="true"
+            ref={domRef}
+          >
+            {isPinned && <CloseButton onClick={dismiss} />}
+            {contents}
+          </div>,
+          portalRoot.current
+        )}
+      {pendingOneClickLink && (
+        <OneClickLinkConfirmModal link={pendingOneClickLink} onDismiss={() => setPendingOneClickLink(null)} />
+      )}
+    </>
+  );
 };
 
 const getStyles = (theme: GrafanaTheme2, maxWidth?: number) => ({
