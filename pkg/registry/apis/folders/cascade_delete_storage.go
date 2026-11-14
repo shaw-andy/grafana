@@ -194,6 +194,9 @@ func (s *cascadeDeleteStorage) cascadeDelete(ctx context.Context, user identity.
 	if err := s.checkFolderContentsAccess(ctx, user, namespace, name, parentUID); err != nil {
 		return nil, false, err
 	}
+	if err := s.checkLeftoverVariablesAccess(ctx, user, namespace, name); err != nil {
+		return nil, false, err
+	}
 
 	children, err := s.childFolders(ctx, namespace, name)
 	if err != nil {
@@ -463,7 +466,8 @@ func (s *cascadeDeleteStorage) childFolders(ctx context.Context, namespace, pare
 // Legacy folder delete gated contained resources on alert.rules:delete and folders:write; the authz
 // mapper resolves the tuples below to those actions (see pkg/services/authz/rbac/mapper.go).
 // variables:delete is added when global variables are enabled: the cascade deletes variables under a
-// service identity, so this is the only user-level gate (same reason as the alert-rules check).
+// service identity, so this and checkLeftoverVariablesAccess are the only user-level gates (same
+// reason as the alert-rules check).
 const (
 	cascadeAlertRuleGroup    = "rules.alerting.grafana.app"
 	cascadeAlertRuleResource = "alertrules"
@@ -511,6 +515,32 @@ func (s *cascadeDeleteStorage) checkFolderContentsAccess(ctx context.Context, us
 		if !resp.Allowed {
 			return apierrors.NewForbidden(foldersv1.FolderResourceInfo.GroupResource(), folderUID, folder.ErrAccessDenied)
 		}
+	}
+	return nil
+}
+
+// checkLeftoverVariablesAccess requires variables:delete on folderUID when global variables are
+// disabled but the folder still holds variables. The variable API lets the service identity delete
+// such leftovers, so without this check any requester allowed to force-delete the folder would
+// remove them. With global variables enabled, checkFolderContentsAccess already requires it.
+func (s *cascadeDeleteStorage) checkLeftoverVariablesAccess(ctx context.Context, user identity.Requester, namespace, folderUID string) error {
+	if s.accessClient == nil || grafanaDashboardGlobalVariablesEnabled(ctx) {
+		return nil
+	}
+	names, err := s.variablesInFolder(ctx, namespace, folderUID)
+	if err != nil {
+		return err
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	varGVR := dashboardV2beta1.VariableResourceInfo.GroupVersionResource()
+	resp, err := s.accessClient.Check(ctx, user, authlib.CheckRequest{Namespace: namespace, Verb: utils.VerbDelete, Group: varGVR.Group, Resource: varGVR.Resource}, folderUID)
+	if err != nil {
+		return err
+	}
+	if !resp.Allowed {
+		return apierrors.NewForbidden(foldersv1.FolderResourceInfo.GroupResource(), folderUID, folder.ErrAccessDenied)
 	}
 	return nil
 }

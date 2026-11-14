@@ -770,3 +770,44 @@ func TestCascadeDelete_ForbiddenWithoutVariablesDelete(t *testing.T) {
 	require.True(t, apierrors.IsForbidden(err))
 	require.Empty(t, store.deleted, "folder must not be deleted when variables:delete is denied")
 }
+
+func TestCascadeDelete_LeftoverVariablesRequireVariablesDelete(t *testing.T) {
+	varGVR := dashv2beta1.VariableResourceInfo.GroupVersionResource()
+	cases := []struct {
+		name      string
+		variables map[string][]string
+		allowVars bool
+		wantErr   bool
+	}{
+		{name: "denied when the folder holds variables", variables: map[string][]string{"root": {"var-1"}}, wantErr: true},
+		{name: "allowed with variables:delete", variables: map[string][]string{"root": {"var-1"}}, allowVars: true},
+		{name: "not required when the folder holds no variables"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setOpenFeatureToggles(t, map[string]bool{
+				featuremgmt.FlagKubernetesFolderCascadeDelete:   true,
+				featuremgmt.FlagGrafanaDashboardGlobalVariables: false,
+			})
+			store := &fakeFolderStorage{existing: map[string]*foldersv1.Folder{"root": newFolder("root")}}
+			s, dyn := newVariableCascade(store, &fakeCascadeSearcher{variablesByFolder: tc.variables}, unstructuredVariable("default", "var-1"))
+			s.accessClient = &recordingAccessClient{allow: func(req authlib.CheckRequest, _ string) bool {
+				return tc.allowVars || req.Resource != varGVR.Resource
+			}}
+
+			_, _, err := s.Delete(ctxWithNamespace(), "root", nil, forceDelete())
+			_, getErr := dyn.Resource(varGVR).Namespace("default").Get(ctxWithNamespace(), "var-1", metav1.GetOptions{})
+			if tc.wantErr {
+				require.True(t, apierrors.IsForbidden(err), "expected forbidden, got %v", err)
+				require.NoError(t, getErr, "variable must not be deleted")
+				require.Empty(t, store.deleted)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, []string{"root"}, store.deleted)
+			if len(tc.variables) > 0 {
+				require.True(t, apierrors.IsNotFound(getErr))
+			}
+		})
+	}
+}

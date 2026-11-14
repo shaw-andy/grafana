@@ -520,11 +520,9 @@ func (s *Service) deleteVariablesInFolders(ctx context.Context, orgID int64, fol
 	ctx, span := s.tracer.Start(ctx, "folder.deleteVariablesInFolders")
 	defer span.End()
 
-	// Search is GET-scoped to the requester. Run as the service so leftover
-	// variables are found and deleted even when grafana.dashboardGlobalVariables
-	// is off (user-facing APIs deny) or the user cannot see every child.
-	ctx = identity.WithServiceIdentityContext(ctx, orgID)
-
+	// Runs as the requester so the variable API enforces variables:delete on
+	// each variable's folder. Variables the requester cannot see are left in
+	// place and the folder API then refuses to delete the non-empty folder.
 	request := &resourcepb.ResourceSearchRequest{
 		Options: &resourcepb.ListOptions{
 			Labels: []*resourcepb.Requirement{},
@@ -548,9 +546,83 @@ func (s *Service) deleteVariablesInFolders(ctx context.Context, orgID int64, fol
 	for _, hit := range hits.Hits {
 		variableUID := hit.Name
 		err = s.variableK8sClient.Delete(ctx, variableUID, orgID, metav1.DeleteOptions{})
+		if apierrors.IsForbidden(err) {
+			return fmt.Errorf("%w: not allowed to delete variable %s: %w", folder.ErrAccessDenied, variableUID, err)
+		}
 		if err != nil && !apierrors.IsNotFound(err) {
 			return folder.ErrInternal.Errorf("failed to delete variable %s: %w", variableUID, err)
 		}
+	}
+	return nil
+}
+
+func (s *Service) searchDashboardsInFolders(ctx context.Context, orgID int64, folderUIDs []string) (v0alpha1.SearchResults, error) {
+	request := &resourcepb.ResourceSearchRequest{
+		Options: &resourcepb.ListOptions{
+			Labels: []*resourcepb.Requirement{},
+			Fields: []*resourcepb.Requirement{
+				{
+					Key:      resource.SEARCH_FIELD_FOLDER,
+					Operator: string(selection.In),
+					Values:   folderUIDs,
+				},
+			},
+		},
+		Limit:        folderSearchLimit,
+		ResultFormat: resourcepb.ResourceSearchRequest_FIELD_VALUES,
+	}
+	hits, err := dashboardsearch.SearchAll(ctx, orgID, request, s.dashboardK8sClient.Search)
+	if err != nil {
+		return v0alpha1.SearchResults{}, folder.ErrInternal.Errorf("failed to fetch dashboards: %w", err)
+	}
+	return hits, nil
+}
+
+// checkNoHiddenDashboards refuses the delete before anything is removed when
+// the folders contain dashboards the requester cannot see. Child deletes are
+// scoped to the requester, so such dashboards would remain and the folder API
+// would reject the folder delete after the visible children were gone.
+func (s *Service) checkNoHiddenDashboards(ctx context.Context, orgID int64, folderUIDs []string) error {
+	ctx, span := s.tracer.Start(ctx, "folder.checkNoHiddenDashboards")
+	defer span.End()
+
+	all, err := s.searchDashboardsInFolders(identity.WithServiceIdentityContext(ctx, orgID), orgID, folderUIDs)
+	if err != nil {
+		return err
+	}
+	if len(all.Hits) == 0 {
+		return nil
+	}
+
+	visible, err := s.searchDashboardsInFolders(ctx, orgID, folderUIDs)
+	if err != nil {
+		return err
+	}
+	visibleUIDs := make(map[string]struct{}, len(visible.Hits))
+	for _, hit := range visible.Hits {
+		visibleUIDs[hit.Name] = struct{}{}
+	}
+	for _, hit := range all.Hits {
+		if _, ok := visibleUIDs[hit.Name]; !ok {
+			return folder.ErrFolderNotEmpty.Errorf("folder contains dashboards you do not have access to")
+		}
+	}
+	return nil
+}
+
+// checkNoDashboardsLeft runs after the child deletes and before variables are
+// removed. The folder API counts every dashboard, so any that are still stored
+// would make it reject the folder delete after the variables were gone.
+func (s *Service) checkNoDashboardsLeft(ctx context.Context, orgID int64, folderUIDs []string) error {
+	ctx, span := s.tracer.Start(ctx, "folder.checkNoDashboardsLeft")
+	defer span.End()
+
+	left, err := s.searchDashboardsInFolders(identity.WithServiceIdentityContext(ctx, orgID), orgID, folderUIDs)
+	if err != nil {
+		return err
+	}
+	if len(left.Hits) > 0 {
+		return folder.ErrFolderNotEmpty.Errorf("folder is not empty, contains %d dashboards", len(left.Hits))
 	}
 	return nil
 }
@@ -582,6 +654,10 @@ func (s *Service) Delete(ctx context.Context, cmd *folder.DeleteFolderCommand) e
 	// must delete children first, then the parent folder
 	s.log.InfoContext(ctx, "deleting folder with descendants", "org_id", cmd.OrgID, "uid", cmd.UID, "folderUIDs", strings.Join(folders, ","))
 	folders = append(folders, cmd.UID)
+
+	if err := s.checkNoHiddenDashboards(ctx, cmd.OrgID, folders); err != nil {
+		return err
+	}
 
 	if cmd.ForceDeleteRules {
 		if err := s.deleteChildrenInFolder(ctx, cmd.OrgID, folders, cmd.SignedInUser); err != nil {
@@ -651,6 +727,10 @@ func (s *Service) Delete(ctx context.Context, cmd *folder.DeleteFolderCommand) e
 		if err != nil {
 			return folder.ErrInternal.Errorf("failed to delete public dashboards: %w", err)
 		}
+	}
+
+	if err := s.checkNoDashboardsLeft(ctx, cmd.OrgID, folders); err != nil {
+		return err
 	}
 
 	if err := s.deleteVariablesInFolders(ctx, cmd.OrgID, folders); err != nil {
