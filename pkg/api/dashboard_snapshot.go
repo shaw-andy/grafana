@@ -18,6 +18,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/dashboards"
 	"github.com/grafana/grafana/pkg/services/dashboardsnapshots"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
+	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/util"
 	"github.com/grafana/grafana/pkg/web"
 )
@@ -244,7 +245,14 @@ func (hs *HTTPServer) DeleteDashboardSnapshot(c *contextmodel.ReqContext) respon
 	dashboardID := queryResult.Dashboard.Get("id").MustInt64()
 	dashboardUID := queryResult.Dashboard.Get("uid").MustString()
 
-	if dashboardID != 0 || dashboardUID != "" {
+	if dashboardID == 0 && dashboardUID == "" {
+		// There is no dashboard to check write access against, and the snapshot key is
+		// public, so the unscoped snapshots:delete permission is not enough on its own.
+		isCreator := queryResult.UserID != 0 && queryResult.UserID == c.UserID
+		if !isCreator && !c.SignedInUser.HasRole(org.RoleAdmin) {
+			return response.Error(http.StatusForbidden, "Access denied to this snapshot", nil)
+		}
+	} else {
 		var evaluator ac.Evaluator
 		if dashboardID != 0 {
 			evaluator = ac.EvalPermission(dashboards.ActionDashboardsWrite, dashboards.ScopeDashboardsProvider.GetResourceScope(strconv.FormatInt(dashboardID, 10)))
