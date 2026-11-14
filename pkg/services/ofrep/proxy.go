@@ -18,6 +18,8 @@ import (
 	"github.com/grafana/grafana/pkg/infra/tracing"
 	"github.com/grafana/grafana/pkg/util/proxyutil"
 	goffmodel "github.com/thomaspoignant/go-feature-flag/cmd/relayproxy/model"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 func (b *APIBuilder) proxyAllFlagReq(ctx context.Context, isAuthedUser bool, namespace string, w http.ResponseWriter, r *http.Request) {
@@ -174,12 +176,32 @@ func (b *APIBuilder) newProxy(proxyPath, namespace string, targetURL *url.URL, i
 		req.URL.Scheme = targetURL.Scheme
 		req.URL.Host = targetURL.Host
 		req.URL.Path = proxyPath
+		req.Header = filterForwardedHeaders(req.Header)
 		req.Header.Set("User-Agent", withStackTag(incomingUserAgent, namespace))
+		otel.GetTextMapPropagator().Inject(req.Context(), propagation.HeaderCarrier(req.Header))
 	}
 
 	proxy := proxyutil.NewReverseProxy(b.logger, director)
 	proxy.Transport = b.transport
 	return proxy, nil
+}
+
+// forwardedRequestHeaders is an allowlist: the feature service is a separate trust domain, so
+// the caller's Grafana credentials (session cookie, Authorization, API keys, auth proxy headers)
+// must never reach it.
+var forwardedRequestHeaders = []string{
+	"Accept",
+	"Content-Type",
+}
+
+func filterForwardedHeaders(in http.Header) http.Header {
+	out := make(http.Header, len(forwardedRequestHeaders))
+	for _, name := range forwardedRequestHeaders {
+		if values := in.Values(name); len(values) > 0 {
+			out[name] = append([]string(nil), values...)
+		}
+	}
+	return out
 }
 
 // maxUserAgentLen bounds a caller-supplied User-Agent before it's forwarded downstream.
