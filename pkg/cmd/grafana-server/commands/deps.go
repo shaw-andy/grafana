@@ -36,6 +36,7 @@ func bootstrapConfig(opts bootstrap.BuildInfo, deps ServerDeps, extraArgs []stri
 			ProfilePort:          ProfilePort,
 			ProfileBlockRate:     ProfileBlockRate,
 			ProfileMutexFraction: ProfileMutexFraction,
+			ProfileTokenFile:     ProfileTokenFile,
 			Tracing:              Tracing,
 			TracingFile:          TracingFile,
 		},
