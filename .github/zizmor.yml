@@ -5,7 +5,7 @@ rules:
         "*": hash-pin
         actions/*: any
         github/*: any
-        grafana/*: any
+        grafana/grafana/*: any
   forbidden-uses:
     config:
       deny:

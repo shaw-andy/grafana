@@ -42,7 +42,7 @@ jobs:
     runs-on: ubuntu-arm64-small
     steps:
       - name: Create GitHub release (manually invoked)
-        uses: grafana/grafana-github-actions-go/github-release@main # zizmor: ignore[unpinned-uses]
+        uses: grafana/grafana-github-actions-go/github-release@015e217f58ce35182230e20ac721e8351258f0ad # main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           version: ${{ inputs.version }}

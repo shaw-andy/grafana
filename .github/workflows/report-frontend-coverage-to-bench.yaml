@@ -92,7 +92,7 @@ jobs:
 
       - name: Get Vault secrets
         id: get-secrets
-        uses: grafana/shared-workflows/actions/get-vault-secrets@main
+        uses: grafana/shared-workflows/actions/get-vault-secrets@6a943082408bb241a26b14661e446220c3e62b16 # main
         with:
           repo_secrets: |
             PROMETHEUS_URL=frontend_perf_tests:prometheus_push_url
