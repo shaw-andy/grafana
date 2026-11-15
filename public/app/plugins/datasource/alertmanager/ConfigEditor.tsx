@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom-v5-compat';
 import { SIGV4ConnectionConfig } from '@grafana/aws-sdk';
 import { type DataSourcePluginOptionsEditorProps, type SelectableValue } from '@grafana/data';
 import { config } from '@grafana/runtime';
-import { Box, DataSourceHttpSettings, InlineField, InlineSwitch, Select, Text } from '@grafana/ui';
+import { Box, DataSourceHttpSettings, InlineField, InlineSwitch, Select, TagsInput, Text } from '@grafana/ui';
 
 import { type AlertManagerDataSourceJsonData, AlertManagerImplementation } from './types';
 
@@ -85,6 +85,24 @@ export const ConfigEditor = (props: Props) => {
             Make sure to enable the alert forwarding on the <Link to={'/alerting/admin'}>settings page</Link>.
           </Text>
         )}
+        <InlineField
+          label="Allowed source hosts"
+          tooltip="The See source link of an alert is only shown when its generator URL points at this Alertmanager or at one of these hosts, such as the Prometheus servers that send alerts to it. Enter a host, or host:port to allow a single port."
+          labelWidth={26}
+        >
+          <TagsInput
+            width={40}
+            placeholder="prometheus.example.com:9090"
+            tags={options.jsonData.generatorURLAllowedHosts ?? []}
+            onChange={(hosts) =>
+              onOptionsChange(
+                produce(options, (draft) => {
+                  draft.jsonData.generatorURLAllowedHosts = hosts;
+                })
+              )
+            }
+          />
+        </InlineField>
       </Box>
       <DataSourceHttpSettings
         defaultUrl={''}

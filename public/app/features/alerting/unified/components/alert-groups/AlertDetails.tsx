@@ -11,6 +11,7 @@ import { useGlobalRuleAbility } from '../../hooks/abilities/rules/ruleAbilities'
 import { RuleAction, SilenceAction } from '../../hooks/abilities/types';
 import { isGrafanaRulesSource } from '../../utils/datasource';
 import { makeAMLink, makeLabelBasedSilenceLink } from '../../utils/misc';
+import { parseExternalAlertmanagerUrl } from '../../utils/url';
 import { AnnotationDetailsField } from '../AnnotationDetailsField';
 
 interface AmNotificationsAlertDetailsProps {
@@ -26,6 +27,8 @@ export const AlertDetails = ({ alert, alertManagerSourceName }: AmNotificationsA
   const isGrafanaSource = isGrafanaRulesSource(alertManagerSourceName);
   const viewRuleAbility = useGlobalRuleAbility(RuleAction.View);
   const isSeeSourceButtonEnabled = isGrafanaSource ? isGranted(viewRuleAbility) : true;
+  const externalSourceUrl =
+    !isGrafanaSource && alert.generatorURL ? parseExternalAlertmanagerUrl(alert.generatorURL) : undefined;
   const canCreateSilence = isGranted(useSilenceAbility({ action: SilenceAction.Create }));
   const canUpdateSilence = isGranted(useSilenceAbility({ action: SilenceAction.Update }));
 
@@ -55,16 +58,26 @@ export const AlertDetails = ({ alert, alertManagerSourceName }: AmNotificationsA
             <Trans i18nKey="alerting.alert-details.silence">Silence</Trans>
           </LinkButton>
         )}
-        {isSeeSourceButtonEnabled && alert.generatorURL && (
+        {isSeeSourceButtonEnabled && isGrafanaSource && alert.generatorURL && (
           <LinkButton className={styles.button} href={alert.generatorURL} icon={'chart-line'} size={'sm'}>
-            {isGrafanaSource
-              ? t('alerting.alert-details.button-see-rule', 'See alert rule')
-              : t('alerting.alert-details.button-see-source', 'See source')}
+            {t('alerting.alert-details.button-see-rule', 'See alert rule')}
+          </LinkButton>
+        )}
+        {isSeeSourceButtonEnabled && externalSourceUrl && (
+          <LinkButton className={styles.button} href={externalSourceUrl.href} icon={'chart-line'} size={'sm'}>
+            {t('alerting.alert-details.button-see-source-on-host', 'See source on {{host}}', {
+              host: externalSourceUrl.host,
+            })}
           </LinkButton>
         )}
       </div>
       {Object.entries(alert.annotations).map(([annotationKey, annotationValue]) => (
-        <AnnotationDetailsField key={annotationKey} annotationKey={annotationKey} value={annotationValue} />
+        <AnnotationDetailsField
+          key={annotationKey}
+          annotationKey={annotationKey}
+          value={annotationValue}
+          externalLinksOnly={!isGrafanaSource}
+        />
       ))}
       <div className={styles.receivers}>
         <Trans

@@ -3,6 +3,7 @@ import { css } from '@emotion/css';
 import { TextLink, Tooltip } from '@grafana/ui';
 
 import { type Annotation, annotationLabels } from '../utils/constants';
+import { parseExternalAlertmanagerUrl } from '../utils/url';
 
 import { DetailsField } from './DetailsField';
 import { Tokenize } from './Tokenize';
@@ -14,9 +15,11 @@ interface Props {
   annotationKey: string;
   value: string;
   valueLink?: string;
+  /** Only render the value as a link when it points outside of Grafana, for annotations that users cannot be trusted with. */
+  externalLinksOnly?: boolean;
 }
 
-export const AnnotationDetailsField = ({ annotationKey, value, valueLink }: Props) => {
+export const AnnotationDetailsField = ({ annotationKey, value, valueLink, externalLinksOnly }: Props) => {
   const annotation = annotationKey as Annotation;
   const label = annotationLabels[annotation] ? (
     <Tooltip content={annotationKey} placement="top" theme="info">
@@ -28,14 +31,20 @@ export const AnnotationDetailsField = ({ annotationKey, value, valueLink }: Prop
 
   return (
     <DetailsField label={label} horizontal={true} childrenWrapperClassName={styles.value}>
-      <AnnotationValue annotationKey={annotationKey} value={value} valueLink={valueLink} />
+      <AnnotationValue
+        annotationKey={annotationKey}
+        value={value}
+        valueLink={valueLink}
+        externalLinksOnly={externalLinksOnly}
+      />
     </DetailsField>
   );
 };
 
-const AnnotationValue = ({ annotationKey, value, valueLink }: Props) => {
+const AnnotationValue = ({ annotationKey, value, valueLink, externalLinksOnly }: Props) => {
   const needsWell = wellableAnnotationKeys.includes(annotationKey);
-  const needsExternalLink = value && value.startsWith('http');
+  const externalLink = externalLinksOnly ? parseExternalAlertmanagerUrl(value)?.href : value;
+  const needsExternalLink = value && value.startsWith('http') && externalLink;
 
   const tokenizeValue = <Tokenize input={value} delimiter={['{{', '}}']} />;
 
@@ -53,7 +62,7 @@ const AnnotationValue = ({ annotationKey, value, valueLink }: Props) => {
 
   if (needsExternalLink) {
     return (
-      <TextLink href={value} external>
+      <TextLink href={externalLink} external>
         {value}
       </TextLink>
     );

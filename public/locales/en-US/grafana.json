@@ -397,7 +397,7 @@
     },
     "alert-details": {
       "button-see-rule": "See alert rule",
-      "button-see-source": "See source",
+      "button-see-source-on-host": "See source on {{host}}",
       "manage-silences": "Manage silences",
       "receivers-list": "Receivers: {{receivers}}",
       "silence": "Silence"
