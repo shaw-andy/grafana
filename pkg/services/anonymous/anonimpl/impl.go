@@ -2,6 +2,8 @@ package anonimpl
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"time"
@@ -27,6 +29,10 @@ import (
 const thirtyDays = 30 * 24 * time.Hour
 const deviceIDHeader = "X-Grafana-Device-Id"
 const keepFor = time.Hour * 24 * 61
+const clientDeviceIDPrefix = "client-"
+
+// maxUserAgentLength matches the anon_device.user_agent column length.
+const maxUserAgentLength = 255
 
 type AnonDeviceService struct {
 	log            log.Logger
@@ -105,7 +111,7 @@ func (a *AnonDeviceService) tagDeviceUI(ctx context.Context, device *anonstore.D
 		a.log.Debug("Tagging device for UI", "deviceID", device.DeviceID, "device", device, "key", key)
 	}
 
-	if err := a.anonStore.CreateOrUpdateDevice(ctx, device); err != nil {
+	if err := a.storeDevice(ctx, device); err != nil {
 		if errors.Is(err, anonstore.ErrDeviceLimitReached) {
 			a.localCache.SetDefault(key, false)
 			return err
@@ -116,6 +122,49 @@ func (a *AnonDeviceService) tagDeviceUI(ctx context.Context, device *anonstore.D
 	}
 
 	return nil
+}
+
+func (a *AnonDeviceService) storeDevice(ctx context.Context, device *anonstore.Device) error {
+	if a.cfg.Anonymous.DeviceLimit <= 0 {
+		return a.anonStore.CreateOrUpdateDevice(ctx, device)
+	}
+
+	clientID := clientDeviceID(device.ClientIP, device.UserAgent)
+	if device.DeviceID != clientID {
+		// The client now sends its own device ID, so release the slot its headerless requests held
+		// to avoid counting the same browser twice.
+		if err := a.anonStore.DeleteDevice(ctx, clientID); err != nil {
+			return err
+		}
+		return a.anonStore.CreateOrUpdateDevice(ctx, device)
+	}
+
+	// Page loads and websocket upgrades cannot carry the device header, so a headerless request
+	// from a client that already holds a counted device uses that device's slot.
+	found, err := a.anonStore.HasActiveClientDevice(ctx, device.ClientIP, device.UserAgent, clientID)
+	if err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+
+	return a.anonStore.CreateOrUpdateDevice(ctx, device)
+}
+
+// clientDeviceID derives a device ID for requests that do not send one, so they are counted
+// against the device limit.
+func clientDeviceID(clientIP, userAgent string) string {
+	sum := sha256.Sum256([]byte(clientIP + "\x00" + userAgent))
+	return clientDeviceIDPrefix + hex.EncodeToString(sum[:])
+}
+
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 func (a *AnonDeviceService) untagDevice(ctx context.Context, _ *authn.Identity, r *authn.Request, err error) {
@@ -135,8 +184,9 @@ func (a *AnonDeviceService) untagDevice(ctx context.Context, _ *authn.Identity, 
 }
 
 func (a *AnonDeviceService) TagDevice(ctx context.Context, httpReq *http.Request, kind anonymous.DeviceKind) error {
+	limited := a.cfg.Anonymous.DeviceLimit > 0
 	deviceID := httpReq.Header.Get(deviceIDHeader)
-	if deviceID == "" {
+	if deviceID == "" && !limited {
 		return nil
 	}
 
@@ -144,18 +194,25 @@ func (a *AnonDeviceService) TagDevice(ctx context.Context, httpReq *http.Request
 	ip, err := network.GetIPFromAddress(addr)
 	if err != nil {
 		a.log.Debug("Failed to parse ip from address", "addr", addr)
-		return nil
+		if !limited {
+			return nil
+		}
 	}
 
-	clientIPStr := ip.String()
-	if len(ip) == 0 {
-		clientIPStr = ""
+	clientIPStr := ""
+	if len(ip) > 0 {
+		clientIPStr = ip.String()
+	}
+
+	userAgent := truncateRunes(httpReq.UserAgent(), maxUserAgentLength)
+	if deviceID == "" {
+		deviceID = clientDeviceID(clientIPStr, userAgent)
 	}
 
 	taggedDevice := &anonstore.Device{
 		DeviceID:  deviceID,
 		ClientIP:  clientIPStr,
-		UserAgent: httpReq.UserAgent(),
+		UserAgent: userAgent,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}

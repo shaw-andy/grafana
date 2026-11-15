@@ -69,6 +69,8 @@ type AnonStore interface {
 	CreateOrUpdateDevice(ctx context.Context, device *Device) error
 	// CountDevices returns the number of devices that have been updated between the given times.
 	CountDevices(ctx context.Context, from time.Time, to time.Time) (int64, error)
+	// HasActiveClientDevice reports whether a device other than excludeDeviceID is active for the given client IP and user agent.
+	HasActiveClientDevice(ctx context.Context, clientIP string, userAgent string, excludeDeviceID string) (bool, error)
 	// DeleteDevice deletes a device by its ID.
 	DeleteDevice(ctx context.Context, deviceID string) error
 	// DeleteDevicesOlderThan deletes all devices that have no been updated since the given time.
@@ -197,6 +199,19 @@ func (s *AnonDBStore) CountDevices(ctx context.Context, from time.Time, to time.
 	})
 
 	return count, err
+}
+
+func (s *AnonDBStore) HasActiveClientDevice(ctx context.Context, clientIP string, userAgent string, excludeDeviceID string) (bool, error) {
+	var count int64
+	from := time.Now().UTC().Add(-anonymousDeviceExpiration)
+	to := time.Now().UTC().Add(time.Minute)
+	err := s.sqlStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
+		_, err := dbSession.SQL("SELECT COUNT(*) FROM anon_device WHERE client_ip = ? AND user_agent = ? AND device_id <> ? AND updated_at BETWEEN ? AND ?",
+			clientIP, userAgent, excludeDeviceID, from, to).Get(&count)
+		return err
+	})
+
+	return count > 0, err
 }
 
 func (s *AnonDBStore) DeleteDevice(ctx context.Context, deviceID string) error {
