@@ -266,4 +266,104 @@ describe('canAccessPluginPage', () => {
 
     expect(canAccessPluginPage(settings, '/a/grafana-incident-app/incidents/declare')).toBe(false);
   });
+
+  const openPlugin = {
+    ...pluginMeta[SupportedPlugin.Incident],
+    includes: [
+      {
+        type: PluginIncludeType.page,
+        name: 'Root',
+        path: '/a/open-plugin',
+        role: OrgRole.Viewer,
+        action: 'plugins.app:access',
+      },
+      {
+        type: PluginIncludeType.page,
+        name: 'Editor',
+        path: '/a/open-plugin/editor-page',
+        role: OrgRole.Editor,
+      },
+      {
+        type: PluginIncludeType.page,
+        name: 'Admin',
+        path: '/a/open-plugin/admin-page',
+        role: OrgRole.Admin,
+      },
+      {
+        type: PluginIncludeType.page,
+        name: 'Secret',
+        path: '/a/open-plugin/secret',
+        role: OrgRole.Viewer,
+        action: 'open-plugin.secret:read',
+      },
+    ],
+  };
+
+  const extPlugin = {
+    ...pluginMeta[SupportedPlugin.Incident],
+    includes: [
+      {
+        type: PluginIncludeType.page,
+        name: 'Exposed components',
+        path: '/a/ext-plugin/exposed-components',
+        role: OrgRole.Admin,
+      },
+    ],
+  };
+
+  it('gates a child of an admin include for a viewer who has application access', () => {
+    contextSrv.user.orgRole = OrgRole.Viewer;
+    contextSrv.isEditor = false;
+    contextSrv.isGrafanaAdmin = false;
+    contextSrv.user.permissions = { 'plugins.app:access': true };
+
+    expect(canAccessPluginPage(openPlugin, '/a/open-plugin/public')).toBe(true);
+    expect(canAccessPluginPage(openPlugin, '/a/open-plugin/admin-page')).toBe(false);
+    expect(canAccessPluginPage(openPlugin, '/a/open-plugin/admin-page/extra')).toBe(false);
+    expect(canAccessPluginPage(openPlugin, '/a/open-plugin/admin-page/extra?next=/a/open-plugin')).toBe(false);
+    expect(canAccessPluginPage(openPlugin, '/a/open-plugin/admin-page-other')).toBe(true);
+    expect(canAccessPluginPage(openPlugin, '/a/open-plugin/editor-page/item')).toBe(false);
+    expect(canAccessPluginPage(openPlugin, '/a/open-plugin/secret/item')).toBe(false);
+  });
+
+  it('lets a viewer with the page action open a child of that include', () => {
+    contextSrv.user.orgRole = OrgRole.Viewer;
+    contextSrv.isEditor = false;
+    contextSrv.isGrafanaAdmin = false;
+    contextSrv.user.permissions = { 'plugins.app:access': true, 'open-plugin.secret:read': true };
+
+    expect(canAccessPluginPage(openPlugin, '/a/open-plugin/secret/item')).toBe(true);
+  });
+
+  it('denies paths that are not under an include the viewer may open', () => {
+    contextSrv.user.orgRole = OrgRole.Viewer;
+    contextSrv.isEditor = false;
+    contextSrv.isGrafanaAdmin = false;
+    contextSrv.user.permissions = { 'plugins.app:access': true };
+
+    expect(canAccessPluginPage(extPlugin, '/a/ext-plugin/exposed-components')).toBe(false);
+    expect(canAccessPluginPage(extPlugin, '/a/ext-plugin/exposed-components/extra')).toBe(false);
+    expect(canAccessPluginPage(extPlugin, '/a/ext-plugin')).toBe(false);
+    expect(canAccessPluginPage(extPlugin, '/a/ext-plugin/other')).toBe(false);
+    expect(canAccessPluginPage(extPlugin, '/a/ext-plugin/other/../exposed-components/extra')).toBe(false);
+  });
+
+  it('still allows an app that declares no page includes', () => {
+    contextSrv.user.orgRole = OrgRole.Viewer;
+    contextSrv.user.permissions = {};
+
+    expect(
+      canAccessPluginPage({ ...pluginMeta[SupportedPlugin.Incident], includes: [] }, '/a/bare-plugin/anywhere')
+    ).toBe(true);
+  });
+
+  it('allows a grafana admin through a role include prefix but not through an undeclared path', () => {
+    contextSrv.user.orgRole = OrgRole.Viewer;
+    contextSrv.isEditor = false;
+    contextSrv.isGrafanaAdmin = true;
+    contextSrv.user.permissions = { 'plugins.app:access': true };
+
+    expect(canAccessPluginPage(extPlugin, '/a/ext-plugin/exposed-components/extra')).toBe(true);
+    expect(canAccessPluginPage(extPlugin, '/a/ext-plugin/other')).toBe(false);
+  });
 });
