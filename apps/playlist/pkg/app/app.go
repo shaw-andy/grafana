@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"regexp"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
@@ -58,7 +60,7 @@ func New(cfg app.Config) (app.App, error) {
 
 	playlistValidator := &simple.Validator{
 		ValidateFunc: func(ctx context.Context, req *app.AdmissionRequest) error {
-			return nil
+			return validatePlaylistItems(req.Object)
 		},
 	}
 
@@ -107,6 +109,41 @@ func New(cfg app.Config) (app.App, error) {
 	}
 
 	return a, nil
+}
+
+// The client interpolates dashboard_by_id values into a request path, so anything
+// other than a comma-separated list of integers must never be stored.
+var dashboardIDsPattern = regexp.MustCompile(`^[0-9]+(,[0-9]+)*$`)
+
+func validatePlaylistItems(obj resource.Object) error {
+	switch playlist := obj.(type) {
+	case *playlistv0alpha1.Playlist:
+		for i, item := range playlist.Spec.Items {
+			if item.Type == playlistv0alpha1.PlaylistPlaylistItemTypeDashboardById {
+				if err := validateDashboardIDs(i, item.Value); err != nil {
+					return err
+				}
+			}
+		}
+	case *playlistv1.Playlist:
+		for i, item := range playlist.Spec.Items {
+			if item.Type == playlistv1.PlaylistPlaylistItemTypeDashboardById {
+				if err := validateDashboardIDs(i, item.Value); err != nil {
+					return err
+				}
+			}
+		}
+	default:
+		return fmt.Errorf("expected Playlist object, got %T", obj)
+	}
+	return nil
+}
+
+func validateDashboardIDs(index int, value string) error {
+	if !dashboardIDsPattern.MatchString(value) {
+		return fmt.Errorf("spec.items[%d].value: dashboard_by_id must be a comma-separated list of integers", index)
+	}
+	return nil
 }
 
 func GetKinds() map[schema.GroupVersion][]resource.Kind {
