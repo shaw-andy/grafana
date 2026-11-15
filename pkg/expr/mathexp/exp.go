@@ -5,7 +5,10 @@ import (
 	"math"
 	"reflect"
 	"runtime"
+	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/grafana/grafana-plugin-sdk-go/data"
 
@@ -807,7 +810,7 @@ func (e *State) addDropNotices(r *Results) {
 
 					itemCount := 0
 					for _, item := range droppedItems {
-						nT.WriteString(fmt.Sprintf("{%s}", item))
+						nT.WriteString(fmt.Sprintf("{%s}", noticeLabelsString(item)))
 
 						itemCount++
 						if itemCount == itemsPerNodeLimit {
@@ -840,5 +843,44 @@ func (e *State) addDropNotices(r *Results) {
 			Severity: data.NoticeSeverityWarning,
 			Text:     nT.String(),
 		})
+	}
+}
+
+// noticeLabelsString formats labels like data.Labels.String, but escapes characters in
+// keys and values that could form HTML or markdown. Label values come from query results
+// and notice text is rendered as markdown by the frontend, so they must stay inert text.
+func noticeLabelsString(l data.Labels) string {
+	keys := make([]string, 0, len(l))
+	for k := range l {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var sb strings.Builder
+	for i, k := range keys {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		writeNoticeEscaped(&sb, k)
+		sb.WriteString("=")
+		writeNoticeEscaped(&sb, l[k])
+	}
+	return sb.String()
+}
+
+func writeNoticeEscaped(sb *strings.Builder, s string) {
+	for _, r := range s {
+		switch {
+		case strings.ContainsRune("\\<>&!=[](){}`\"'", r):
+			fmt.Fprintf(sb, "\\u%04x", r)
+		case r == utf8.RuneError || !unicode.IsPrint(r):
+			if r > 0xFFFF {
+				fmt.Fprintf(sb, "\\U%08x", r)
+			} else {
+				fmt.Fprintf(sb, "\\u%04x", r)
+			}
+		default:
+			sb.WriteRune(r)
+		}
 	}
 }
