@@ -171,6 +171,7 @@ func TestRouterTargetCloudFallback(t *testing.T) {
 				require.Equal(t, "tenant.example.com", req.URL.Host)
 				return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: http.NoBody}, nil
 			})
+			loader.singleTenantFallback.stackTransport = loader.singleTenantFallback.transport
 		}
 		svc, err := ProvideService(cfg, featuremgmt.WithFeatures(), loader, prometheus.NewRegistry())
 		require.NoError(t, err)
@@ -178,7 +179,7 @@ func TestRouterTargetCloudFallback(t *testing.T) {
 		httpRouter.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
 		require.NoError(t, svc.RegisterTargetRoutes(httpRouter, nil))
 		recorder := httptest.NewRecorder()
-		httpRouter.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/apis/example/v1/namespaces/stacks-123/widgets", nil))
+		httpRouter.ServeHTTP(recorder, withCallerIdentity(httptest.NewRequest(http.MethodGet, "/apis/example/v1/namespaces/stacks-123/widgets", nil)))
 		if enabled {
 			require.Equal(t, http.StatusNoContent, recorder.Code)
 		} else {

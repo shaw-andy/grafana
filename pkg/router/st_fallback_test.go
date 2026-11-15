@@ -13,8 +13,11 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/grafana/authlib/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 )
 
 type fallbackRoundTripper func(*http.Request) (*http.Response, error)
@@ -42,12 +45,31 @@ func testFallbackURL(t *testing.T, raw string) *url.URL {
 
 func newTestSingleTenantFallback(t *testing.T) *singleTenantFallback {
 	t.Helper()
-	st, err := newSingleTenantFallback(singleTenantFallbackOptions{cacheSize: 500, resolveHost: func(context.Context, int64) (string, error) {
-		t.Error("unexpected lookup: test must provide a resolver")
-		return "", errors.New("unexpected lookup")
-	}})
+	st, err := newSingleTenantFallback(singleTenantFallbackOptions{
+		cacheSize:     500,
+		hostAllowlist: []string{"example.com", "grafana.net"},
+		resolveHost: func(context.Context, int64) (string, error) {
+			t.Error("unexpected lookup: test must provide a resolver")
+			return "", errors.New("unexpected lookup")
+		},
+	})
 	require.NoError(t, err)
 	return st
+}
+
+// withCallerIdentity authenticates the request as a caller of the namespace in its path.
+func withCallerIdentity(req *http.Request) *http.Request {
+	namespace := "stacks-123"
+	parts := strings.Split(strings.TrimPrefix(req.URL.Path, "/"), "/")
+	if len(parts) > 4 && parts[3] == "namespaces" && parts[4] != "" {
+		namespace = parts[4]
+	}
+	return req.WithContext(types.WithAuthInfo(req.Context(), &identity.StaticRequester{
+		Type:      types.TypeUser,
+		UserID:    1,
+		UserUID:   "user-1",
+		Namespace: namespace,
+	}))
 }
 
 func TestNewSingleTenantFallbackInvalidCacheSize(t *testing.T) {
@@ -146,8 +168,9 @@ func TestSingleTenantFallbackServeHTTP(t *testing.T) {
 				require.Equal(t, "https", req.URL.Scheme)
 				return &http.Response{StatusCode: http.StatusAccepted, Header: http.Header{"X-Backend": {"tenant"}}, Body: io.NopCloser(strings.NewReader("forwarded"))}, nil
 			})
+			st.stackTransport = st.transport
 			for range 2 {
-				req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+				req := withCallerIdentity(httptest.NewRequest(http.MethodGet, tc.path, nil))
 				recorder := httptest.NewRecorder()
 				st.ServeHTTP(recorder, req)
 				if !tc.resolved {
@@ -260,7 +283,7 @@ func TestSingleTenantFallbackCachesNotFound(t *testing.T) {
 		}
 		for range 2 {
 			recorder := httptest.NewRecorder()
-			st.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/apis/example/v1/namespaces/stacks-123/widgets", nil))
+			st.ServeHTTP(recorder, withCallerIdentity(httptest.NewRequest(http.MethodGet, "/apis/example/v1/namespaces/stacks-123/widgets", nil)))
 			require.Equal(t, http.StatusNotFound, recorder.Code)
 		}
 		require.EqualValues(t, 1, calls.Load())
@@ -281,7 +304,7 @@ func TestSingleTenantFallbackDoesNotCacheLookupErrors(t *testing.T) {
 	lookupErr := errors.New("lookup failed")
 	st.resolveHost = func(context.Context, int64) (string, error) { return "", lookupErr }
 	recorder := httptest.NewRecorder()
-	st.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/apis/example/v1/namespaces/stacks-123/widgets", nil))
+	st.ServeHTTP(recorder, withCallerIdentity(httptest.NewRequest(http.MethodGet, "/apis/example/v1/namespaces/stacks-123/widgets", nil)))
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 	require.Zero(t, st.cache.Len())
 	st.resolveHost = func(context.Context, int64) (string, error) { return "https://recovered.example.com/", nil }
@@ -350,7 +373,8 @@ func TestSingleTenantFallbackForwardRequest(t *testing.T) {
 		require.Equal(t, "payload", string(body))
 		return &http.Response{StatusCode: http.StatusCreated, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"created":true}`))}, nil
 	})
-	req := httptest.NewRequest(http.MethodPost, "/apis/example/v1/namespaces/stacks-123/widgets/a%2Fb?limit=10", strings.NewReader("payload"))
+	st.stackTransport = st.transport
+	req := withCallerIdentity(httptest.NewRequest(http.MethodPost, "/apis/example/v1/namespaces/stacks-123/widgets/a%2Fb?limit=10", strings.NewReader("payload")))
 	req.Header.Set("Authorization", "Bearer test-token")
 	req.Header.Set("Connection", "X-Hop")
 	req.Header.Set("X-Hop", "remove")
@@ -375,7 +399,7 @@ func TestSingleTenantFallbackDiscovery(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("discovery"))}, nil
 			})
 			recorder := httptest.NewRecorder()
-			st.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+			st.ServeHTTP(recorder, withCallerIdentity(httptest.NewRequest(http.MethodGet, path, nil)))
 			require.Equal(t, 1, calls)
 			require.Equal(t, http.StatusOK, recorder.Code)
 			require.Equal(t, "discovery", recorder.Body.String())
@@ -393,8 +417,9 @@ func TestSingleTenantFallbackProxyFailure(t *testing.T) {
 			}
 			return nil, errors.New("transport unavailable")
 		})
+		st.stackTransport = st.transport
 		recorder := httptest.NewRecorder()
-		st.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/apis/example/v1/namespaces/stacks-123/widgets", nil))
+		st.ServeHTTP(recorder, withCallerIdentity(httptest.NewRequest(http.MethodGet, "/apis/example/v1/namespaces/stacks-123/widgets", nil)))
 		require.Equal(t, http.StatusBadGateway, recorder.Code)
 		require.Empty(t, recorder.Header().Get("Location"))
 	}
@@ -476,9 +501,10 @@ func TestSingleTenantFallbackRefreshAfterStackChanges(t *testing.T) {
 					destinations = append(destinations, req.URL.Scheme+"://"+req.URL.Host)
 					return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: http.NoBody}, nil
 				})
+				st.stackTransport = st.transport
 				request := func() int {
 					recorder := httptest.NewRecorder()
-					st.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/apis/example/v1/namespaces/stacks-123/widgets", nil))
+					st.ServeHTTP(recorder, withCallerIdentity(httptest.NewRequest(http.MethodGet, "/apis/example/v1/namespaces/stacks-123/widgets", nil)))
 					return recorder.Code
 				}
 				require.Equal(t, http.StatusNoContent, request())
