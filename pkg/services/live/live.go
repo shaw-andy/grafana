@@ -185,7 +185,8 @@ func ProvideService(cfg *setting.Cfg, routeRegister routing.RouteRegister, plugC
 	}
 	g.GrafanaScope.Dashboards = dash
 	g.GrafanaScope.Features["dashboard"] = dash
-	g.GrafanaScope.Features["watch"] = features.NewWatchRunner(g.Publish, configProvider)
+	g.watchRunner = features.NewWatchRunner(g.Publish, configProvider)
+	g.GrafanaScope.Features["watch"] = g.watchRunner
 
 	g.surveyCaller = survey.NewCaller(managedStreamRunner, node)
 	err = g.surveyCaller.SetupHandlers()
@@ -254,6 +255,7 @@ func ProvideService(cfg *setting.Cfg, routeRegister routing.RouteRegister, plugC
 		// Called when client subscribes to the channel.
 		client.OnSubscribe(func(e centrifuge.SubscribeEvent, cb centrifuge.SubscribeCallback) {
 			ctx, span := tracer.Start(client.Context(), "live.OnSubscribe")
+			ctx = livecontext.SetContextClientID(ctx, client.ID())
 			// We finish span when calling callback, which can be done on a separate goroutine.
 
 			span.SetAttributes(
@@ -309,7 +311,6 @@ func ProvideService(cfg *setting.Cfg, routeRegister routing.RouteRegister, plugC
 			}
 		})
 
-		// We don't need to do anything on unsubscribe, but we create tracing span with channel name.
 		client.OnUnsubscribe(func(e centrifuge.UnsubscribeEvent) {
 			_, span := tracer.Start(client.Context(), "live.OnUnsubscribe")
 			defer span.End()
@@ -317,6 +318,7 @@ func ProvideService(cfg *setting.Cfg, routeRegister routing.RouteRegister, plugC
 			span.SetAttributes(
 				attribute.String("channel", e.Channel),
 			)
+			g.handleOnUnsubscribe(client, e)
 		})
 
 		client.OnDisconnect(func(e centrifuge.DisconnectEvent) {
@@ -516,6 +518,7 @@ type GrafanaLive struct {
 
 	// The core internal features
 	GrafanaScope CoreGrafanaScope
+	watchRunner  *features.WatchRunner
 
 	ManagedStreamRunner *managedstream.Runner
 	Pipeline            *pipeline.Pipeline
@@ -830,6 +833,21 @@ func (g *GrafanaLive) handleOnSubscribe(clientContextWithSpan context.Context, c
 	}, nil
 }
 
+func (g *GrafanaLive) handleOnUnsubscribe(client *centrifuge.Client, e centrifuge.UnsubscribeEvent) {
+	if g.watchRunner == nil {
+		return
+	}
+	info, channel, err := orgchannel.StripK8sNamespace(e.Channel)
+	if err != nil {
+		return
+	}
+	addr, err := live.ParseChannel(channel)
+	if err != nil || addr.Scope != live.ScopeWatch {
+		return
+	}
+	g.watchRunner.OnUnsubscribe(info.Value, channel, client.ID())
+}
+
 func (g *GrafanaLive) handleOnPublish(clientCtxWithSpan context.Context, client *centrifuge.Client, e centrifuge.PublishEvent) (centrifuge.PublishReply, error) {
 	logger.Debug("Client wants to publish", "user", client.UserID(), "client", client.ID(), "channel", e.Channel)
 
@@ -978,6 +996,20 @@ func (g *GrafanaLive) GetChannelHandler(ctx context.Context, user identity.Reque
 	addr, err := live.ParseChannel(channel)
 	if err != nil {
 		return nil, live.Channel{}, err
+	}
+
+	// Watch channels are unique per user and resource name, and all share one
+	// handler, so caching them would grow the map with every distinct channel.
+	if addr.Scope == live.ScopeWatch {
+		getter, err := g.handleWatchScope()
+		if err != nil {
+			return nil, addr, fmt.Errorf("error getting channel handler factory: %w", err)
+		}
+		c, err := getter.GetHandlerForPath(addr.Path)
+		if err != nil {
+			return nil, addr, fmt.Errorf("error getting handler for path: %w", err)
+		}
+		return c, addr, nil
 	}
 
 	g.channelsMu.RLock()
