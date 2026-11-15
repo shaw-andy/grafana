@@ -128,6 +128,36 @@ describe('handleRedirectTo', () => {
     expect(locationService.replace).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { desc: 'logout', redirectTo: '/logout' },
+    { desc: 'logout under the sub path', redirectTo: '/grafana/logout/' },
+    { desc: 'logout with an org switch', redirectTo: '/grafana/logout?orgId=2' },
+    { desc: 'logout through a goto dot segment', redirectTo: '/goto/../logout' },
+    { desc: 'logout through an encoded dot segment', redirectTo: '/goto/%2e%2e/logout' },
+    { desc: 'percent-encoded logout', redirectTo: '/%6cogout?orgId=2' },
+    { desc: 'organization switch', redirectTo: '/grafana/profile/switch-org/2?orgId=2' },
+    { desc: 'encoded organization switch', redirectTo: '/profile%2Fswitch-org/2?orgId=2' },
+  ])('drops the stored redirect to $desc without navigating', ({ redirectTo }) => {
+    contextSrv.user.isSignedIn = true;
+    contextSrv.user.orgId = 1;
+    sessionStorage.setItem(RedirectToUrlKey, encodeURIComponent(redirectTo));
+
+    handleRedirectTo();
+
+    expect(sessionStorage.getItem(RedirectToUrlKey)).toBeNull();
+    expect(window.location.replace).not.toHaveBeenCalled();
+    expect(locationService.replace).not.toHaveBeenCalled();
+  });
+
+  it('still navigates to pages whose path only contains an action name', () => {
+    contextSrv.user.isSignedIn = true;
+    sessionStorage.setItem(RedirectToUrlKey, encodeURIComponent('/grafana/d/logout'));
+
+    handleRedirectTo();
+
+    expect(locationService.replace).toHaveBeenCalledWith('/d/logout');
+  });
+
   it('falls back to frontend navigation for same-origin redirects in the current org', () => {
     contextSrv.user.isSignedIn = true;
     contextSrv.user.orgId = 1;

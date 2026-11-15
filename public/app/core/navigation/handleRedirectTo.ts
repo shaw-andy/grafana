@@ -5,6 +5,32 @@ import { contextSrv, RedirectToUrlKey } from '../services/context_srv';
 
 const redirectToParamKey = 'redirectTo';
 
+// GET routes that change state. The stored redirect is followed right after
+// login, so landing on one of these would act on the user's behalf.
+const actionPaths = ['/logout', '/profile/switch-org'];
+
+function isActionPath(url: URL): boolean {
+  let pathname: string;
+  try {
+    // The backend routes on the decoded path, so "/%6cogout" reaches /logout.
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    return true;
+  }
+
+  const segments: string[] = [];
+  for (const segment of pathname.split('/')) {
+    if (segment === '..') {
+      segments.pop();
+    } else if (segment !== '' && segment !== '.') {
+      segments.push(segment);
+    }
+  }
+
+  const path = locationUtil.stripBaseFromUrl(`/${segments.join('/')}`).toLowerCase();
+  return actionPaths.some((action) => path === action || path.startsWith(`${action}/`));
+}
+
 export function handleRedirectTo(): void {
   const queryParams = locationService.getSearch();
 
@@ -34,18 +60,22 @@ export function handleRedirectTo(): void {
   window.sessionStorage.removeItem(RedirectToUrlKey);
   const decodedRedirectTo = decodeURIComponent(redirectTo);
 
+  let redirectUrl: URL | undefined;
+
+  try {
+    redirectUrl = new URL(decodedRedirectTo, window.location.origin);
+  } catch {}
+
+  if (redirectUrl && isActionPath(redirectUrl)) {
+    return;
+  }
+
   if (decodedRedirectTo.startsWith('/goto/')) {
     // In this case there should be a request to the backend
     const urlToRedirectTo = locationUtil.assureBaseUrl(decodedRedirectTo);
     window.location.replace(urlToRedirectTo);
     return;
   }
-
-  let redirectUrl: URL | undefined;
-
-  try {
-    redirectUrl = new URL(decodedRedirectTo, window.location.origin);
-  } catch {}
 
   // Only allow same-origin redirects to avoid an open redirect via the redirectTo query param.
   // Note that `window.location.origin` is only used in `new URL()` if the first param isn't
