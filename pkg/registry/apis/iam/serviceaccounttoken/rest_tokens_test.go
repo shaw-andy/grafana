@@ -276,18 +276,29 @@ func (f *fakeSettingService) Collect(chan<- prometheus.Metric) {}
 type fakeLegacyStore struct {
 	legacy.LegacyIdentityStore
 	createCalled bool
+	// expires is the unix timestamp passed to the store, copied so the test
+	// does not retain the rest of the create command.
+	expires *int64
 }
 
-func (f *fakeLegacyStore) CreateServiceAccountTokenWithHash(context.Context, claims.NamespaceInfo, legacy.CreateServiceAccountTokenWithHashCommand) error {
+func (f *fakeLegacyStore) CreateServiceAccountTokenWithHash(_ context.Context, _ claims.NamespaceInfo, cmd legacy.CreateServiceAccountTokenWithHashCommand) error {
 	f.createCalled = true
+	f.expires = nil
+	if cmd.Expires != nil {
+		v := *cmd.Expires
+		f.expires = &v
+	}
 	return nil
 }
 
 type fakeResponder struct {
-	err error
+	err    error
+	status int
 }
 
-func (f *fakeResponder) Object(int, runtime.Object) {}
+func (f *fakeResponder) Object(status int, _ runtime.Object) {
+	f.status = status
+}
 
 func (f *fakeResponder) Error(err error) {
 	f.err = err
