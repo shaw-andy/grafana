@@ -1,6 +1,7 @@
 import { type Grammar } from 'prismjs';
 
-import { escapeRegex, type LogRowModel, parseFlags } from '@grafana/data';
+import { escapeRegex, type LogRowModel } from '@grafana/data';
+import { searchWordToRegExp } from '@grafana/data/internal';
 
 import { type LogListModel } from './processing';
 
@@ -60,13 +61,11 @@ export const generateTextMatchGrammar = (highlightWords: string[] | undefined = 
    */
   const expressions = highlightWords
     .map((word) => {
-      const { cleaned, flags } = parseFlags(cleanNeedle(word));
-      try {
-        return new RegExp(`(?:${cleaned})`, flags);
-      } catch (e) {
-        console.error(`generateTextMatchGrammar: cannot generate regular expression from /${cleaned}/${flags}`, e);
+      const expression = searchWordToRegExp(word);
+      if (!expression) {
+        console.error(`generateTextMatchGrammar: cannot generate regular expression from ${word}`);
       }
-      return undefined;
+      return expression;
     })
     .filter((expression) => expression !== undefined);
 
@@ -83,10 +82,6 @@ export const generateTextMatchGrammar = (highlightWords: string[] | undefined = 
   return {
     'log-search-match': expressions,
   };
-};
-
-const cleanNeedle = (needle: string): string => {
-  return needle.replace(/[[{(][\w,.\/:;<=>?:*+]+$/, '');
 };
 
 /**
