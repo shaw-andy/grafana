@@ -9,6 +9,8 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/grafana/grafana/pkg/services/serviceaccounts"
 )
 
 const (
@@ -90,7 +92,7 @@ func (s *TokensREST) resolveExpirationSettings(ctx context.Context) (expirationS
 	return expirationSettings{}, errors.New("service account token REST: neither cfgProvider nor settingService is configured")
 }
 
-func validateExpiration(expiresInSeconds int64, settings expirationSettings, now time.Time) error {
+func validateExpiration(expiresInSeconds int64, settings expirationSettings, _ time.Time) error {
 	if settings.apiKeyMaxSecondsToLive != defaultTokenExpirationLimit {
 		if expiresInSeconds == 0 {
 			return errors.New("expiresInSeconds is required when auth.api_key_max_seconds_to_live is set")
@@ -104,10 +106,7 @@ func validateExpiration(expiresInSeconds int64, settings expirationSettings, now
 		if expiresInSeconds == 0 {
 			return errors.New("expiresInSeconds is required when service_accounts.token_expiration_day_limit is set")
 		}
-
-		dayExpireLimit := now.Add(time.Duration(settings.saTokenExpirationDays) * 24 * time.Hour).Truncate(24 * time.Hour)
-		expirationDate := now.Add(time.Duration(expiresInSeconds) * time.Second).Truncate(24 * time.Hour)
-		if expirationDate.After(dayExpireLimit) {
+		if serviceaccounts.ExceedsTokenExpirationDayLimit(expiresInSeconds, settings.saTokenExpirationDays) {
 			return errors.New("expiration date exceeds service_accounts.token_expiration_day_limit")
 		}
 	}

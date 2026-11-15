@@ -2,8 +2,23 @@ package serviceaccounts
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
+
+const secondsPerDay = int64(24 * 60 * 60)
+
+// ExceedsTokenExpirationDayLimit reports whether a token lifetime is longer than
+// service_accounts.token_expiration_day_limit. The limit is a duration, not a
+// calendar date: the stored expiry is the creation instant plus secondsToLive,
+// so the lifetime must be compared to dayLimit*24h exactly. A dayLimit <= 0
+// disables the limit.
+func ExceedsTokenExpirationDayLimit(secondsToLive int64, dayLimit int64) bool {
+	if dayLimit <= 0 || dayLimit > math.MaxInt64/secondsPerDay {
+		return false
+	}
+	return secondsToLive > dayLimit*secondsPerDay
+}
 
 // generateLogin makes a generated string to have a ID for the service account across orgs and it's name
 // this causes you to create a service account with the same name in different orgs
