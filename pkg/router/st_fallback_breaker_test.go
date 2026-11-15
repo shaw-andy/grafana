@@ -28,6 +28,7 @@ func TestSingleTenantBreakersIsolateGroupsOnSameHost(t *testing.T) {
 					}
 					return &http.Response{StatusCode: code, Header: make(http.Header), Body: http.NoBody}, nil
 				})
+				st.stackTransport = st.transport
 				var backends []Backend
 				if registered {
 					for _, group := range []string{"broken", "healthy"} {
@@ -40,7 +41,7 @@ func TestSingleTenantBreakersIsolateGroupsOnSameHost(t *testing.T) {
 				request := func(group, version string) int {
 					recorder := httptest.NewRecorder()
 					path := "/apis/" + group + "/" + version + "/namespaces/stacks-123/widgets"
-					router.HandleFunc(recorder, httptest.NewRequest(http.MethodGet, path, nil), http.NotFoundHandler())
+					router.HandleFunc(recorder, withCallerIdentity(httptest.NewRequest(http.MethodGet, path, nil)), http.NotFoundHandler())
 					return recorder.Code
 				}
 				for range 6 {
@@ -74,9 +75,10 @@ func TestSingleTenantDiscoveryBreakerIsSeparateOnSameHost(t *testing.T) {
 		}
 		return &http.Response{StatusCode: code, Header: make(http.Header), Body: http.NoBody}, nil
 	})
+	st.stackTransport = st.transport
 	request := func(path string) int {
 		recorder := httptest.NewRecorder()
-		st.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		st.ServeHTTP(recorder, withCallerIdentity(httptest.NewRequest(http.MethodGet, path, nil)))
 		return recorder.Code
 	}
 	for range 6 {

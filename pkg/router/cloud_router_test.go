@@ -517,7 +517,7 @@ func TestCloudLoaderSingleTenantFallback(t *testing.T) {
 			}
 		}))
 		t.Cleanup(gcom.Close)
-		cfg := cfgWithCloudRouterSection(t, map[string]string{"st_discovery_url": "https://play.grafana.org/"})
+		cfg := cfgWithCloudRouterSection(t, map[string]string{"st_discovery_url": "https://play.grafana.org/", "st_host_allowlist": "grafana.org"})
 		cfg.GrafanaComAPIURL = gcom.URL + "/api"
 		cfg.GrafanaComSSOAPIToken = "test-gcom-token"
 		loader, err := ProvideCloudRoutesLoaderFactory(cfg, PluginDependencies{})

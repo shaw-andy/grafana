@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -91,9 +92,14 @@ func TestProxyTracing(t *testing.T) {
 				require.NoError(t, parseErr)
 				backend, err = newAggregateBackend("test", group, base, transport)
 			default:
+				stackTransport := transport.Clone()
+				stackTransport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+					return (&net.Dialer{}).DialContext(ctx, network, upstream.Listener.Addr().String())
+				}
 				handler, err = newSingleTenantFallback(singleTenantFallbackOptions{
-					cacheSize: 10, transport: transport,
-					resolveHost: func(context.Context, int64) (string, error) { return upstream.URL, nil },
+					cacheSize: 10, transport: transport, stackTransport: stackTransport,
+					hostAllowlist: []string{"example.com"},
+					resolveHost:   func(context.Context, int64) (string, error) { return "http://tenant.example.com", nil },
 				})
 			}
 			require.NoError(t, err)
@@ -103,7 +109,7 @@ func TestProxyTracing(t *testing.T) {
 			}
 			ctx, parent := otel.Tracer("test").Start(t.Context(), "parent")
 			defer parent.End()
-			req := httptest.NewRequest(http.MethodGet, "/apis/test.grafana.app/v1/namespaces/stacks-1234/resources", nil).WithContext(ctx)
+			req := withCallerIdentity(httptest.NewRequest(http.MethodGet, "/apis/test.grafana.app/v1/namespaces/stacks-1234/resources", nil).WithContext(ctx))
 			// A context parent must take precedence over an older forwarded header.
 			req.Header.Set("traceparent", "00-11111111111111111111111111111111-1111111111111111-01")
 			response := httptest.NewRecorder()

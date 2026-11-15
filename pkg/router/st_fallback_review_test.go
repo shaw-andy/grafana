@@ -118,12 +118,13 @@ func TestSingleTenantBreakersIsolateDestinations(t *testing.T) {
 				}
 				return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: http.NoBody}, nil
 			})
+			st.stackTransport = st.transport
 			router := NewGrafanaRouter(st)
 			require.NoError(t, router.reconcile(t.Context()))
 			discoveryFailed = true
 			request := func(path string) int {
 				recorder := httptest.NewRecorder()
-				req := httptest.NewRequest(http.MethodGet, path, nil)
+				req := withCallerIdentity(httptest.NewRequest(http.MethodGet, path, nil))
 				if path == "/apis" {
 					req.Header.Set("Accept", aggregatedDiscoveryJSON)
 				}

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strings"
 	"sync/atomic"
 
 	authnlib "github.com/grafana/authlib/authn"
@@ -195,6 +196,7 @@ func ProvideCloudRoutesLoaderFactory(cfg *setting.Cfg, deps PluginDependencies) 
 			cacheSize:     100,
 			resolveHost:   newGComURLResolver(cfg.GrafanaComAPIURL, cfg.GrafanaComSSOAPIToken),
 			discoveryHost: discoURL,
+			hostAllowlist: strings.Split(section.Key("st_host_allowlist").MustString(""), ","),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("%s: st_discovery_url: %w", cloudRouterSection, err)
