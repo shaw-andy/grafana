@@ -8,7 +8,15 @@ import {
   type DataFrame,
 } from '@grafana/data';
 import { type TraceToLogsOptionsV2, type TraceToMetricsOptions } from '@grafana/o11y-ds-frontend';
-import { type DataSourceSrv, getDataSourceSrv, setDataSourceSrv, setTemplateSrv } from '@grafana/runtime';
+import { interpolateQueryExpr } from '@grafana/prometheus';
+import {
+  type DataSourceSrv,
+  getDataSourceSrv,
+  getTemplateSrv,
+  setDataSourceSrv,
+  setTemplateSrv,
+} from '@grafana/runtime';
+import { parser } from '@prometheus-io/lezer-promql';
 import { FlagKeys } from '@grafana/runtime/internal';
 import { setTestFlags } from '@grafana/test-utils/unstable';
 import { DatasourceSrv } from 'app/features/plugins/datasource_srv';
@@ -16,9 +24,11 @@ import { DatasourceSrv } from 'app/features/plugins/datasource_srv';
 import { LinkSrv, setLinkSrv } from '../../panel/panellinks/link_srv';
 import { TemplateSrv } from '../../templating/template_srv';
 
+import { v0Migrator } from '../hooks/useStateSync/migrators/v0';
 import { SpanLinkType } from './components/types/links';
 import { type Trace, type TraceSpan } from './components/types/trace';
 import { createSpanLinkFactory, pyroscopeProfileIdTagKey } from './createSpanLink';
+import { transformDataFrames } from './utils/transform';
 
 const dummyTraceData = { duration: 10, traceID: 'trace1', traceName: 'test trace' } as unknown as Trace;
 const dummyDataFrame = createDataFrame({
@@ -671,6 +681,70 @@ describe('createSpanLinkFactory', () => {
           '{"range":{"from":"1602637080000","to":"1602637321000"},"datasource":"prom1Uid","queries":[{"expr":"no_name_here","refId":"A","datasource":{"type":"prometheus","uid":"prom1Uid"}}]}'
         )}`
       );
+    });
+
+    // A span author controls process.serviceName and span tag values. An empty metrics query
+    // falls back to the built-in histogram and must keep that name inside one PromQL string.
+    // A configured query that interpolates $__tags must do the same for tag values.
+    describe('PromQL label values from the span', () => {
+      const quoteBreakout =
+        'api"} or sum(rate(http_requests_total[5m])) or histogram_quantile(0.5, sum(rate(traces_spanmetrics_latency_bucket{service="api';
+
+      it.each<[string, string | undefined, string]>([
+        ['empty string', '', quoteBreakout],
+        ['empty string', '', 'api\\'],
+        ['empty string', '', 'a\\\\b"c'],
+        ['omitted text', undefined, quoteBreakout],
+        ['omitted text', undefined, 'api\\'],
+        ['omitted text', undefined, 'a\\\\b"c'],
+      ])(
+        'default query (%s) keeps this service name inside one PromQL string: %j',
+        (_queryLabel, queryText, serviceName) => {
+          const splitOpenFn = jest.fn();
+          const expr = executedMetricsExpr(splitOpenFn, { query: queryText }, serviceName);
+          expectPromqlLabelValue(expr, serviceName, {
+            prefix: 'histogram_quantile(0.5, sum(rate(traces_spanmetrics_latency_bucket{service=',
+            suffix: '}[5m])) by (le))',
+          });
+        }
+      );
+
+      it('keeps a non-empty metrics query text and does not insert the service name into it', () => {
+        const splitOpenFn = jest.fn();
+        const expr = executedMetricsExpr(splitOpenFn, { query: 'customQuery' }, quoteBreakout);
+        expect(expr).toBe('customQuery');
+      });
+
+      it('keeps a span tag value inside one PromQL string when the query uses $__tags', () => {
+        const splitOpenFn = jest.fn();
+        const expr = executedMetricsExpr(
+          splitOpenFn,
+          { query: 'requests_total{$__tags}' },
+          'checkout',
+          [{ key: 'service.name', value: quoteBreakout }],
+          [{ key: 'service.name', value: 'service' }]
+        );
+        expectPromqlLabelValue(expr, quoteBreakout, {
+          prefix: 'requests_total{service=',
+          suffix: '}',
+        });
+      });
+
+      it('keeps a backslash in a span tag value from ending the PromQL string', () => {
+        const tagValue = 'api\\';
+        const splitOpenFn = jest.fn();
+        const expr = executedMetricsExpr(
+          splitOpenFn,
+          { query: 'requests_total{$__tags}' },
+          'checkout',
+          [{ key: 'service.name', value: tagValue }],
+          [{ key: 'service.name', value: 'service' }]
+        );
+        expectPromqlLabelValue(expr, tagValue, {
+          prefix: 'requests_total{service=',
+          suffix: '}',
+        });
+      });
     });
 
     it('with adjusted start and end time', () => {
@@ -1746,6 +1820,127 @@ describe('dataFrame links', () => {
     expect(links![2].type).toBe(SpanLinkType.Unknown);
   });
 });
+
+function spanFromTraceFrame(serviceName: string, serviceTags: Array<{ key: string; value: string }> = []): TraceSpan {
+  const frame = createDataFrame({
+    fields: [
+      { name: 'traceID', values: ['7946b05c2e2e4e5a'] },
+      { name: 'spanID', values: ['6605c7b08e715d6c'] },
+      { name: 'operationName', values: ['operation'] },
+      { name: 'serviceName', values: [serviceName] },
+      { name: 'serviceTags', values: [serviceTags] },
+      { name: 'tags', values: [[]] },
+      { name: 'startTime', values: [1602637200] },
+      { name: 'duration', values: [1] },
+      { name: 'logs', values: [[]] },
+    ],
+  });
+  const trace = transformDataFrames(frame);
+  if (!trace?.spans[0]) {
+    throw new Error('trace frame did not produce a span');
+  }
+  return trace.spans[0];
+}
+
+function executedMetricsExpr(
+  splitOpenFn: jest.Mock,
+  query: { name?: string; query?: string },
+  serviceName: string,
+  serviceTags: Array<{ key: string; value: string }> = [],
+  tags?: Array<{ key: string; value: string }>
+): string {
+  const span = spanFromTraceFrame(serviceName, serviceTags);
+  expect(span.process.serviceName).toBe(serviceName);
+
+  const createLink = createSpanLinkFactory({
+    splitOpenFn,
+    traceToMetricsOptions: {
+      datasourceUid: 'prom1Uid',
+      queries: [query],
+      tags,
+    },
+    metricsDataSourceSettings: getDataSourceSrv().getInstanceSettings('prom1Uid'),
+    trace: dummyTraceData,
+    dataFrame: dummyDataFrame,
+  });
+  const links = createLink!(span);
+  const link = links?.find((item) => item.type === SpanLinkType.Metrics);
+  expect(link).toBeDefined();
+
+  const fromHref = exprFromExploreHref(link!.href);
+  link!.onClick?.({});
+  expect(splitOpenFn).toHaveBeenCalledTimes(1);
+  const fromClick = splitOpenFn.mock.calls[0][0].queries[0].expr as string;
+  expect(fromClick).toBe(fromHref);
+
+  // Same two replacements PrometheusDatasource.applyTemplateVariables performs when the
+  // query has no ad-hoc filters and no scopes: variable values go through interpolateQueryExpr,
+  // and text that is not a variable is left unchanged.
+  const scopedVars = {
+    __interval: { value: '$__interval', text: '$__interval' },
+    __interval_ms: { value: '$__interval_ms', text: '$__interval_ms' },
+  };
+  const templateSrv = getTemplateSrv();
+  const once = templateSrv.replace(fromClick, scopedVars, interpolateQueryExpr);
+  return templateSrv.replace(once, scopedVars, interpolateQueryExpr);
+}
+
+function exprFromExploreHref(href: string): string {
+  const left = new URL(href, 'http://grafana.local').searchParams.get('left');
+  expect(left).toEqual(expect.any(String));
+  const { to, error } = v0Migrator.parse({ left: left! });
+  expect(error).toBe(false);
+  const query = to.left.queries[0] as { expr?: string };
+  expect(typeof query.expr).toBe('string');
+  return query.expr!;
+}
+
+function expectPromqlLabelValue(expr: string, labelValue: string, shape: { prefix: string; suffix: string }) {
+  const literals = promqlStringLiterals(expr);
+  expect(literals).toEqual([expect.any(String)]);
+  const literal = literals[0];
+  expect(expr).toBe(`${shape.prefix}${literal}${shape.suffix}`);
+  expect(unescapePromqlString(literal)).toBe(labelValue);
+}
+
+function promqlStringLiterals(expr: string): string[] {
+  const literals: string[] = [];
+  const cursor = parser.parse(expr).cursor();
+  do {
+    if (cursor.type.name === 'StringLiteral') {
+      literals.push(expr.slice(cursor.from, cursor.to));
+    }
+  } while (cursor.next());
+  return literals;
+}
+
+// Inverse of escaping backslash, newline, and double quote in a PromQL double-quoted string.
+function unescapePromqlString(literal: string): string {
+  expect(literal.startsWith('"')).toBe(true);
+  expect(literal.endsWith('"')).toBe(true);
+  const body = literal.slice(1, -1);
+  let out = '';
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] !== '\\') {
+      out += body[i];
+      continue;
+    }
+    const next = body[i + 1];
+    if (next === '\\') {
+      out += '\\';
+      i++;
+    } else if (next === '"') {
+      out += '"';
+      i++;
+    } else if (next === 'n') {
+      out += '\n';
+      i++;
+    } else {
+      out += '\\';
+    }
+  }
+  return out;
+}
 
 function setupSpanLinkFactory(
   options: Partial<TraceToLogsOptionsV2> = {},
