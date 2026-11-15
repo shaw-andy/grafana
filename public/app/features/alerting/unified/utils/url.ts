@@ -26,6 +26,29 @@ export function createRelativeUrl(
   return `${subPath}${path}${searchParamsString ? `?${searchParamsString}` : ''}`;
 }
 
+/**
+ * Parses a URL taken from an alert of an external Alertmanager, such as its generator URL or an annotation value.
+ * Anyone who can post alerts to that Alertmanager controls these URLs, so only absolute http(s) URLs outside of
+ * Grafana are returned: a link back into Grafana would run a request with the viewer's session.
+ */
+export function parseExternalAlertmanagerUrl(raw: string): URL | undefined {
+  const url = tryParseUrl(raw);
+  if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) {
+    return undefined;
+  }
+
+  const grafanaOrigins = [window.location.origin, tryParseUrl(config.appUrl)?.origin];
+  return grafanaOrigins.includes(url.origin) ? undefined : url;
+}
+
+function tryParseUrl(raw: string): URL | undefined {
+  try {
+    return new URL(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 export function createAbsoluteUrl(
   path: RelativeUrl,
   queryParams?: string[][] | Record<string, string> | string | URLSearchParams

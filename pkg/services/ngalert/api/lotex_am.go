@@ -69,6 +69,21 @@ func (am *LotexAM) withAMReq(
 	extractor func(*response.NormalResponse) (interface{}, error),
 	headers map[string]string,
 ) response.Response {
+	return am.withAMReqForDatasource(ctx, method, endpoint, pathParams, body, func(*datasources.DataSource) func(*response.NormalResponse) (any, error) {
+		return extractor
+	}, headers)
+}
+
+// withAMReqForDatasource builds the response extractor from the data source the request is sent to.
+func (am *LotexAM) withAMReqForDatasource(
+	ctx *contextmodel.ReqContext,
+	method string,
+	endpoint string,
+	pathParams []string,
+	body io.Reader,
+	extractorFor func(*datasources.DataSource) func(*response.NormalResponse) (any, error),
+	headers map[string]string,
+) response.Response {
 	datasourceUID := web.Params(ctx.Req)[":DatasourceUID"]
 	if datasourceUID == "" {
 		return response.Error(http.StatusBadRequest, "DatasourceUID is invalid", nil)
@@ -105,7 +120,7 @@ func (am *LotexAM) withAMReq(
 		method,
 		withPath(*ctx.Req.URL, fmt.Sprintf(endpointPath, iPathParams...)),
 		body,
-		extractor,
+		extractorFor(ds),
 		headers,
 	)
 }
@@ -175,25 +190,49 @@ func (am *LotexAM) RouteGetAlertingConfig(ctx *contextmodel.ReqContext) response
 }
 
 func (am *LotexAM) RouteGetAMAlertGroups(ctx *contextmodel.ReqContext) response.Response {
-	return am.withAMReq(
+	return am.withAMReqForDatasource(
 		ctx,
 		http.MethodGet,
 		"groups",
 		nil,
 		nil,
-		jsonExtractor(&apimodels.AlertGroups{}),
+		func(ds *datasources.DataSource) func(*response.NormalResponse) (any, error) {
+			policy := newGeneratorURLPolicy(ds, ctx.Req.Host)
+			return func(resp *response.NormalResponse) (any, error) {
+				groups := apimodels.AlertGroups{}
+				if _, err := jsonExtractor(&groups)(resp); err != nil {
+					return nil, err
+				}
+				for _, group := range groups {
+					if group != nil {
+						policy.sanitize(group.Alerts)
+					}
+				}
+				return &groups, nil
+			}
+		},
 		nil,
 	)
 }
 
 func (am *LotexAM) RouteGetAMAlerts(ctx *contextmodel.ReqContext) response.Response {
-	return am.withAMReq(
+	return am.withAMReqForDatasource(
 		ctx,
 		http.MethodGet,
 		"alerts",
 		nil,
 		nil,
-		jsonExtractor(&apimodels.GettableAlerts{}),
+		func(ds *datasources.DataSource) func(*response.NormalResponse) (any, error) {
+			policy := newGeneratorURLPolicy(ds, ctx.Req.Host)
+			return func(resp *response.NormalResponse) (any, error) {
+				alerts := apimodels.GettableAlerts{}
+				if _, err := jsonExtractor(&alerts)(resp); err != nil {
+					return nil, err
+				}
+				policy.sanitize(alerts)
+				return &alerts, nil
+			}
+		},
 		nil,
 	)
 }

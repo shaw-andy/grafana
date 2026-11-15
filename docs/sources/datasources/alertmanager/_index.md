@@ -69,10 +69,11 @@ You can provision Alertmanager data sources using configuration files or Terrafo
 
 The `jsonData` fields used across both methods are:
 
-| Field                        | Description                                                                                                                                                   |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `implementation`             | The Alertmanager implementation. Supported values: `mimir`, `cortex`, `prometheus`. Defaults to `mimir`.                                                      |
-| `handleGrafanaManagedAlerts` | When `true`, this Alertmanager receives Grafana-managed alerts. You must also enable alert forwarding in **Alerting** > **Administration** in the Grafana UI. |
+| Field                        | Description                                                                                                                                                                                                                                                                                         |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `implementation`             | The Alertmanager implementation. Supported values: `mimir`, `cortex`, `prometheus`. Defaults to `mimir`.                                                                                                                                                                                            |
+| `handleGrafanaManagedAlerts` | When `true`, this Alertmanager receives Grafana-managed alerts. You must also enable alert forwarding in **Alerting** > **Administration** in the Grafana UI.                                                                                                                                       |
+| `generatorURLAllowedHosts`   | A list of hosts, as `host` or `host:port`, that alert generator URLs can point at, such as the Prometheus servers that send alerts to this Alertmanager. Grafana only returns a generator URL, and shows the **See source** link, when it points at the Alertmanager host or at one of these hosts. |
 
 ### Configuration file
 
