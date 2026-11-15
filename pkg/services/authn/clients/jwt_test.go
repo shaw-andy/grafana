@@ -34,7 +34,7 @@ func TestAuthenticateJWT(t *testing.T) {
 		cfg            *setting.Cfg
 	}{
 		{
-			name: "Valid Use case with group path",
+			name: "Valid Use case with group path and insecure user lookup",
 			wantID: &authn.Identity{
 				OrgID:           1,
 				OrgName:         "",
@@ -77,6 +77,7 @@ func TestAuthenticateJWT(t *testing.T) {
 					EmailClaim:              "email",
 					UsernameClaim:           "preferred_username",
 					AutoSignUp:              true,
+					AllowInsecureUserLookup: true,
 					AllowAssignGrafanaAdmin: true,
 					RoleAttributeStrict:     true,
 					RoleAttributePath:       "roles",
@@ -105,10 +106,6 @@ func TestAuthenticateJWT(t *testing.T) {
 					SyncOrgRoles:    true,
 					SyncPermissions: true,
 					SyncTeams:       false,
-					LookUpParams: login.UserLookupParams{
-						Email: new("eai.doe@cor.po"),
-						Login: new("eai-doe"),
-					},
 				},
 			},
 			verifyProvider: func(context.Context, string) (map[string]any, error) {
@@ -155,10 +152,6 @@ func TestAuthenticateJWT(t *testing.T) {
 					SyncOrgRoles:    true,
 					SyncPermissions: true,
 					SyncTeams:       true,
-					LookUpParams: login.UserLookupParams{
-						Email: new("eai.doe@cor.po"),
-						Login: new("eai-doe"),
-					},
 				},
 			},
 			verifyProvider: func(context.Context, string) (map[string]any, error) {
@@ -209,10 +202,6 @@ func TestAuthenticateJWT(t *testing.T) {
 					SyncOrgRoles:    true,
 					SyncPermissions: true,
 					SyncTeams:       true,
-					LookUpParams: login.UserLookupParams{
-						Email: new("eai.doe@cor.po"),
-						Login: new("eai-doe"),
-					},
 				},
 			},
 			verifyProvider: func(context.Context, string) (map[string]any, error) {

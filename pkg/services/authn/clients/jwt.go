@@ -92,23 +92,27 @@ func (s *JWT) Authenticate(ctx context.Context, r *authn.Request) (*authn.Identi
 
 	if key := s.cfg.JWTAuth.UsernameClaim; key != "" {
 		id.Login, _ = claims[key].(string)
-		id.ClientParams.LookUpParams.Login = &id.Login
 	} else if key := s.cfg.JWTAuth.UsernameAttributePath; key != "" {
 		id.Login, err = util.SearchJSONForStringAttr(s.cfg.JWTAuth.UsernameAttributePath, claims)
 		if err != nil {
 			return nil, err
 		}
-		id.ClientParams.LookUpParams.Login = &id.Login
 	}
 
 	if key := s.cfg.JWTAuth.EmailClaim; key != "" {
 		id.Email, _ = claims[key].(string)
-		id.ClientParams.LookUpParams.Email = &id.Email
 	} else if key := s.cfg.JWTAuth.EmailAttributePath; key != "" {
 		id.Email, err = util.SearchJSONForStringAttr(s.cfg.JWTAuth.EmailAttributePath, claims)
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	// Without a lookup by login or email, user sync resolves the identity only
+	// through the user_auth row bound to the subject, so a subject that is not
+	// yet linked can never be attached to an existing account.
+	if s.cfg.JWTAuth.AllowInsecureUserLookup {
+		id.ClientParams.LookUpParams.Login = &id.Login
 		id.ClientParams.LookUpParams.Email = &id.Email
 	}
 

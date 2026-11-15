@@ -65,7 +65,24 @@ email_claim = sub
 # auto_sign_up = true
 ```
 
-If `auto_sign_up` is enabled, then the `sub` claim is used as the "external Auth ID". The `name` claim is used as the user's full name if it is present.
+Grafana uses the `sub` claim as the "external Auth ID" and links it to a Grafana user. The username and email claims set the user's login and email. The `name` claim is used as the user's full name if it is present.
+
+If `auto_sign_up` is enabled, then Grafana creates a user the first time it sees a `sub` claim that isn't linked to a user yet. If the login or email from the token already belongs to another Grafana user, the login is refused.
+
+### Link existing users by username or email
+
+By default, Grafana doesn't link a `sub` claim to an existing user whose login or email matches the username or email claim. You can turn on this lookup with the `allow_insecure_user_lookup` option.
+
+{{< admonition type="warning" >}}
+Only enable `allow_insecure_user_lookup` if the token issuer guarantees that the username and email claims are verified and can't be changed by users. Otherwise, anyone who can obtain a token with a matching claim can sign in as that existing user.
+{{< /admonition >}}
+
+```ini
+# [auth.jwt]
+# ...
+
+allow_insecure_user_lookup = true
+```
 
 Additionally, if the login username or the email claims are nested inside the JWT structure, you can specify the path to the attributes using the `username_attribute_path` and `email_attribute_path` configuration options using the JMESPath syntax.
 
