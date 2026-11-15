@@ -379,9 +379,9 @@ describe('AppRootPage', () => {
         contextSrv.isGrafanaAdmin = false;
       });
 
-      it('should allow access to plugin entry page by default', async () => {
+      it('should deny access to the plugin entry page when no include covers it', async () => {
         renderUnderRouter('');
-        expect(await screen.findByText('my great component')).toBeVisible();
+        expect(await screen.findByText('Access denied')).toBeVisible();
       });
 
       it('should deny access to page with action but no role when user has no permissions', async () => {
@@ -426,9 +426,9 @@ describe('AppRootPage', () => {
           contextSrv.user.orgRole = OrgRole.Viewer;
         });
 
-        it('should allow access to plugin entry page', async () => {
+        it('should deny access to the plugin entry page when no include covers it', async () => {
           renderUnderRouter('');
-          expect(await screen.findByText('my great component')).toBeVisible();
+          expect(await screen.findByText('Access denied')).toBeVisible();
         });
 
         it('should deny access to page with action but no role', async () => {
@@ -477,9 +477,6 @@ describe('AppRootPage', () => {
           });
 
           it('should allow access to basic pages', async () => {
-            renderUnderRouter('');
-            expect(await screen.findByText('my great component')).toBeVisible();
-
             renderUnderRouter('page-without-role');
             expect(await screen.findByText('my great component')).toBeVisible();
           });
@@ -529,9 +526,9 @@ describe('AppRootPage', () => {
             expect(await screen.findByText('Access denied')).toBeVisible();
           });
 
-          it('should allow access to plugin entry page', async () => {
+          it('should deny access to the plugin entry page when no include covers it', async () => {
             renderUnderRouter('');
-            expect(await screen.findByText('my great component')).toBeVisible();
+            expect(await screen.findByText('Access denied')).toBeVisible();
           });
 
           it('should allow access to page without role', async () => {
@@ -569,9 +566,9 @@ describe('AppRootPage', () => {
           expect(await screen.findByText('Access denied')).toBeVisible();
         });
 
-        it('should allow access to plugin entry page', async () => {
+        it('should deny access to the plugin entry page when no include covers it', async () => {
           renderUnderRouter('');
-          expect(await screen.findByText('my great component')).toBeVisible();
+          expect(await screen.findByText('Access denied')).toBeVisible();
         });
 
         it('should allow access to page without role', async () => {
