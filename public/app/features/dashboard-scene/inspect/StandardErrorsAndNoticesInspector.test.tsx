@@ -110,3 +110,64 @@ describe('StandardErrorsAndNoticesInspector', () => {
     expect(screen.getAllByRole('button', { name: 'Copy to clipboard' })).toHaveLength(2);
   });
 });
+
+// Paths of same-origin GETs that change the viewer's session. The browser
+// sends the session cookie on an image, media, or CSS request to these paths.
+const sessionRotatePath = '/user/auth-tokens/rotate';
+const orgSwitchPath = '/profile/switch-org/2';
+
+// The math expression copies a dropped series label into the result notice in
+// this shape. See pkg/expr/mathexp/exp.go addDropNotices.
+function droppedSeriesNotice(label: string): string {
+  return `1 items dropped from union(s): ["$A + $B": ($A: {job=${label}})]`;
+}
+
+const droppedLabelPayloads = [
+  `![x](${sessionRotatePath})`,
+  `![x](${orgSwitchPath})`,
+  `<img src="${sessionRotatePath}">`,
+  `<img src="${orgSwitchPath}">`,
+  `<video src="${sessionRotatePath}"></video>`,
+  `<audio src="${orgSwitchPath}"></audio>`,
+  `<div style="background-image: url(${sessionRotatePath})"></div>`,
+  `<div style="background-image: url(${orgSwitchPath})"></div>`,
+];
+
+// Tags and style urls the browser fetches without a click. Iframes are omitted:
+// the sanitizer marks them credentialless, so they do not send the session cookie.
+const autoFetchSelector = 'img, video, audio, source, track, image, object, embed, link';
+
+function urlsTheBrowserFetches(container: HTMLElement): string[] {
+  const urls: string[] = [];
+  container.querySelectorAll<HTMLElement>(autoFetchSelector).forEach((element) => {
+    for (const name of ['src', 'href', 'poster', 'data', 'srcset']) {
+      const value = element.getAttribute(name);
+      if (value) {
+        urls.push(value);
+      }
+    }
+  });
+  container.querySelectorAll<HTMLElement>('[style]').forEach((element) => {
+    const style = element.getAttribute('style') ?? '';
+    for (const match of style.matchAll(/url\(\s*(['"]?)([^'")]+)\1\s*\)/gi)) {
+      urls.push(match[2]);
+    }
+  });
+  return urls;
+}
+
+describe('StandardErrorsAndNoticesInspector notice markup', () => {
+  it.each(droppedLabelPayloads)(
+    'does not request a same-origin state-changing GET from dropped label %s',
+    (label) => {
+      const { container } = setup([
+        frameWithNotices([{ severity: 'warning', text: droppedSeriesNotice(label) }]),
+      ]);
+
+      const fetched = urlsTheBrowserFetches(container).filter(
+        (url) => url.includes(sessionRotatePath) || url.includes(orgSwitchPath)
+      );
+      expect(fetched).toEqual([]);
+    }
+  );
+});
