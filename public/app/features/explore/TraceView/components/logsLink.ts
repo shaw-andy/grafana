@@ -10,10 +10,13 @@ import { FlagKeys, getFeatureFlagClient } from '@grafana/runtime/internal';
 import { type LokiQuery } from 'app/features/loki-helpers/types';
 
 import {
+  canInlineInQuery,
+  escapeQueryValue,
   getDefaultLogsTags,
   getFilteredTags,
   getFormattedTags,
   getSpanTags,
+  quoteQueryValue,
   toLokiLabelName,
 } from '../crossSignalConfig';
 
@@ -114,6 +117,11 @@ export function getTraceToLogsQuery(
 
   let query: DataQuery | DataQuery[] | undefined;
   let tags = '';
+
+  if (!customQuery && ![traceID, spanID].every((id) => id === undefined || canInlineInQuery(id))) {
+    return { query, tags };
+  }
+
   switch (logsDataSourceSettings?.type) {
     case 'loki':
       // Trace/OTel attributes use dots; Loki label names require underscores.
@@ -212,16 +220,21 @@ function getQueryForLoki(
     return getLegacyQueryForLoki(traceID, spanID, options);
   }
 
+  if (!tags.every(canInlineInQuery)) {
+    return undefined;
+  }
+
   const tagSelector = `{${tags.join(', ')}}`;
+  const jobNames = serviceNames.filter(canInlineInQuery);
   const jobSelector =
-    serviceNames.length > 0 ? `{job=~"(.*/)?(${serviceNames.map(escapeRegExp).join('|')})"}` : undefined;
+    jobNames.length > 0 ? `{job=~"(.*/)?(${escapeQueryValue(jobNames.map(escapeRegExp).join('|'))})"}` : undefined;
 
   const queries: LokiQuery[] = [];
 
   for (const { trace: traceField, span: spanField } of TRACE_SPAN_ID_FIELD_VARIANTS) {
-    const structuredIdFilters = [`${traceField}="${traceID}"`];
+    const structuredIdFilters = [`${traceField}=${quoteQueryValue(traceID)}`];
     if (spanID) {
-      structuredIdFilters.push(`${spanField}="${spanID}"`);
+      structuredIdFilters.push(`${spanField}=${quoteQueryValue(spanID)}`);
     }
     const structuredPipeline = `| logfmt | json | drop __error__ | ${structuredIdFilters.join(' | ')}`;
     const fieldRef = traceField;
@@ -239,9 +252,9 @@ function getQueryForLoki(
     }
   }
 
-  const lineContainsFilters = [`|= "${traceID}"`];
+  const lineContainsFilters = [`|= ${quoteQueryValue(traceID)}`];
   if (spanID) {
-    lineContainsFilters.push(`|= "${spanID}"`);
+    lineContainsFilters.push(`|= ${quoteQueryValue(spanID)}`);
   }
   queries.push({
     expr: `${tagSelector} ${lineContainsFilters.join(' ')}`,
@@ -257,24 +270,14 @@ function getQueryForLoki(
 function getLegacyQueryForLoki(traceID: string, spanID: string | undefined, options: TraceToLogsOptionsV2): LokiQuery {
   const { filterByTraceID, filterBySpanID } = options;
 
-  const scopedVar = spanID ? '__span' : '__trace';
-
   let expr = '{${__tags}}';
   if (filterByTraceID && traceID) {
-    expr +=
-      ' | label_format log_line_contains_trace_id=`{{ contains "${' +
-      scopedVar +
-      '.traceId}" __line__  }}` | log_line_contains_trace_id="true" or trace_id="${' +
-      scopedVar +
-      '.traceId}"';
+    const id = quoteQueryValue(traceID);
+    expr += ` | label_format log_line_contains_trace_id=\`{{ contains ${id} __line__  }}\` | log_line_contains_trace_id="true" or trace_id=${id}`;
   }
   if (filterBySpanID && spanID) {
-    expr +=
-      ' | label_format log_line_contains_span_id=`{{ contains "${' +
-      scopedVar +
-      '.spanId}" __line__  }}` | log_line_contains_span_id="true" or span_id="${' +
-      scopedVar +
-      '.spanId}"';
+    const id = quoteQueryValue(spanID);
+    expr += ` | label_format log_line_contains_span_id=\`{{ contains ${id} __line__  }}\` | log_line_contains_span_id="true" or span_id=${id}`;
   }
 
   return {
@@ -311,11 +314,11 @@ function getQueryForElasticsearchOrOpensearch(
 
   let queryArr = [];
   if (filterBySpanID && spanID) {
-    queryArr.push(`"${spanID}"`);
+    queryArr.push(quoteQueryValue(spanID));
   }
 
   if (filterByTraceID) {
-    queryArr.push(`"${traceID}"`);
+    queryArr.push(quoteQueryValue(traceID));
   }
 
   if (tags) {
@@ -347,10 +350,10 @@ function getQueryForSplunk(
     query += '${__tags}';
   }
   if (filterByTraceID) {
-    query += ` "${traceID}"`;
+    query += ` ${quoteQueryValue(traceID)}`;
   }
   if (filterBySpanID && spanID) {
-    query += ` "${spanID}"`;
+    query += ` ${quoteQueryValue(spanID)}`;
   }
 
   return {
@@ -374,11 +377,11 @@ function getQueryForGoogleCloudLogging(
 
   let queryArr = [];
   if (filterBySpanID && spanID) {
-    queryArr.push(`"${spanID}"`);
+    queryArr.push(quoteQueryValue(spanID));
   }
 
   if (filterByTraceID) {
-    queryArr.push(`"${traceID}"`);
+    queryArr.push(quoteQueryValue(traceID));
   }
 
   if (tags) {
@@ -413,11 +416,11 @@ function getQueryForFalconLogScale(
 
   let lsql = '${__tags}';
   if (filterByTraceID) {
-    lsql += ` or "${traceID}"`;
+    lsql += ` or ${quoteQueryValue(traceID)}`;
   }
 
   if (filterBySpanID && spanID) {
-    lsql += ` or "${spanID}"`;
+    lsql += ` or ${quoteQueryValue(spanID)}`;
   }
 
   return {
@@ -451,10 +454,10 @@ function getQueryForVictoriaLogs(
   const parts: string[] = [];
 
   if (filterBySpanID && spanID) {
-    parts.push(`span_id:="${spanID}"`);
+    parts.push(`span_id:=${quoteQueryValue(spanID)}`);
   }
   if (filterByTraceID) {
-    parts.push(`trace_id:="${traceID}"`);
+    parts.push(`trace_id:=${quoteQueryValue(traceID)}`);
   }
   if (tags) {
     parts.push('${__tags}');

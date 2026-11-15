@@ -29,7 +29,14 @@ import { getTraceToLogsSpanQuery, interpolateQueries } from './components/logsLi
 import { type SpanLinkDef, type SpanLinkFunc, SpanLinkType } from './components/types/links';
 import { type Trace, type TraceSpan, type TraceSpanReference } from './components/types/trace';
 import { getTimeRangeFromTimestamps, scopedVarsFromTrace } from './createTraceLink';
-import { getDefaultMetricTags, getDefaultProfilingTags, getFormattedTags, getSpanTags } from './crossSignalConfig';
+import {
+  canInlineInQuery,
+  getDefaultMetricTags,
+  getDefaultProfilingTags,
+  getFormattedTags,
+  getSpanTags,
+  quoteQueryValue,
+} from './crossSignalConfig';
 
 /**
  * This is a factory for the link creator. It returns the function mainly so it can return undefined in which case
@@ -276,9 +283,12 @@ function legacyCreateSpanLinkFactory(
     // Get metrics links
     if (metricsDataSourceSettings && traceToMetricsOptions?.queries) {
       for (const query of traceToMetricsOptions.queries) {
+        if (!query.query && !canInlineInQuery(span.process.serviceName)) {
+          continue;
+        }
         const expr =
           query.query ||
-          `histogram_quantile(0.5, sum(rate(traces_spanmetrics_latency_bucket{service="${span.process.serviceName}"}[5m])) by (le))`;
+          `histogram_quantile(0.5, sum(rate(traces_spanmetrics_latency_bucket{service=${quoteQueryValue(span.process.serviceName)}}[5m])) by (le))`;
         const dataLink: DataLink<PromQuery> = {
           title: metricsDataSourceSettings.name,
           url: '',

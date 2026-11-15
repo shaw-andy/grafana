@@ -39,6 +39,27 @@ export function getSpanTags(span: TraceSpan) {
   ];
 }
 
+/**
+ * Escapes backslashes and double quotes so a span-controlled value stays inside a double-quoted string literal.
+ * Every supported logs/metrics query language (LogQL, PromQL, Lucene, SPL, LogsQL, ...) accepts these escapes.
+ */
+export function escapeQueryValue(value: string): string {
+  return value.replace(/[\\"]/g, '\\$&');
+}
+
+export function quoteQueryValue(value: string): string {
+  return `"${escapeQueryValue(value)}"`;
+}
+
+/**
+ * Values pasted directly into a link query are interpolated by the template service afterwards, so `$` or `[[`
+ * could pull in another (unescaped) variable. Backticks cannot be represented inside the backtick-quoted
+ * label_format templates of the legacy Loki query.
+ */
+export function canInlineInQuery(value: string): boolean {
+  return !/[$`]|\[\[/.test(value);
+}
+
 type TagFormatOptions = {
   labelValueSign?: string;
   joinBy?: string;
@@ -73,7 +94,7 @@ export function getFilteredTags(
         if (normalizeLabelName) {
           labelName = normalizeLabelName(labelName);
         }
-        return `${labelName}${labelValueSign}"${tag.value}"`;
+        return `${labelName}${labelValueSign}${quoteQueryValue(String(tag.value))}`;
       }
       return undefined;
     })
