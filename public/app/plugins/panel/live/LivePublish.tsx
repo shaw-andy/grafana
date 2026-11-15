@@ -1,12 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { type LiveChannelAddress, isValidLiveChannelAddress } from '@grafana/data';
+import { AppEvents, type LiveChannelAddress, isValidLiveChannelAddress } from '@grafana/data';
 import { Trans, t } from '@grafana/i18n';
 import { getBackendSrv, getGrafanaLiveSrv } from '@grafana/runtime';
 import { Button } from '@grafana/ui';
 import { CodeMirrorEditor } from '@grafana/ui/unstable';
+import { appEvents } from 'app/core/app_events';
 
 import { MessagePublishMode } from './types';
+
+// The stream id becomes a single URL path segment, so a value made only of dots
+// would be resolved as a relative segment and move the request off /api/live/push.
+function isSafeStreamId(stream?: string): stream is string {
+  return !!stream && stream.length <= 160 && /^[A-Za-z0-9_.-]+$/.test(stream) && !/^\.+$/.test(stream);
+}
 
 interface Props {
   height: number;
@@ -41,7 +48,12 @@ export function LivePublish({ height, mode, body, addr, onSave }: Props) {
         alert('expected stream scope!');
         return;
       }
-      return getBackendSrv().post(`api/live/push/${addr.stream}`, body);
+      const stream = addr.stream;
+      if (!isSafeStreamId(stream)) {
+        appEvents.emit(AppEvents.alertError, ['Invalid stream id']);
+        return;
+      }
+      return getBackendSrv().post(`api/live/push/${encodeURIComponent(stream)}`, body);
     }
 
     if (!isValidLiveChannelAddress(addr)) {
