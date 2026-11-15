@@ -10,6 +10,7 @@ import {
 
 import { DASHBOARD_LIBRARY_ROUTES } from '../../types';
 import { fetchCommunityDashboard } from '../api/dashboardLibraryApi';
+import { catalogThumbnailViolation } from '../assertCatalogThumbnail';
 import { CONTENT_KINDS, CREATION_ORIGINS, EVENT_LOCATIONS, SOURCE_ENTRY_POINTS } from '../constants';
 import { type GnetDashboard } from '../types';
 
@@ -18,6 +19,7 @@ import {
   buildDashboardDetails,
   buildGrafanaComUrl,
   getLogoUrl,
+  getThumbnailUrl,
   navigateToTemplate,
   onUseCommunityDashboard,
   interpolateDashboardForCompatibilityCheck,
@@ -127,6 +129,48 @@ describe('communityDashboardHelpers', () => {
       expect(result.lastUpdate).not.toBe('2025-11-05T16:55:41.000Z');
       expect(result.lastUpdate).toContain('2025');
       expect(result.lastUpdate).toMatch(/Nov/);
+    });
+  });
+
+  describe('getThumbnailUrl', () => {
+    const traversalHrefs = [
+      '/../../../logout',
+      '../../../logout',
+      '/%2e%2e/%2e%2e/%2e%2e/logout',
+      '\\..\\..\\..\\logout',
+      'https://evil.example/logout',
+      '//evil.example/logout',
+    ];
+
+    it.each(traversalHrefs)('does not turn screenshot href %s into a request outside the gnet proxy', (href) => {
+      const dashboard = createMockGnetDashboard({
+        screenshots: [{ links: [{ rel: 'image', href }] }],
+      });
+
+      expect(catalogThumbnailViolation(getThumbnailUrl(dashboard))).toBeNull();
+    });
+
+    it('prefixes a grafana.com screenshot path with the gnet proxy', () => {
+      const dashboard = createMockGnetDashboard({
+        screenshots: [{ links: [{ rel: 'image', href: '/api/dashboards/1860/images/2' }] }],
+      });
+
+      expect(getThumbnailUrl(dashboard)).toBe('/api/gnet/api/dashboards/1860/images/2');
+      expect(catalogThumbnailViolation(getThumbnailUrl(dashboard))).toBeNull();
+    });
+
+    it('keeps parent segments in the query string off the request path', () => {
+      const dashboard = createMockGnetDashboard({
+        screenshots: [{ links: [{ rel: 'image', href: '/api/dashboards/3/images/1?next=../logout' }] }],
+      });
+
+      const thumbnail = getThumbnailUrl(dashboard);
+      expect(new URL(thumbnail, 'http://grafana.local').pathname).toBe('/api/gnet/api/dashboards/3/images/1');
+      expect(catalogThumbnailViolation(thumbnail)).toBeNull();
+    });
+
+    it('returns an empty string when the dashboard has no image link', () => {
+      expect(getThumbnailUrl(createMockGnetDashboard())).toBe('');
     });
   });
 
