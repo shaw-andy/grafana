@@ -1,6 +1,7 @@
 import { lastValueFrom } from 'rxjs';
 
 import { type LibraryPanelSpec, type LibraryPanelStatus } from '@grafana/api-clients/rtkq/dashboard/v0alpha1';
+import { PathValidationError, validatePath } from '@grafana/data';
 import { type FetchError, getBackendSrv } from '@grafana/runtime';
 import { FlagKeys, getFeatureFlagClient } from '@grafana/runtime/internal';
 import { type LibraryElementDTOMetaUser, type LibraryPanel } from '@grafana/schema';
@@ -26,6 +27,17 @@ const ROOT_FOLDER_UID = 'general';
 const REQUIRED_RESOURCE_VERBS = ['get', 'list', 'create', 'update', 'delete'];
 
 export type LibraryPanelResource = Resource<LibraryPanelSpec, LibraryPanelStatus, 'LibraryPanel'>;
+
+/**
+ * Library panel uids come from dashboard JSON that any editor can write, so they must
+ * be confined to a single path segment before being placed in a request URL.
+ */
+export function libraryPanelUidPathSegment(uid: string): string {
+  if (uid === '' || uid === '.' || uid === '..') {
+    throw new PathValidationError();
+  }
+  return encodeURIComponent(validatePath(uid));
+}
 
 // ResourceForCreate has no status, but properties of the legacy panel model without
 // a typed spec field travel in status.missing, so creates must carry it
@@ -326,8 +338,9 @@ async function fetchConnectedDashboardsCount(uid: string): Promise<number> {
       await lastValueFrom(
         getBackendSrv().fetch<{ result: unknown[] }>({
           method: 'GET',
-          url: `/api/library-elements/${uid}/connections`,
+          url: `/api/library-elements/${libraryPanelUidPathSegment(uid)}/connections`,
           showErrorAlert: false,
+          validatePath: true,
         })
       )
     ).data;
@@ -500,9 +513,10 @@ export const libraryPanelsK8sClient = {
       await lastValueFrom(
         getBackendSrv().fetch<LibraryPanelResource>({
           method: 'GET',
-          url: `${client.url}/${uid}`,
+          url: `${client.url}/${libraryPanelUidPathSegment(uid)}`,
           showSuccessAlert: !isHandled,
           showErrorAlert: !isHandled,
+          validatePath: true,
         })
       )
     ).data;
@@ -529,7 +543,7 @@ export const libraryPanelsK8sClient = {
 
   async update(uid: string, name: string, model: object, version: number, folderUid?: string): Promise<LibraryPanel> {
     const client = resourceClient();
-    const existing = await client.get(uid);
+    const existing = await client.get(libraryPanelUidPathSegment(uid));
     const currentVersion = existing.metadata.generation ?? 1;
     if (currentVersion !== version) {
       const message = 'the library element has been changed by someone else';
@@ -554,7 +568,6 @@ export const libraryPanelsK8sClient = {
       kind: 'LibraryPanel',
       metadata: {
         ...existing.metadata,
-        name: uid,
         // generation carries the legacy optimistic-concurrency version check
         generation: version,
         resourceVersion: existing.metadata.resourceVersion ?? '',
@@ -569,7 +582,7 @@ export const libraryPanelsK8sClient = {
   },
 
   async remove(uid: string): Promise<{ message: string }> {
-    await resourceClient().delete(uid, false);
+    await resourceClient().delete(libraryPanelUidPathSegment(uid), false);
     return { message: 'Library element deleted' };
   },
 };

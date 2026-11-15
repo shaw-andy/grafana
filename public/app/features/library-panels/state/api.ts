@@ -4,6 +4,7 @@ import { type VizPanel } from '@grafana/scenes';
 import { type LibraryPanel, defaultDashboard } from '@grafana/schema';
 import {
   isK8sLibraryPanelsClientEnabled,
+  libraryPanelUidPathSegment,
   libraryPanelsK8sClient,
 } from 'app/api/clients/dashboard/v0alpha1/libraryPanels';
 import { DashboardModel } from 'app/features/dashboard/state/DashboardModel';
@@ -108,9 +109,10 @@ export async function getLibraryPanel(uid: string, isHandled = false): Promise<L
   const response = await lastValueFrom(
     getBackendSrv().fetch<{ result: LibraryElementDTO }>({
       method: 'GET',
-      url: `/api/library-elements/${uid}`,
+      url: `/api/library-elements/${libraryPanelUidPathSegment(uid)}`,
       showSuccessAlert: !isHandled,
       showErrorAlert: !isHandled,
+      validatePath: true,
     })
   );
   return migrateLibraryPanelModel(response.data.result);
@@ -159,13 +161,17 @@ export async function updateLibraryPanel(panelSaveModel: PanelModelWithLibraryPa
   }
 
   const kind = LibraryElementKind.Panel;
-  const { result } = await getBackendSrv().patch(`/api/library-elements/${uid}`, {
-    folderUid,
-    name,
-    model,
-    version,
-    kind,
-  });
+  const { result } = await getBackendSrv().patch(
+    `/api/library-elements/${libraryPanelUidPathSegment(uid)}`,
+    {
+      folderUid,
+      name,
+      model,
+      version,
+      kind,
+    },
+    { validatePath: true }
+  );
   return result;
 }
 
@@ -174,14 +180,19 @@ export async function deleteLibraryPanel(uid: string): Promise<{ message: string
     return libraryPanelsK8sClient.remove(uid);
   }
 
-  return getBackendSrv().delete(`/api/library-elements/${uid}`);
+  return getBackendSrv().delete(`/api/library-elements/${libraryPanelUidPathSegment(uid)}`, undefined, {
+    validatePath: true,
+  });
 }
 
 export async function getLibraryPanelConnectedDashboards(
   libraryPanelUid: string
 ): Promise<LibraryElementConnectionDTO[]> {
   const { result } = await getBackendSrv().get<{ result: LibraryElementConnectionDTO[] }>(
-    `/api/library-elements/${libraryPanelUid}/connections`
+    `/api/library-elements/${libraryPanelUidPathSegment(libraryPanelUid)}/connections`,
+    undefined,
+    undefined,
+    { validatePath: true }
   );
   return result;
 }
@@ -243,13 +254,17 @@ async function updateLibraryVizPanel(vizPanel: VizPanel): Promise<LibraryPanel> 
     return libraryPanelsK8sClient.update(uid, name, model, version, folderUid);
   }
 
-  const { result } = await getBackendSrv().patch(`/api/library-elements/${uid}`, {
-    folderUid,
-    name,
-    model,
-    version,
-    kind,
-  });
+  const { result } = await getBackendSrv().patch(
+    `/api/library-elements/${libraryPanelUidPathSegment(uid)}`,
+    {
+      folderUid,
+      name,
+      model,
+      version,
+      kind,
+    },
+    { validatePath: true }
+  );
   return result;
 }
 
