@@ -6,6 +6,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/apiserver/pkg/admission"
 
@@ -140,7 +141,90 @@ func (b *DashboardsAPIBuilder) mutateDashboard(ctx context.Context, a admission.
 		meta.SetDeprecatedInternalID(internalID) // nolint:staticcheck
 	}
 
+	// Library panel uids are interpolated into request paths by viewers' browsers,
+	// so they are enforced independently of the field validation mode.
+	if errs := validateLibraryPanelUIDs(obj); len(errs) > 0 {
+		return apierrors.NewInvalid(resourceInfo.GroupVersionKind().GroupKind(), meta.GetName(), errs)
+	}
+
 	return b.validateDashboardIfStrict(ctx, a, migrationErr, resourceInfo)
+}
+
+func validateLibraryPanelUIDs(obj runtime.Object) field.ErrorList {
+	specPath := field.NewPath("spec")
+	switch v := obj.(type) {
+	case *dashboardV0.Dashboard:
+		return validateUnstructuredLibraryPanelUIDs(v.Spec.Object, specPath)
+	case *dashboardV1.Dashboard:
+		return validateUnstructuredLibraryPanelUIDs(v.Spec.Object, specPath)
+	case *dashboardV2alpha1.Dashboard:
+		var errs field.ErrorList
+		for key, element := range v.Spec.Elements {
+			if element.LibraryPanelKind != nil {
+				errs = append(errs, validateLibraryPanelUID(element.LibraryPanelKind.Spec.LibraryPanel.Uid,
+					specPath.Child("elements").Key(key).Child("spec", "libraryPanel", "uid"))...)
+			}
+		}
+		return errs
+	case *dashboardV2beta1.Dashboard:
+		var errs field.ErrorList
+		for key, element := range v.Spec.Elements {
+			if element.LibraryPanelKind != nil {
+				errs = append(errs, validateLibraryPanelUID(element.LibraryPanelKind.Spec.LibraryPanel.Uid,
+					specPath.Child("elements").Key(key).Child("spec", "libraryPanel", "uid"))...)
+			}
+		}
+		return errs
+	case *dashboardV2.Dashboard:
+		var errs field.ErrorList
+		for key, element := range v.Spec.Elements {
+			if element.LibraryPanelKind != nil {
+				errs = append(errs, validateLibraryPanelUID(element.LibraryPanelKind.Spec.LibraryPanel.Uid,
+					specPath.Child("elements").Key(key).Child("spec", "libraryPanel", "uid"))...)
+			}
+		}
+		return errs
+	}
+	return nil
+}
+
+// validateUnstructuredLibraryPanelUIDs checks panels at any nesting depth, including
+// collapsed rows and pre-schema-16 "rows", because the frontend migrates all of them
+// into library panels.
+func validateUnstructuredLibraryPanelUIDs(spec map[string]any, path *field.Path) field.ErrorList {
+	var errs field.ErrorList
+	for _, key := range []string{"panels", "rows"} {
+		items, ok := spec[key].([]any)
+		if !ok {
+			continue
+		}
+		for i, item := range items {
+			panel, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			panelPath := path.Child(key).Index(i)
+			if libraryPanel, ok := panel["libraryPanel"].(map[string]any); ok {
+				if raw, exists := libraryPanel["uid"]; exists && raw != nil {
+					uid, isString := raw.(string)
+					if !isString {
+						errs = append(errs, field.Invalid(panelPath.Child("libraryPanel", "uid"), raw, "library panel uid must be a string"))
+					} else {
+						errs = append(errs, validateLibraryPanelUID(uid, panelPath.Child("libraryPanel", "uid"))...)
+					}
+				}
+			}
+			errs = append(errs, validateUnstructuredLibraryPanelUIDs(panel, panelPath)...)
+		}
+	}
+	return errs
+}
+
+func validateLibraryPanelUID(uid string, path *field.Path) field.ErrorList {
+	if !util.IsValidShortUID(uid) {
+		return field.ErrorList{field.Invalid(path, uid, "library panel uid may only contain letters, digits, '-' and '_'")}
+	}
+	return nil
 }
 
 // validateDashboardIfStrict validates the dashboard spec if field validation mode is strict.
