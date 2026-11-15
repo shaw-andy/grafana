@@ -27,6 +27,7 @@ type AuthJWTSettings struct {
 	JWKSetFile              string
 	JWKSetValue             string
 	AutoSignUp              bool
+	AllowInsecureUserLookup bool
 	RoleAttributePath       string
 	RoleAttributeStrict     bool
 	OrgMapping              []string
@@ -76,6 +77,7 @@ func (cfg *Cfg) readAuthJWTSettings() {
 	jwtSettings.JWKSetFile = valueAsString(authJWT, "jwk_set_file", "")
 	jwtSettings.JWKSetValue = valueAsString(authJWT, "jwk_set_value", "")
 	jwtSettings.AutoSignUp = authJWT.Key("auto_sign_up").MustBool(false)
+	jwtSettings.AllowInsecureUserLookup = authJWT.Key("allow_insecure_user_lookup").MustBool(false)
 	jwtSettings.RoleAttributePath = valueAsString(authJWT, "role_attribute_path", "")
 	jwtSettings.RoleAttributeStrict = authJWT.Key("role_attribute_strict").MustBool(false)
 	jwtSettings.AllowAssignGrafanaAdmin = authJWT.Key("allow_assign_grafana_admin").MustBool(false)
