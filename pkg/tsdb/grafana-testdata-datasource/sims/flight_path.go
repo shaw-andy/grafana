@@ -1,6 +1,7 @@
 package sims
 
 import (
+	"fmt"
 	"math"
 	"time"
 
@@ -41,7 +42,32 @@ func (s *flightSim) GetState() simulationState {
 }
 
 func (s *flightSim) SetConfig(vals map[string]any) error {
-	return updateConfigObjectFromJSON(&s.cfg, vals)
+	cfg := s.cfg
+	if err := updateConfigObjectFromJSON(&cfg, vals); err != nil {
+		return err
+	}
+	if err := cfg.validate(); err != nil {
+		return err
+	}
+	s.cfg = cfg
+	return nil
+}
+
+// periodNanos converts the period to the integer divisor used by getNextPoint.
+// Periods that truncate to zero nanoseconds or overflow int64 are refused.
+func periodNanos(period float64) (int64, bool) {
+	ns := period * float64(time.Second)
+	if !(ns >= 1 && ns < math.MaxInt64) {
+		return 0, false
+	}
+	return int64(ns), true
+}
+
+func (f *flightConfig) validate() error {
+	if _, ok := periodNanos(f.Period); !ok {
+		return fmt.Errorf("invalid period %g: must be at least one nanosecond", f.Period)
+	}
+	return nil
 }
 
 func (s *flightSim) NewFrame(size int) *data.Frame {
@@ -108,16 +134,23 @@ func newFlightSimInfo() simulationInfo {
 				key: cfg.Key,
 				cfg: sf, // default value
 			}
-			err := updateConfigObjectFromJSON(&s.cfg, cfg.Config) // override any fields
-			return s, err
+			if err := updateConfigObjectFromJSON(&s.cfg, cfg.Config); err != nil { // override any fields
+				return nil, err
+			}
+			if err := s.cfg.validate(); err != nil {
+				return nil, err
+			}
+			return s, nil
 		},
 	}
 }
 
 func (f *flightConfig) getNextPoint(t time.Time) flightDataPoint {
-	periodNS := int64(f.Period * float64(time.Second))
-	ms := t.UnixNano() % periodNS
-	per := float64(ms) / float64(periodNS)
+	per := 0.0
+	if periodNS, ok := periodNanos(f.Period); ok {
+		ms := t.UnixNano() % periodNS
+		per = float64(ms) / float64(periodNS)
+	}
 	rad := per * 2.0 * math.Pi // 0 >> 2Pi
 	delta := f.AltitudeMax - f.AltitudeMin
 

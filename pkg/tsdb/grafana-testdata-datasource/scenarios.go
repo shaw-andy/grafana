@@ -1389,12 +1389,19 @@ func predictableCSVWave(query backend.DataQuery, model kinds.TestDataQuery) ([]*
 }
 
 func predictableSeries(timeRange backend.TimeRange, timeStep, length int64, getValue func(mod int64) (*float64, error)) (data.Fields, error) {
+	if timeStep <= 0 || length <= 0 {
+		return nil, fmt.Errorf("time step and number of values in the wave must be greater than zero")
+	}
+	wavePeriod := timeStep * length
+	if wavePeriod/length != timeStep {
+		return nil, fmt.Errorf("wave period is too long")
+	}
+
 	from := timeRange.From.UnixNano() / int64(time.Millisecond)
 	to := timeRange.To.UnixNano() / int64(time.Millisecond)
 
 	timeCursor := from - (from % timeStep) // Truncate Start
-	wavePeriod := timeStep * length
-	maxPoints := 10000 // Don't return too many points
+	maxPoints := 10000                     // Don't return too many points
 
 	timeVec := make([]time.Time, 0)
 	floatVec := make([]*float64, 0)

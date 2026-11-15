@@ -1,6 +1,7 @@
 package sims
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"time"
@@ -34,7 +35,32 @@ func (s *waveformSim) GetState() simulationState {
 }
 
 func (s *waveformSim) SetConfig(vals map[string]any) error {
-	return updateConfigObjectFromJSON(s.cfg, vals)
+	cfg := s.cfg
+	if err := updateConfigObjectFromJSON(&cfg, vals); err != nil {
+		return err
+	}
+	if err := cfg.validate(); err != nil {
+		return err
+	}
+	s.cfg = cfg
+	return nil
+}
+
+// periodMillis converts the period to the integer divisor used by GetValues.
+// Periods that truncate to zero milliseconds or overflow int64 are refused.
+func periodMillis(period float64) (int64, bool) {
+	ms := period * 1000
+	if !(ms >= 1 && ms < math.MaxInt64) {
+		return 0, false
+	}
+	return int64(ms), true
+}
+
+func (c *waveformConfig) validate() error {
+	if _, ok := periodMillis(c.Period); !ok {
+		return fmt.Errorf("invalid period %g: must be at least 0.001 seconds", c.Period)
+	}
+	return nil
 }
 
 func (s *waveformSim) NewFrame(size int) *data.Frame {
@@ -49,9 +75,10 @@ func (s *waveformSim) NewFrame(size int) *data.Frame {
 
 func (s *waveformSim) GetValues(t time.Time) map[string]any {
 	x := 0.0
-	if s.cfg.Period > 0 {
-		periodMS := s.cfg.Period * 1000
-		ms := t.UnixMilli() % int64(periodMS)
+	period := s.cfg.Period
+	if divisor, ok := periodMillis(period); ok {
+		periodMS := period * 1000
+		ms := t.UnixMilli() % divisor
 		x = ((float64(ms) / periodMS) * 2 * math.Pi) // 0 >> 2Pi
 	}
 
@@ -104,8 +131,13 @@ func newSinewaveInfo() simulationInfo {
 				cfg:        sf, // default value
 				calculator: sinewaveCalculator,
 			}
-			err := updateConfigObjectFromJSON(&s.cfg, cfg.Config) // override any fields
-			return s, err
+			if err := updateConfigObjectFromJSON(&s.cfg, cfg.Config); err != nil { // override any fields
+				return nil, err
+			}
+			if err := s.cfg.validate(); err != nil {
+				return nil, err
+			}
+			return s, nil
 		},
 	}
 }
