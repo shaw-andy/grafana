@@ -16,17 +16,20 @@ import (
 	userstorage "github.com/grafana/grafana/pkg/apis/userstorage/v0alpha1"
 	"github.com/grafana/grafana/pkg/services/apiserver/builder"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
+	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginstore"
 )
 
 var _ builder.APIGroupBuilder = (*UserStorageAPIBuilder)(nil)
 
 type UserStorageAPIBuilder struct {
-	registerer prometheus.Registerer
+	registerer  prometheus.Registerer
+	pluginStore pluginstore.Store
 }
 
-func RegisterAPIService(features featuremgmt.FeatureToggles, apiregistration builder.APIRegistrar, registerer prometheus.Registerer) *UserStorageAPIBuilder {
+func RegisterAPIService(features featuremgmt.FeatureToggles, apiregistration builder.APIRegistrar, registerer prometheus.Registerer, pluginStore pluginstore.Store) *UserStorageAPIBuilder {
 	builder := &UserStorageAPIBuilder{
-		registerer: registerer,
+		registerer:  registerer,
+		pluginStore: pluginStore,
 	}
 	apiregistration.RegisterAPI(builder)
 	return builder
@@ -62,7 +65,7 @@ func (b *UserStorageAPIBuilder) UpdateAPIGroupInfo(apiGroupInfo *genericapiserve
 	resourceInfo := userstorage.UserStorageResourceInfo
 	storage := map[string]rest.Storage{}
 
-	storageReg, err := newStorage(opts.Scheme, opts.OptsGetter, b.registerer)
+	storageReg, err := newStorage(opts.Scheme, opts.OptsGetter, b.registerer, b.pluginStore)
 	if err != nil {
 		return err
 	}

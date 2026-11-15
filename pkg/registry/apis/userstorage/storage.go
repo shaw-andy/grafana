@@ -8,6 +8,7 @@ import (
 	userstorage "github.com/grafana/grafana/pkg/apis/userstorage/v0alpha1"
 	grafanaregistry "github.com/grafana/grafana/pkg/apiserver/registry/generic"
 	grafanarest "github.com/grafana/grafana/pkg/apiserver/rest"
+	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginstore"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -17,10 +18,11 @@ type storage struct {
 	*genericregistry.Store
 }
 
-func newStorage(scheme *runtime.Scheme, optsGetter generic.RESTOptionsGetter, registerer prometheus.Registerer) (*storage, error) {
+func newStorage(scheme *runtime.Scheme, optsGetter generic.RESTOptionsGetter, registerer prometheus.Registerer, pluginStore pluginstore.Store) (*storage, error) {
 	resourceInfo := userstorage.UserStorageResourceInfo
 	strategy := grafanaregistry.NewStrategy(scheme, resourceInfo.GroupVersion())
 	storageStrategy := newStrategy(scheme, resourceInfo.GroupVersion(), registerer)
+	storageStrategy.pluginStore = pluginStore
 
 	store := &genericregistry.Store{
 		NewFunc:                   resourceInfo.NewFunc,
