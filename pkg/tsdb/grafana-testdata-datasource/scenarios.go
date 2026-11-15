@@ -1546,10 +1546,12 @@ func parseLabelsString(labelText string, seriesIndex int) data.Labels {
 	tags := make(data.Labels)
 
 	for _, keyval := range strings.Split(text, ",") {
-		idx := strings.Index(keyval, "=")
-		key := strings.TrimSpace(keyval[:idx])
-		val := strings.TrimSpace(keyval[idx+1:])
-		val = strings.Trim(val, "\"")
+		key, val, found := strings.Cut(keyval, "=")
+		if !found {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		val = strings.Trim(strings.TrimSpace(val), "\"")
 		val = strings.ReplaceAll(val, "$seriesIndex", strconv.Itoa(seriesIndex))
 		tags[key] = val
 	}
