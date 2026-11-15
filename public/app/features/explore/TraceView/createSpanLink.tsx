@@ -29,7 +29,13 @@ import { getTraceToLogsSpanQuery, interpolateQueries } from './components/logsLi
 import { type SpanLinkDef, type SpanLinkFunc, SpanLinkType } from './components/types/links';
 import { type Trace, type TraceSpan, type TraceSpanReference } from './components/types/trace';
 import { getTimeRangeFromTimestamps, scopedVarsFromTrace } from './createTraceLink';
-import { getDefaultMetricTags, getDefaultProfilingTags, getFormattedTags, getSpanTags } from './crossSignalConfig';
+import {
+  escapePromQLStringValue,
+  getDefaultMetricTags,
+  getDefaultProfilingTags,
+  getFormattedTags,
+  getSpanTags,
+} from './crossSignalConfig';
 
 /**
  * This is a factory for the link creator. It returns the function mainly so it can return undefined in which case
@@ -278,7 +284,7 @@ function legacyCreateSpanLinkFactory(
       for (const query of traceToMetricsOptions.queries) {
         const expr =
           query.query ||
-          `histogram_quantile(0.5, sum(rate(traces_spanmetrics_latency_bucket{service="${span.process.serviceName}"}[5m])) by (le))`;
+          `histogram_quantile(0.5, sum(rate(traces_spanmetrics_latency_bucket{service="${escapePromQLStringValue(span.process.serviceName)}"}[5m])) by (le))`;
         const dataLink: DataLink<PromQuery> = {
           title: metricsDataSourceSettings.name,
           url: '',
@@ -302,7 +308,7 @@ function legacyCreateSpanLinkFactory(
           ...scopedVars,
           __tags: {
             text: t('explore.legacy-create-span-link-factory.text.tags', 'Tags'),
-            value: getFormattedTags(getSpanTags(span), tagsToUse),
+            value: getFormattedTags(getSpanTags(span), tagsToUse, { escapeValue: escapePromQLStringValue }),
           },
         };
 
@@ -485,7 +491,7 @@ export function scopedVarsFromTags(
     tags = {
       __tags: {
         text: t('explore.scoped-vars-from-tags.text.tags', 'Tags'),
-        value: getFormattedTags(getSpanTags(span), profileTags),
+        value: getFormattedTags(getSpanTags(span), profileTags, { escapeValue: escapePromQLStringValue }),
       },
     };
   }
