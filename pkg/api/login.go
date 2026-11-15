@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -45,6 +46,11 @@ var redirectAllowRe = regexp.MustCompile(`^/[a-zA-Z0-9-_./]*$`)
 // Do not allow redirect URLs that contain "//" or ".."
 var redirectDenyRe = regexp.MustCompile(`(//|\.\.)`)
 
+// GET routes that change state. Redirects are followed automatically after
+// login with the new session, so landing on one of these would act on the
+// user's behalf.
+var redirectActionPaths = []string{"/logout", "/profile/switch-org"}
+
 var (
 	errAbsoluteRedirectTo  = errors.New("absolute URLs are not allowed for redirect_to cookie value")
 	errInvalidRedirectTo   = errors.New("invalid redirect_to cookie value")
@@ -78,7 +84,21 @@ func (hs *HTTPServer) ValidateRedirectTo(redirectTo string) (string, error) {
 	if hs.Cfg.AppSubURL != "" && !strings.HasPrefix(to.Path, hs.Cfg.AppSubURL+"/") {
 		return "", errInvalidRedirectTo
 	}
+
+	if isRedirectActionPath(strings.TrimPrefix(path.Clean(to.Path), hs.Cfg.AppSubURL)) {
+		return "", errForbiddenRedirectTo
+	}
 	return to.String(), nil
+}
+
+func isRedirectActionPath(p string) bool {
+	p = strings.ToLower(p)
+	for _, action := range redirectActionPaths {
+		if p == action || strings.HasPrefix(p, action+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func (hs *HTTPServer) CookieOptionsFromCfg() cookies.CookieOptions {

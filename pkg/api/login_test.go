@@ -291,6 +291,21 @@ func TestLoginViewRedirect(t *testing.T) {
 			appURL:      "http://localhost:3000/",
 			status:      302,
 		},
+		{
+			desc:        "URL path is logout",
+			url:         "/logout",
+			redirectURL: "/",
+			appURL:      "http://localhost:3000/",
+			status:      302,
+		},
+		{
+			desc:        "URL path switches organization",
+			url:         "/grafana/profile/switch-org/2",
+			redirectURL: "/grafana/",
+			appURL:      "http://localhost:3000/",
+			appSubURL:   "/grafana",
+			status:      302,
+		},
 	}
 
 	for _, c := range redirectCases {
@@ -335,6 +350,54 @@ func TestLoginViewRedirect(t *testing.T) {
 				}
 				assert.True(t, redirectToCookieFound)
 			}
+		})
+	}
+}
+
+func TestValidateRedirectToActionPaths(t *testing.T) {
+	cases := []struct {
+		redirectTo string
+		appSubURL  string
+		allowed    bool
+	}{
+		{redirectTo: "/logout"},
+		{redirectTo: "/logout/"},
+		{redirectTo: "/logout/saml"},
+		{redirectTo: "/logout?orgId=2"},
+		{redirectTo: "/logout#section"},
+		{redirectTo: "/./logout"},
+		{redirectTo: "/%6cogout"},
+		{redirectTo: "/LOGOUT"},
+		{redirectTo: "/profile/switch-org/2"},
+		{redirectTo: "/profile/switch-org/2/"},
+		{redirectTo: "/profile/./switch-org/2"},
+		{redirectTo: "/%70rofile/switch-org/2"},
+		{redirectTo: "/profile%2Fswitch-org/2"},
+		{redirectTo: "/grafana/logout", appSubURL: "/grafana"},
+		{redirectTo: "/grafana/./logout", appSubURL: "/grafana"},
+		{redirectTo: "/grafana/profile/switch-org/2", appSubURL: "/grafana"},
+		{redirectTo: "/", allowed: true},
+		{redirectTo: "/profile", allowed: true},
+		{redirectTo: "/d/logout", allowed: true},
+		{redirectTo: "/logouts", allowed: true},
+		{redirectTo: "/profile/switch-organization", allowed: true},
+		{redirectTo: "/d/abc?orgId=2", allowed: true},
+		{redirectTo: "/grafana/d/abc", appSubURL: "/grafana", allowed: true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.appSubURL+" "+c.redirectTo, func(t *testing.T) {
+			hs := &HTTPServer{Cfg: setting.NewCfg()}
+			hs.Cfg.AppSubURL = c.appSubURL
+
+			got, err := hs.ValidateRedirectTo(c.redirectTo)
+			if c.allowed {
+				require.NoError(t, err)
+				assert.Equal(t, c.redirectTo, got)
+				return
+			}
+			require.ErrorIs(t, err, errForbiddenRedirectTo)
+			assert.Empty(t, got)
 		})
 	}
 }
