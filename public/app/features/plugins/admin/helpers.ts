@@ -5,6 +5,7 @@ import { PluginSignatureStatus, dateTimeParse, type PluginError, PluginType, Plu
 import { config, featureEnabled } from '@grafana/runtime';
 import { FlagKeys, getFeatureFlagClient } from '@grafana/runtime/internal';
 import { contextSrv } from 'app/core/services/context_srv';
+import { getGnetProxyUrl } from 'app/core/utils/gnetProxy';
 import { AccessControlAction } from 'app/types/accessControl';
 
 import {
@@ -92,6 +93,17 @@ export function mergeLocalAndRemote(local?: LocalPlugin, remote?: RemotePlugin, 
   return mapToCatalogPlugin(local, remote, error);
 }
 
+function getRemotePluginLogos(id: string, version: string) {
+  const getLogoUrl = (size: 'small' | 'large') => {
+    const proxyUrl = getGnetProxyUrl(
+      `plugins/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/logos/${size}`
+    );
+    return proxyUrl ? `${config.appSubUrl}${proxyUrl}` : '';
+  };
+
+  return { small: getLogoUrl('small'), large: getLogoUrl('large') };
+}
+
 export function mapRemoteToCatalog(plugin: RemotePlugin, error?: PluginError): CatalogPlugin {
   const {
     name,
@@ -122,10 +134,7 @@ export function mapRemoteToCatalog(plugin: RemotePlugin, error?: PluginError): C
     downloads,
     id,
     info: {
-      logos: {
-        small: `${config.appSubUrl}/api/gnet/plugins/${id}/versions/${version}/logos/small`,
-        large: `${config.appSubUrl}/api/gnet/plugins/${id}/versions/${version}/logos/large`,
-      },
+      logos: getRemotePluginLogos(id, version),
       keywords,
     },
     name,
@@ -229,10 +238,7 @@ export function mapToCatalogPlugin(local?: LocalPlugin, remote?: RemotePlugin, e
   };
 
   if (remote) {
-    logos = {
-      small: `${config.appSubUrl}/api/gnet/plugins/${id}/versions/${remote.version}/logos/small`,
-      large: `${config.appSubUrl}/api/gnet/plugins/${id}/versions/${remote.version}/logos/large`,
-    };
+    logos = getRemotePluginLogos(id, remote.version);
   } else if (local && local.info.logos) {
     logos = local.info.logos;
   }

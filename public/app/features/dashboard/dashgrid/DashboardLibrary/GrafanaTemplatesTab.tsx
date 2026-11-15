@@ -10,6 +10,7 @@ import {
   useFlagDashboardTemplatesAssistantButton,
 } from '@grafana/runtime/internal';
 import { EmptyState, Grid } from '@grafana/ui';
+import { getGnetProxyUrl } from 'app/core/utils/gnetProxy';
 
 import { DashboardCard } from './DashboardCard';
 import { NewTemplateDashboardInteractions } from './analytics/main';
@@ -146,8 +147,8 @@ export const GrafanaTemplatesTab = ({
       {loading
         ? Array.from({ length: 4 }).map((_, index) => <DashboardCard.Skeleton key={index} />)
         : dashboards?.map((dashboard) => {
-            const thumbnail = dashboard.screenshots?.[0]?.links.find((l: Link) => l.rel === 'image')?.href ?? '';
-            const thumbnailUrl = thumbnail ? `/api/gnet${thumbnail}` : '';
+            const thumbnail = dashboard.screenshots?.[0]?.links.find((l: Link) => l.rel === 'image')?.href;
+            const thumbnailUrl = getGnetProxyUrl(thumbnail);
 
             return (
               <DashboardCard
