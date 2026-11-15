@@ -22,6 +22,7 @@ import (
 
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/services/apiserver"
+	"github.com/grafana/grafana/pkg/services/live/livecontext"
 	"github.com/grafana/grafana/pkg/services/live/model"
 )
 
@@ -31,7 +32,11 @@ type WatchRunner struct {
 	configProvider apiserver.RestConfigProvider
 
 	watchingMu sync.Mutex
-	watching   map[string]*watcher
+	watching   map[string]*watcher // keyed by watchKey
+}
+
+func watchKey(ns string, channel string) string {
+	return ns + "/" + channel
 }
 
 func NewWatchRunner(publisher model.ChannelPublisher, configProvider apiserver.RestConfigProvider) *WatchRunner {
@@ -49,7 +54,7 @@ func (b *WatchRunner) GetHandlerForPath(_ string) (model.ChannelHandler, error) 
 // Valid paths look like: {version}/{resource}[={name}]/{user.uid}
 // * v0alpha1/dashboards/u12345
 // * v0alpha1/dashboards=ABCD/u12345
-func (b *WatchRunner) OnSubscribe(_ context.Context, u identity.Requester, e model.SubscribeEvent) (model.SubscribeReply, backend.SubscribeStreamStatus, error) {
+func (b *WatchRunner) OnSubscribe(ctx context.Context, u identity.Requester, e model.SubscribeEvent) (model.SubscribeReply, backend.SubscribeStreamStatus, error) {
 	// To make sure we do not share resources across users, include the UID in the path
 	userID := u.GetIdentifier()
 	if u.GetIdentityType() == types.TypeAnonymous {
@@ -61,11 +66,23 @@ func (b *WatchRunner) OnSubscribe(_ context.Context, u identity.Requester, e mod
 		return model.SubscribeReply{}, backend.SubscribeStreamStatusPermissionDenied, fmt.Errorf("path must end with user uid (%s)", userID)
 	}
 
+	// Each watch is owned by the live clients subscribed to it and must stop
+	// once they are gone, so a subscription without a client cannot start one.
+	clientID, ok := livecontext.GetContextClientID(ctx)
+	if !ok || clientID == "" {
+		return model.SubscribeReply{}, backend.SubscribeStreamStatusPermissionDenied, fmt.Errorf("missing live client")
+	}
+	if err := ctx.Err(); err != nil {
+		return model.SubscribeReply{}, backend.SubscribeStreamStatusNotFound, err
+	}
+
+	key := watchKey(u.GetNamespace(), e.Channel)
+
 	b.watchingMu.Lock()
 	defer b.watchingMu.Unlock()
 
-	current, ok := b.watching[e.Channel]
-	if ok && !current.done {
+	if current, ok := b.watching[key]; ok {
+		b.addSubscriberLocked(ctx, key, current, clientID)
 		return model.SubscribeReply{
 			JoinLeave: false,
 			Presence:  false,
@@ -91,10 +108,14 @@ func (b *WatchRunner) OnSubscribe(_ context.Context, u identity.Requester, e mod
 		return model.SubscribeReply{}, backend.SubscribeStreamStatusNotFound, err
 	}
 
+	// The watch outlives this subscribe request, so it gets its own context that
+	// is cancelled when the last subscriber leaves.
+	watchCtx, cancel := context.WithCancel(context.Background())
 	// add user to both requester and authInfo context keys, older implementations are still using requester
-	ctx := identity.WithRequester(types.WithAuthInfo(context.Background(), u), u)
+	watchCtx = identity.WithRequester(types.WithAuthInfo(watchCtx, u), u)
 	uclient, err := dynamic.NewForConfig(cfg)
 	if err != nil {
+		cancel()
 		return model.SubscribeReply{}, backend.SubscribeStreamStatusNotFound, err
 	}
 	client := uclient.Resource(gvr).Namespace(u.GetNamespace())
@@ -114,20 +135,24 @@ func (b *WatchRunner) OnSubscribe(_ context.Context, u identity.Requester, e mod
 		}
 	}
 
-	watch, err := client.Watch(ctx, opts)
+	watch, err := client.Watch(watchCtx, opts)
 	if err != nil {
+		cancel()
 		return model.SubscribeReply{}, backend.SubscribeStreamStatusNotFound, err
 	}
 
-	current = &watcher{
-		ns:        u.GetNamespace(),
-		channel:   e.Channel,
-		publisher: b.publisher,
-		watch:     watch,
+	current := &watcher{
+		ns:          u.GetNamespace(),
+		channel:     e.Channel,
+		publisher:   b.publisher,
+		watch:       watch,
+		cancel:      cancel,
+		subscribers: make(map[string]func() bool),
 	}
 
-	b.watching[e.Channel] = current
-	go current.run(ctx)
+	b.watching[key] = current
+	b.addSubscriberLocked(ctx, key, current, clientID)
+	go b.run(watchCtx, key, current)
 
 	return model.SubscribeReply{
 		JoinLeave: false, // need unsubscribe envents
@@ -167,51 +192,108 @@ func (b *WatchRunner) OnPublish(_ context.Context, u identity.Requester, e model
 	return model.PublishReply{}, backend.PublishStreamStatusNotFound, fmt.Errorf("watch does not support publish")
 }
 
-type watcher struct {
-	ns        string
-	channel   string
-	publisher model.ChannelPublisher
-	done      bool
-	watch     watch.Interface
+// OnUnsubscribe is called when a live client leaves a watch channel, including
+// when its connection closes.
+func (b *WatchRunner) OnUnsubscribe(ns string, channel string, clientID string) {
+	key := watchKey(ns, channel)
+
+	b.watchingMu.Lock()
+	defer b.watchingMu.Unlock()
+
+	if current, ok := b.watching[key]; ok {
+		b.removeSubscriberLocked(key, current, clientID)
+	}
 }
 
-func (b *watcher) run(ctx context.Context) {
-	logger := logging.FromContext(ctx).With("channel", b.channel)
+// addSubscriberLocked ties the subscriber to its connection context, so the
+// subscription is released even if no unsubscribe event is delivered for it.
+func (b *WatchRunner) addSubscriberLocked(ctx context.Context, key string, w *watcher, clientID string) {
+	if _, ok := w.subscribers[clientID]; ok {
+		return
+	}
+	w.subscribers[clientID] = context.AfterFunc(ctx, func() {
+		b.watchingMu.Lock()
+		defer b.watchingMu.Unlock()
+		if b.watching[key] == w {
+			b.removeSubscriberLocked(key, w, clientID)
+		}
+	})
+}
 
-	ch := b.watch.ResultChan()
+func (b *WatchRunner) removeSubscriberLocked(key string, w *watcher, clientID string) {
+	stop, ok := w.subscribers[clientID]
+	if !ok {
+		return
+	}
+	stop()
+	delete(w.subscribers, clientID)
+	if len(w.subscribers) == 0 {
+		b.stopLocked(key, w)
+	}
+}
+
+func (b *WatchRunner) stopLocked(key string, w *watcher) {
+	if b.watching[key] == w {
+		delete(b.watching, key)
+	}
+	for _, stop := range w.subscribers {
+		stop()
+	}
+	clear(w.subscribers)
+	w.cancel()
+	w.watch.Stop()
+}
+
+func (b *WatchRunner) run(ctx context.Context, key string, w *watcher) {
+	// When the stream ends on its own the frontend resubscribes, which opens a
+	// new watch.
+	defer func() {
+		b.watchingMu.Lock()
+		defer b.watchingMu.Unlock()
+		b.stopLocked(key, w)
+	}()
+
+	logger := logging.FromContext(ctx).With("channel", w.channel)
+
+	ch := w.watch.ResultChan()
 	for {
 		select {
 		// This is sent when there are no longer any subscriptions
 		case <-ctx.Done():
-			logger.Info("context done", "channel", b.channel)
-			b.watch.Stop()
-			b.done = true
+			logger.Info("context done", "channel", w.channel)
 			return
 
 		// Each watch event
 		case event, ok := <-ch:
 			if !ok {
-				logger.Info("watch stream broken", "channel", b.channel)
-				b.watch.Stop()
-				b.done = true // will force reconnect from the frontend
+				logger.Info("watch stream broken", "channel", w.channel)
 				return
 			}
 
 			data, err := marshalWatchEvent(event)
 			if err != nil {
-				logger.Error("marshal error", "channel", b.channel, "err", err)
+				logger.Error("marshal error", "channel", w.channel, "err", err)
 				continue
 			}
 
-			err = b.publisher(b.ns, b.channel, data)
+			err = w.publisher(w.ns, w.channel, data)
 			if err != nil {
-				logger.Error("publish error", "channel", b.channel, "err", err)
-				b.watch.Stop()
-				b.done = true // will force reconnect from the frontend
-				continue
+				logger.Error("publish error", "channel", w.channel, "err", err)
+				return
 			}
 		}
 	}
+}
+
+type watcher struct {
+	ns        string
+	channel   string
+	publisher model.ChannelPublisher
+	watch     watch.Interface
+	cancel    context.CancelFunc
+
+	// live client ID -> stops the release on connection close
+	subscribers map[string]func() bool
 }
 
 // marshalWatchEvent serializes a watch event to JSON. This is extracted from the
