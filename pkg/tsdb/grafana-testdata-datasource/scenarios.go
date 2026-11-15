@@ -663,6 +663,7 @@ func (s *Service) handlePredictablePulseScenario(ctx context.Context, req *backe
 		respD := resp.Responses[q.RefID]
 		frame, err := predictablePulse(q, model)
 		if err != nil {
+			resp.Responses[q.RefID] = backend.ErrDataResponse(backend.StatusBadRequest, err.Error())
 			continue
 		}
 		respD.Frames = append(respD.Frames, frame)
@@ -1360,7 +1361,10 @@ func predictableCSVWave(query backend.DataQuery, model kinds.TestDataQuery) ([]*
 			values[i] = val
 		}
 
-		subQ.TimeStep *= 1000 // Seconds to Milliseconds
+		subQ.TimeStep, err = secondsToMilliseconds(subQ.TimeStep)
+		if err != nil {
+			return nil, err
+		}
 		valuesLen := int64(len(values))
 		getValue := func(mod int64) (*float64, error) {
 			var i int64
@@ -1388,7 +1392,22 @@ func predictableCSVWave(query backend.DataQuery, model kinds.TestDataQuery) ([]*
 	return frames, nil
 }
 
+func secondsToMilliseconds(timeStep int64) (int64, error) {
+	if timeStep <= 0 || timeStep > math.MaxInt64/1000 {
+		return 0, fmt.Errorf("timeStep must be a positive number of seconds, got %d", timeStep)
+	}
+	return timeStep * 1000, nil
+}
+
 func predictableSeries(timeRange backend.TimeRange, timeStep, length int64, getValue func(mod int64) (*float64, error)) (data.Fields, error) {
+	// timeStep and the wave period are used as modulo divisors below.
+	if timeStep <= 0 {
+		return nil, fmt.Errorf("timeStep must be greater than zero")
+	}
+	if length <= 0 || length > math.MaxInt64/timeStep {
+		return nil, fmt.Errorf("waveform must contain between 1 and %d points", math.MaxInt64/timeStep)
+	}
+
 	from := timeRange.From.UnixNano() / int64(time.Millisecond)
 	to := timeRange.To.UnixNano() / int64(time.Millisecond)
 
@@ -1427,6 +1446,9 @@ func predictablePulse(query backend.DataQuery, model kinds.TestDataQuery) (*data
 	var offValue *float64
 
 	options := model.PulseWave
+	if options == nil {
+		return nil, fmt.Errorf("predictable pulse query requires pulseWave")
+	}
 
 	var err error
 	timeStep = options.TimeStep
@@ -1442,7 +1464,13 @@ func predictablePulse(query backend.DataQuery, model kinds.TestDataQuery) (*data
 		return nil, fmt.Errorf("failed to parse offValue value '%v' into float: %v", options.OffValue, err)
 	}
 
-	timeStep *= 1000                             // Seconds to Milliseconds
+	if onCount < 0 || offCount < 0 {
+		return nil, fmt.Errorf("onCount and offCount must not be negative")
+	}
+	timeStep, err = secondsToMilliseconds(timeStep)
+	if err != nil {
+		return nil, err
+	}
 	onFor := func(mod int64) (*float64, error) { // How many items in the cycle should get the on value
 		var i int64
 		for i = 0; i < onCount; i++ {
