@@ -712,7 +712,9 @@ func TestLogoutSaml(t *testing.T) {
 		return response.Empty(http.StatusOK)
 	})
 	sc.m.Get(sc.url, sc.defaultHandler)
-	sc.fakeReqNoAssertions("GET", sc.url).exec()
+	sc.fakeReqNoAssertions("GET", sc.url)
+	sc.req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	sc.exec()
 	require.Equal(t, 302, sc.resp.Code)
 }
 
