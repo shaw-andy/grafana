@@ -78,7 +78,10 @@ func (hs *HTTPServer) AddOrgInvite(c *contextmodel.ReqContext) response.Response
 		if !errors.Is(err, user.ErrUserNotFound) {
 			return response.Error(http.StatusInternalServerError, "Failed to query db for existing user check", err)
 		}
-	} else {
+		usr = nil
+	}
+
+	if usr != nil {
 		// Evaluate permissions for adding an existing user to the organization
 		userIDScope := ac.Scope("users", "id", strconv.Itoa(int(usr.ID)))
 		hasAccess, err := hs.AccessControl.Evaluate(c.Req.Context(), c.SignedInUser, ac.EvalPermission(ac.ActionOrgUsersAdd, userIDScope))
@@ -89,6 +92,15 @@ func (hs *HTTPServer) AddOrgInvite(c *contextmodel.ReqContext) response.Response
 			return response.Error(http.StatusForbidden, "Permission denied: not permitted to add an existing user to this organisation", err)
 		}
 		return hs.inviteExistingUserToOrg(c, usr, &inviteDto)
+	}
+
+	// The invited account does not exist yet, so no per-user scope can cover it.
+	hasAccess, err := hs.AccessControl.Evaluate(c.Req.Context(), c.SignedInUser, ac.EvalPermission(ac.ActionOrgUsersAdd, ac.ScopeUsersAll))
+	if err != nil {
+		return response.Error(http.StatusInternalServerError, "Failed to evaluate permissions", err)
+	}
+	if !hasAccess {
+		return response.Error(http.StatusForbidden, "Permission denied: not permitted to invite new users to this organisation", nil)
 	}
 
 	if hs.Cfg.DisableLoginForm {
