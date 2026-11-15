@@ -62,13 +62,20 @@ export const playlistAPIv1 = generatedAPI.enhanceEndpoints({
   },
 });
 
+// The value is interpolated into a request path, so anything else must never reach the lookup.
+const dashboardIDsPattern = /^[0-9]+(,[0-9]+)*$/;
+
 /** @deprecated -- this migrates playlists saved with internal ids to uid  */
 async function migrateInternalIDs(playlist?: PlaylistSpec) {
   if (playlist?.items) {
+    playlist.items = playlist.items.filter(
+      (item) => item.type !== 'dashboard_by_id' || dashboardIDsPattern.test(item.value)
+    );
     for (const item of playlist.items) {
       if (item.type === 'dashboard_by_id') {
         item.type = 'dashboard_by_uid';
-        const uids = await getBackendSrv().get<string[]>(`/api/dashboards/ids/${item.value}`);
+        const ids = item.value.split(',').map(encodeURIComponent).join(',');
+        const uids = await getBackendSrv().get<string[]>(`/api/dashboards/ids/${ids}`);
         if (uids?.length) {
           item.value = uids[0];
         }
