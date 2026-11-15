@@ -21,6 +21,14 @@
   "includes": [
     {
       "type": "page",
+      "name": "Home",
+      "path": "/a/grafana-extensionstest-app",
+      "role": "Admin",
+      "addToNav": false,
+      "defaultNav": false
+    },
+    {
+      "type": "page",
       "name": "Exposed components",
       "path": "/a/grafana-extensionstest-app/exposed-components",
       "role": "Admin",
