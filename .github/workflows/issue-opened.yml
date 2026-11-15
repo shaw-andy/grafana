@@ -40,7 +40,7 @@ jobs:
           github_app: grafana-pr-automation
 
       - name: Run Commands
-        uses: grafana/grafana-github-actions/commands@main
+        uses: grafana/grafana-github-actions/commands@af3213823a725b60b60947211de51d0fa3959391 # main
         with:
           token: ${{ steps.get-github-app-token.outputs.token }}
           configPath: "issue-opened"
@@ -56,7 +56,7 @@ jobs:
 
       - name: "Get vault secrets"
         id: vault-secrets
-        uses: grafana/shared-workflows/actions/get-vault-secrets@get-vault-secrets/v2.0.0 # zizmor: ignore[unpinned-uses]
+        uses: grafana/shared-workflows/actions/get-vault-secrets@e46fe1e9a2bf9e618bcf8d8d32f3a7381b45c06d # get-vault-secrets/v2.0.0
         with:
           # Secrets placed in the ci/repo/grafana/grafana/plugins_platform_issue_triager path in Vault
           repo_secrets: |
@@ -86,7 +86,7 @@ jobs:
       - name: Send issue to the auto triager action
         id: auto_triage
         if: steps.check-if-grafana-org-member.outputs.is_grafana_org_member != 'true' && github.event.issue.author_association != 'MEMBER' && github.event.issue.author_association != 'OWNER'
-        uses: grafana/auto-triager@main # zizmor: ignore[unpinned-uses]
+        uses: grafana/auto-triager@98490594b227572eaf233c859ffd9293e68626c5 # main
         with:
           token: ${{ steps.generate_token.outputs.token }}
           issue_number: ${{ github.event.issue.number }}
@@ -184,7 +184,7 @@ jobs:
     steps:
       - name: "Get vault secrets"
         id: vault-secrets
-        uses: grafana/shared-workflows/actions/get-vault-secrets@get-vault-secrets/v2.0.0 # zizmor: ignore[unpinned-uses]
+        uses: grafana/shared-workflows/actions/get-vault-secrets@e46fe1e9a2bf9e618bcf8d8d32f3a7381b45c06d # get-vault-secrets/v2.0.0
         with:
           # Secrets placed in the ci/repo/grafana/grafana/plugins_platform_issue_triager path in Vault
           repo_secrets: |
@@ -207,7 +207,7 @@ jobs:
 
       - name: Send issue to the auto triager action
         id: auto_triage
-        uses: grafana/auto-triager@main # zizmor: ignore[unpinned-uses]
+        uses: grafana/auto-triager@98490594b227572eaf233c859ffd9293e68626c5 # main
         with:
           token: ${{ steps.generate_token.outputs.token }}
           issue_number: ${{ matrix.issue }}
