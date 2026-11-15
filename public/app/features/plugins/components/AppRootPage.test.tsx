@@ -3,7 +3,15 @@ import { Component, useEffect } from 'react';
 import { Routes, Route, Link } from 'react-router-dom-v5-compat';
 import { render } from 'test/test-utils';
 
-import { AppPlugin, PluginType, type AppRootProps, type NavModelItem, PluginIncludeType, OrgRole } from '@grafana/data';
+import {
+  AppPlugin,
+  PluginType,
+  type AppRootProps,
+  type NavModelItem,
+  type PluginMeta,
+  PluginIncludeType,
+  OrgRole,
+} from '@grafana/data';
 import { getMockPlugin } from '@grafana/data/test';
 import { selectors } from '@grafana/e2e-selectors';
 import { setEchoSrv } from '@grafana/runtime';
@@ -595,5 +603,208 @@ describe('AppRootPage', () => {
         });
       });
     });
+  });
+});
+
+describe('AppRootPage include role gate', () => {
+  const previousRole = contextSrv.user.orgRole;
+  const previousPermissions = contextSrv.user.permissions;
+  const previousIsEditor = contextSrv.isEditor;
+  const previousIsGrafanaAdmin = contextSrv.isGrafanaAdmin;
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    setEchoSrv(new Echo());
+    contextSrv.isEditor = false;
+    contextSrv.isGrafanaAdmin = false;
+    contextSrv.user.permissions = {};
+  });
+
+  afterEach(() => {
+    contextSrv.user.orgRole = previousRole;
+    contextSrv.user.permissions = previousPermissions;
+    contextSrv.isEditor = previousIsEditor;
+    contextSrv.isGrafanaAdmin = previousIsGrafanaAdmin;
+  });
+
+  function install(pluginId: string, root: NonNullable<AppPlugin['root']>, includes: PluginMeta['includes']) {
+    const meta = getMockPlugin({
+      id: pluginId,
+      type: PluginType.app,
+      enabled: true,
+      includes,
+    });
+    getPluginSettingsMock.mockResolvedValue(meta);
+    refetchPluginSettingsMock.mockResolvedValue(meta);
+    const plugin = new AppPlugin();
+    plugin.meta = meta;
+    plugin.root = root;
+    importAppPluginMock.mockResolvedValue(plugin);
+  }
+
+  it('does not mount a catch-all admin page for a viewer on a non-exact url', async () => {
+    contextSrv.user.orgRole = OrgRole.Viewer;
+    contextSrv.user.permissions = { 'plugins.app:access': true };
+    // The extensions test app renders its admin page from both the declared route and the splat.
+    install(
+      'grafana-extensionstest-app',
+      function CatchAllAdminPage() {
+        return (
+          <Routes>
+            <Route path="exposed-components" element={<h1>Exposed components</h1>} />
+            <Route path="*" element={<h1>Exposed components</h1>} />
+          </Routes>
+        );
+      },
+      [
+        {
+          type: PluginIncludeType.page,
+          name: 'Exposed components',
+          path: '/a/grafana-extensionstest-app/exposed-components',
+          role: OrgRole.Admin,
+          addToNav: true,
+        },
+      ]
+    );
+
+    renderUnderRouter('exposed-components/extra', 'grafana-extensionstest-app');
+
+    const outcome = await screen.findByText(/Exposed components|Access denied/);
+    expect(outcome).toHaveTextContent('Access denied');
+    expect(screen.queryByRole('heading', { name: 'Exposed components' })).not.toBeInTheDocument();
+  });
+
+  it('does not mount the plugin root for a viewer on the app root or an undeclared path', async () => {
+    contextSrv.user.orgRole = OrgRole.Viewer;
+    contextSrv.user.permissions = { 'plugins.app:access': true };
+    install(
+      'grafana-extensionstest-app',
+      function AdminRoot() {
+        return <h1>Exposed components</h1>;
+      },
+      [
+        {
+          type: PluginIncludeType.page,
+          name: 'Exposed components',
+          path: '/a/grafana-extensionstest-app/exposed-components',
+          role: OrgRole.Admin,
+        },
+      ]
+    );
+
+    renderUnderRouter('', 'grafana-extensionstest-app');
+    expect(await screen.findByText('Access denied')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Exposed components' })).not.toBeInTheDocument();
+
+    renderUnderRouter('other', 'grafana-extensionstest-app');
+    expect(await screen.findByText('Access denied')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Exposed components' })).not.toBeInTheDocument();
+  });
+
+  it('mounts only the requested path when that path is under an include the viewer may open', async () => {
+    contextSrv.user.orgRole = OrgRole.Viewer;
+    contextSrv.user.permissions = { 'plugins.app:access': true };
+    install(
+      'open-plugin',
+      function EchoPath(props: AppRootProps) {
+        return <h1>Mounted {props.path}</h1>;
+      },
+      [
+        {
+          type: PluginIncludeType.page,
+          name: 'Root',
+          path: '/a/open-plugin',
+          role: OrgRole.Viewer,
+          action: 'plugins.app:access',
+        },
+        {
+          type: PluginIncludeType.page,
+          name: 'Admin',
+          path: '/a/open-plugin/admin-page',
+          role: OrgRole.Admin,
+        },
+        {
+          type: PluginIncludeType.page,
+          name: 'Secret',
+          path: '/a/open-plugin/secret',
+          role: OrgRole.Viewer,
+          action: 'open-plugin.secret:read',
+        },
+      ]
+    );
+
+    renderUnderRouter('public', 'open-plugin');
+    expect(await screen.findByRole('heading', { name: 'Mounted /a/open-plugin/public' })).toBeVisible();
+
+    renderUnderRouter('admin-page/extra', 'open-plugin');
+    expect(await screen.findByText('Access denied')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Mounted /a/open-plugin/admin-page/extra' })).not.toBeInTheDocument();
+
+    renderUnderRouter('admin-page-other', 'open-plugin');
+    expect(await screen.findByRole('heading', { name: 'Mounted /a/open-plugin/admin-page-other' })).toBeVisible();
+
+    renderUnderRouter('secret/item', 'open-plugin');
+    expect(await screen.findByText('Access denied')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Mounted /a/open-plugin/secret/item' })).not.toBeInTheDocument();
+  });
+
+  it('mounts a child of an action include when the viewer has that action', async () => {
+    contextSrv.user.orgRole = OrgRole.Viewer;
+    contextSrv.user.permissions = { 'plugins.app:access': true, 'open-plugin.secret:read': true };
+    install(
+      'open-plugin',
+      function EchoPath(props: AppRootProps) {
+        return <h1>Mounted {props.path}</h1>;
+      },
+      [
+        {
+          type: PluginIncludeType.page,
+          name: 'Root',
+          path: '/a/open-plugin',
+          role: OrgRole.Viewer,
+          action: 'plugins.app:access',
+        },
+        {
+          type: PluginIncludeType.page,
+          name: 'Secret',
+          path: '/a/open-plugin/secret',
+          role: OrgRole.Viewer,
+          action: 'open-plugin.secret:read',
+        },
+      ]
+    );
+
+    renderUnderRouter('secret/item', 'open-plugin');
+    expect(await screen.findByRole('heading', { name: 'Mounted /a/open-plugin/secret/item' })).toBeVisible();
+  });
+
+  it('lets an org admin open a child of an admin include and still denies an undeclared path', async () => {
+    contextSrv.user.orgRole = OrgRole.Admin;
+    contextSrv.user.permissions = { 'plugins.app:access': true };
+    install(
+      'grafana-extensionstest-app',
+      function EchoPath(props: AppRootProps) {
+        return <h1>Mounted {props.path}</h1>;
+      },
+      [
+        {
+          type: PluginIncludeType.page,
+          name: 'Exposed components',
+          path: '/a/grafana-extensionstest-app/exposed-components',
+          role: OrgRole.Admin,
+        },
+      ]
+    );
+
+    renderUnderRouter('exposed-components/extra', 'grafana-extensionstest-app');
+    expect(
+      await screen.findByRole('heading', { name: 'Mounted /a/grafana-extensionstest-app/exposed-components/extra' })
+    ).toBeVisible();
+
+    renderUnderRouter('other', 'grafana-extensionstest-app');
+    expect(await screen.findByText('Access denied')).toBeVisible();
+    expect(
+      screen.queryByRole('heading', { name: 'Mounted /a/grafana-extensionstest-app/other' })
+    ).not.toBeInTheDocument();
   });
 });
