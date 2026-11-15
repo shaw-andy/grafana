@@ -55,3 +55,16 @@ export function getGnetProxyUrl(gcomPath: string | null | undefined): string {
   const search = query ? new URLSearchParams(query).toString() : '';
   return `${GNET_PROXY_PREFIX}/${segments.join('/')}${search ? `?${search}` : ''}`;
 }
+
+/**
+ * Builds the Grafana.com proxy address for a single dashboard. The id often comes from the page
+ * URL, so it must stay a single path segment.
+ */
+export function getGnetDashboardUrl(gnetId: number | string): string {
+  const segment = encodeURIComponent(String(gnetId));
+  const url = getGnetProxyUrl(`dashboards/${segment}`);
+  if (url !== `${GNET_PROXY_PREFIX}/dashboards/${segment}`) {
+    throw new Error(`Invalid Grafana.com dashboard id: ${gnetId}`);
+  }
+  return url;
+}
