@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	dashboardV0 "github.com/grafana/grafana/apps/dashboard/pkg/apis/dashboard/v0alpha1"
 	common "github.com/grafana/grafana/pkg/apimachinery/apis/common/v0alpha1"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
 	"github.com/grafana/grafana/pkg/infra/log"
@@ -425,14 +424,76 @@ func TestCollectLibraryPanelPagePaginatesReadableItems(t *testing.T) {
 	require.NoError(t, err)
 	defer sqlRows.Close() // nolint:errcheck
 
-	page, err := collectLibraryPanelPage(sqlRows, 1, func(item dashboardV0.LibraryPanel) (bool, error) {
-		return item.Name != "denied", nil
+	page, err := collectLibraryPanelPage(sqlRows, 2, func(uid string) (bool, error) {
+		return uid != "denied", nil
 	})
 
 	require.NoError(t, err)
 	require.Len(t, page.Items, 1)
 	require.Equal(t, "first-readable", page.Items[0].Name)
 	require.Equal(t, "2", page.Continue)
+	require.NoError(t, mockDBController.ExpectationsWereMet())
+}
+
+func TestCollectLibraryPanelPageStopsAtLimitWhenRowsAreDenied(t *testing.T) {
+	mockDB, mockDBController, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close() // nolint:errcheck
+
+	columns := []string{
+		"id", "uid", "folder_uid", "created", "created_by", "updated", "updated_by",
+		"name", "type", "description", "model", "version",
+	}
+	now := time.Now()
+	model := []byte(`{"type":"text","title":"Panel","options":{},"fieldConfig":{}}`)
+	rows := sqlmock.NewRows(columns).
+		AddRow(3, "denied", "", now, nil, now, nil, "Denied", "text", "", model, 1).
+		AddRow(2, "readable", "", now, nil, now, nil, "Readable", "text", "", model, 1)
+	mockDBController.ExpectQuery("SELECT").WillReturnRows(rows)
+
+	sqlRows, err := mockDB.Query("SELECT")
+	require.NoError(t, err)
+	defer sqlRows.Close() // nolint:errcheck
+
+	var evaluated []string
+	page, err := collectLibraryPanelPage(sqlRows, 1, func(uid string) (bool, error) {
+		evaluated = append(evaluated, uid)
+		return uid != "denied", nil
+	})
+
+	require.NoError(t, err)
+	require.Empty(t, page.Items)
+	require.Equal(t, "3", page.Continue)
+	require.Equal(t, []string{"denied"}, evaluated)
+	require.NoError(t, mockDBController.ExpectationsWereMet())
+}
+
+func TestCollectLibraryPanelPageLastPageHasNoContinue(t *testing.T) {
+	mockDB, mockDBController, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close() // nolint:errcheck
+
+	columns := []string{
+		"id", "uid", "folder_uid", "created", "created_by", "updated", "updated_by",
+		"name", "type", "description", "model", "version",
+	}
+	now := time.Now()
+	model := []byte(`{"type":"text","title":"Panel","options":{},"fieldConfig":{}}`)
+	rows := sqlmock.NewRows(columns).
+		AddRow(1, "readable", "", now, nil, now, nil, "Readable", "text", "", model, 1)
+	mockDBController.ExpectQuery("SELECT").WillReturnRows(rows)
+
+	sqlRows, err := mockDB.Query("SELECT")
+	require.NoError(t, err)
+	defer sqlRows.Close() // nolint:errcheck
+
+	page, err := collectLibraryPanelPage(sqlRows, 1, func(uid string) (bool, error) {
+		return true, nil
+	})
+
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Empty(t, page.Continue)
 	require.NoError(t, mockDBController.ExpectationsWereMet())
 }
 
