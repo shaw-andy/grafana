@@ -59,6 +59,9 @@ func (s *Service) handleUSAScenario(ctx context.Context, req *backend.QueryDataR
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse query json: %v", err)
 		}
+		if period <= 0 {
+			return nil, fmt.Errorf("period must be greater than zero")
+		}
 
 		if len(usa.Fields) == 0 {
 			usa.Fields = []string{"foo", "bar", "baz"}
