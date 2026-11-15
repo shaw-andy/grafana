@@ -518,7 +518,7 @@ func (hs *HTTPServer) UserSetUsingOrg(c *contextmodel.ReqContext) response.Respo
 	return response.Success("Active organization changed")
 }
 
-// GET /profile/switch-org/:id
+// POST /profile/switch-org/:id
 func (hs *HTTPServer) ChangeActiveOrgAndRedirectToHome(c *contextmodel.ReqContext) {
 	orgID, err := strconv.ParseInt(web.Params(c.Req)[":id"], 10, 64)
 	if err != nil {

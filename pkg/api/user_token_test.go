@@ -16,6 +16,7 @@ import (
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/services/auth"
 	"github.com/grafana/grafana/pkg/services/auth/authtest"
+	"github.com/grafana/grafana/pkg/services/authn"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
 	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/services/user"
@@ -208,9 +209,11 @@ func TestHTTPServer_RotateUserAuthTokenRedirect(t *testing.T) {
 					req := server.NewGetRequest(urlString)
 					req.AddCookie(&http.Cookie{Name: "grafana_session", Value: "123", Path: "/"})
 
-					if sessionCase.useSessionStorageRedirect {
-						req = webtest.RequestWithWebContext(req, &contextmodel.ReqContext{UseSessionStorageRedirect: true})
-					} else {
+					req = webtest.RequestWithWebContext(req, &contextmodel.ReqContext{
+						UseSessionStorageRedirect: sessionCase.useSessionStorageRedirect,
+						LookupTokenErr:            authn.NewTokenNeedsRotationError(1),
+					})
+					if !sessionCase.useSessionStorageRedirect {
 						req.AddCookie(&http.Cookie{Name: "redirect_to", Value: redirectToQuery, Path: "/"})
 					}
 

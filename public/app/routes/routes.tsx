@@ -491,6 +491,17 @@ export function getAppRoutes(): RouteDescriptor[] {
       chromeless: true,
     },
     {
+      path: '/logout',
+      component: () => <Navigate replace to="/logout/confirm" />,
+    },
+    {
+      path: '/logout/confirm',
+      component: SafeDynamicImport(
+        () => import(/* webpackChunkName: "LogoutConfirmPage" */ 'app/core/components/Logout/LogoutConfirmPage')
+      ),
+      chromeless: true,
+    },
+    {
       path: '/invite/:code',
       allowAnonymous: true,
       component: SafeDynamicImport(

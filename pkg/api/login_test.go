@@ -711,9 +711,11 @@ func TestLogoutSaml(t *testing.T) {
 		hs.Logout(c)
 		return response.Empty(http.StatusOK)
 	})
-	sc.m.Get(sc.url, sc.defaultHandler)
-	sc.fakeReqNoAssertions("GET", sc.url).exec()
+	sc.cfg.LoginCookieName = "grafana_session"
+	sc.m.Post(sc.url, sc.defaultHandler)
+	sc.fakeReqNoAssertionsWithCookie("POST", sc.url, http.Cookie{Name: "grafana_session", Value: "placeholder-session"}).exec()
 	require.Equal(t, 302, sc.resp.Code)
+	require.Equal(t, "/logout/saml", sc.resp.Header().Get("Location"))
 }
 
 func TestIsExternallySynced(t *testing.T) {
