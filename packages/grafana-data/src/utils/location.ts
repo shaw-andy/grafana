@@ -15,6 +15,7 @@ interface MinimalGrafanaConfig {
 let grafanaConfig: MinimalGrafanaConfig = { appSubUrl: '' };
 let getTimeRangeUrlParams: () => RawTimeRange;
 let getVariablesUrlParams: (scopedVars?: ScopedVars) => UrlQueryMap;
+let getCurrentOrgId: (() => number | undefined) | undefined;
 
 const maybeParseUrl = (input: string): URL | undefined => {
   try {
@@ -113,10 +114,103 @@ const updateSearchParams = (init: string, partial: string) => {
   }
 };
 
+// One-click links navigate without showing the destination, so same-origin targets are limited to
+// routes the backend only answers with the app shell. Anything else (logout, org switching, shortlink
+// redirects, OAuth and invite endpoints, snapshot deletion) can act on the viewer's session.
+const oneClickSameOriginPathRes = [
+  /^\/(?:d|d-solo)\/[^/]+(?:\/[^/]+)?\/?$/,
+  /^\/dashboards(?:\/.*)?$/,
+  /^\/explore\/?$/,
+];
+
+// Query parameters that backend middleware acts on for any route.
+const oneClickBlockedQueryParams = ['auth_token', 'forceLogin'];
+
+const isSafeOneClickPath = (path: string): boolean => {
+  if (!oneClickSameOriginPathRes.some((re) => re.test(path))) {
+    return false;
+  }
+
+  for (const segment of path.split('/')) {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      return false;
+    }
+    if (decoded === '.' || decoded === '..' || decoded.includes('/') || decoded.includes('\\')) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const isSafeOneClickQuery = (params: URLSearchParams): boolean => {
+  if (oneClickBlockedQueryParams.some((name) => params.has(name))) {
+    return false;
+  }
+
+  // The org redirect middleware switches the active org whenever orgId differs from it.
+  const orgIds = params.getAll('orgId');
+  if (orgIds.length > 0) {
+    const currentOrgId = getCurrentOrgId?.();
+    if (currentOrgId == null || orgIds.some((orgId) => orgId !== String(currentOrgId))) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+/**
+ * Resolves the href of a one-click data link to the absolute URL that may be opened without the
+ * viewer first seeing it. Returns undefined when the link must not be followed on a single click.
+ * Callers must open the returned URL rather than the original href.
+ *
+ * @internal
+ */
+const getOneClickUrl = (href: string | undefined): string | undefined => {
+  if (!href) {
+    return undefined;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(href, document.baseURI);
+  } catch {
+    return undefined;
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return undefined;
+  }
+
+  if (url.origin !== window.location.origin) {
+    return url.href;
+  }
+
+  const appSubUrl = (grafanaConfig.appSubUrl ?? '').replace(/\/+$/, '');
+  let path = url.pathname;
+  if (appSubUrl !== '') {
+    if (path !== appSubUrl && !path.startsWith(`${appSubUrl}/`)) {
+      return undefined;
+    }
+    path = path.slice(appSubUrl.length) || '/';
+  }
+
+  if (!isSafeOneClickPath(path) || !isSafeOneClickQuery(url.searchParams)) {
+    return undefined;
+  }
+
+  return url.href;
+};
+
 interface LocationUtilDependencies {
   config: GrafanaConfig;
   getTimeRangeForUrl: () => RawTimeRange;
   getVariablesUrlParams: (scopedVars?: ScopedVars) => UrlQueryMap;
+  getCurrentOrgId?: () => number | undefined;
 }
 
 export const locationUtil = {
@@ -131,8 +225,10 @@ export const locationUtil = {
     grafanaConfig = dependencies.config;
     getTimeRangeUrlParams = dependencies.getTimeRangeForUrl;
     getVariablesUrlParams = dependencies.getVariablesUrlParams;
+    getCurrentOrgId = dependencies.getCurrentOrgId;
   },
   stripBaseFromUrl,
+  getOneClickUrl,
   assureBaseUrl,
   updateSearchParams,
   getTimeRangeUrlParams: () => {

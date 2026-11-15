@@ -302,6 +302,7 @@ export class GrafanaApp {
         config: window.grafanaBootData.settings,
         getTimeRangeForUrl: getTimeSrv().timeRangeForUrl,
         getVariablesUrlParams: getVariablesUrlParams,
+        getCurrentOrgId: () => contextSrv.user.orgId,
       });
 
       // For multi-org users, ensure every SPA navigation carries ?orgId so
