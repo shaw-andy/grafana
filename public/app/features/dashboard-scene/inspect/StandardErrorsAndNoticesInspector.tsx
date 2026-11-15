@@ -1,4 +1,5 @@
 import { css } from '@emotion/css';
+import DOMPurify from 'dompurify';
 import { useState } from 'react';
 
 import {
@@ -43,6 +44,77 @@ const SEVERITY_LABELS: Record<Severity, () => string> = {
 
 function getSeverityIcon(severity: Severity): IconName {
   return severity === 'info' ? 'info-circle' : 'exclamation-triangle';
+}
+
+// Notice text can carry values from query results (for example series labels), so only
+// formatting that the browser never fetches anything for is allowed: no images, media,
+// embeds or inline styles.
+const NOTICE_ALLOWED_TAGS = [
+  'a',
+  'p',
+  'br',
+  'hr',
+  'strong',
+  'b',
+  'em',
+  'i',
+  'del',
+  's',
+  'code',
+  'pre',
+  'blockquote',
+  'ul',
+  'ol',
+  'li',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'table',
+  'thead',
+  'tbody',
+  'tr',
+  'th',
+  'td',
+];
+
+// Links to this Grafana origin are dropped: a click would send the session cookie to
+// endpoints that change session state on GET.
+function isAllowedNoticeLink(href: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(href, window.location.href);
+  } catch {
+    return false;
+  }
+  if (url.protocol === 'mailto:') {
+    return true;
+  }
+  return (url.protocol === 'https:' || url.protocol === 'http:') && url.origin !== window.location.origin;
+}
+
+function renderNoticeMarkdown(text: string): string {
+  const fragment = DOMPurify.sanitize(renderMarkdown(text, { noSanitize: true }), {
+    ALLOWED_TAGS: NOTICE_ALLOWED_TAGS,
+    ALLOWED_ATTR: ['href'],
+    RETURN_DOM_FRAGMENT: true,
+  });
+
+  fragment.querySelectorAll('a').forEach((link) => {
+    const href = link.getAttribute('href');
+    if (href && isAllowedNoticeLink(href)) {
+      link.setAttribute('target', '_blank');
+      link.setAttribute('rel', 'noopener noreferrer');
+    } else {
+      link.replaceWith(...Array.from(link.childNodes));
+    }
+  });
+
+  const container = document.createElement('div');
+  container.appendChild(fragment);
+  return container.innerHTML;
 }
 
 function formatError(error: DataQueryError): string {
@@ -140,8 +212,10 @@ function EntryCard({ entry }: { entry: InspectableEntry }) {
               <pre className={styles.code}>{entry.content}</pre>
             </>
           ) : (
-            // renderMarkdown sanitizes its output, so this is safe to set as HTML.
-            <div className={styles.markdown} dangerouslySetInnerHTML={{ __html: renderMarkdown(entry.content) }} />
+            <div
+              className={styles.markdown}
+              dangerouslySetInnerHTML={{ __html: renderNoticeMarkdown(entry.content) }}
+            />
           )}
           {entry.link && (
             <TextLink href={textUtil.sanitizeUrl(entry.link)} external className={styles.link}>
