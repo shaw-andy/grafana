@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"path/filepath"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/middleware/cookies"
+	"github.com/grafana/grafana/pkg/plugins"
 	ac "github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/auth"
 	"github.com/grafana/grafana/pkg/services/authn"
@@ -141,47 +142,126 @@ func CanAdminPlugins(cfg *setting.Cfg, accessControl ac.AccessControl) func(c *c
 func RoleAppPluginAuth(accessControl ac.AccessControl, ps pluginstore.Store, logger log.Logger) func(c *contextmodel.ReqContext) {
 	return func(c *contextmodel.ReqContext) {
 		pluginID := web.Params(c.Req)[":id"]
+		requestPaths := appRequestPathVariants(c.Req.URL)
+		appRoot := normalizeIncludePath("/a/" + pluginID)
+		for _, reqPath := range requestPaths {
+			if !isUnderIncludePath(reqPath, appRoot) {
+				accessForbidden(c)
+				return
+			}
+		}
+
 		p, exists := ps.Plugin(c.Req.Context(), pluginID)
 		if !exists {
 			// The frontend will handle app not found appropriately
 			return
 		}
 
-		permitted := true
-		path := normalizeIncludePath(c.Req.URL.Path)
-		hasAccess := ac.HasAccess(accessControl, c)
-		for _, i := range p.Includes {
-			if i.Type != "page" {
-				continue
-			}
-
-			u, err := url.Parse(i.Path)
-			if err != nil {
-				logger.Error("failed to parse include path", "pluginId", pluginID, "include", i.Name, "err", err)
-				continue
-			}
-
-			if normalizeIncludePath(u.Path) == path {
-				if i.RequiresRBACAction() && !hasAccess(pluginaccesscontrol.GetPluginRouteEvaluator(pluginID, i.Action)) {
-					logger.Debug("Plugin include is covered by RBAC, user doesn't have access", "plugin", pluginID, "include", i.Name)
-					permitted = false
-					break
-				} else if !i.RequiresRBACAction() && !c.HasUserRole(i.Role) {
-					permitted = false
-					break
-				}
-			}
+		pages := pageIncludesUnder(p.Includes, appRoot)
+		// Apps without page includes under their app URL declare no per-page restrictions there;
+		// plugins.app:access already gates them.
+		if len(pages) == 0 {
+			return
 		}
 
-		if !permitted {
-			accessForbidden(c)
-			return
+		hasAccess := ac.HasAccess(accessControl, c)
+		canOpen := func(i *plugins.Includes) bool {
+			if i.RequiresRBACAction() {
+				return hasAccess(pluginaccesscontrol.GetPluginRouteEvaluator(pluginID, i.Action))
+			}
+			return c.HasUserRole(i.Role)
+		}
+
+		// The plugin's client router decides what renders under any URL, so every reading of the
+		// path must fall under an include the caller may open, and the most specific include wins.
+		for _, reqPath := range requestPaths {
+			matched := longestMatchingIncludes(pages, reqPath)
+			if len(matched) == 0 {
+				logger.Debug("Plugin path is not covered by any page include", "plugin", pluginID)
+				accessForbidden(c)
+				return
+			}
+			for _, i := range matched {
+				if !canOpen(i.include) {
+					logger.Debug("User doesn't have access to plugin include", "plugin", pluginID, "include", i.include.Name)
+					accessForbidden(c)
+					return
+				}
+			}
 		}
 	}
 }
 
+type pageInclude struct {
+	path    string
+	include *plugins.Includes
+}
+
+func pageIncludesUnder(includes []*plugins.Includes, root string) []pageInclude {
+	pages := make([]pageInclude, 0, len(includes))
+	for _, i := range includes {
+		if i.Type != "page" || i.Path == "" {
+			continue
+		}
+		p := i.Path
+		if idx := strings.IndexAny(p, "?#"); idx >= 0 {
+			p = p[:idx]
+		}
+		p = normalizeIncludePath(cleanURLPath(p))
+		if !isUnderIncludePath(p, root) {
+			continue
+		}
+		pages = append(pages, pageInclude{path: p, include: i})
+	}
+	return pages
+}
+
+func longestMatchingIncludes(pages []pageInclude, path string) []pageInclude {
+	var matched []pageInclude
+	for _, page := range pages {
+		if !isUnderIncludePath(path, page.path) {
+			continue
+		}
+		if len(matched) > 0 && len(page.path) < len(matched[0].path) {
+			continue
+		}
+		if len(matched) > 0 && len(page.path) > len(matched[0].path) {
+			matched = matched[:0]
+		}
+		matched = append(matched, page)
+	}
+	return matched
+}
+
+// appRequestPathVariants returns the decoded and escaped request path, each as sent and with
+// dot segments resolved, so that no reading of the URL can land outside the include it is checked against.
+func appRequestPathVariants(u *url.URL) []string {
+	raw := []string{u.Path, u.EscapedPath()}
+	variants := make([]string, 0, len(raw)*2)
+	for _, p := range raw {
+		for _, v := range []string{normalizeIncludePath(p), normalizeIncludePath(cleanURLPath(p))} {
+			if !slices.Contains(variants, v) {
+				variants = append(variants, v)
+			}
+		}
+	}
+	return variants
+}
+
+func cleanURLPath(p string) string {
+	return path.Clean("/" + p)
+}
+
+// normalizeIncludePath is case-insensitive because client-side routers match routes case-insensitively by default.
 func normalizeIncludePath(p string) string {
-	return strings.TrimPrefix(filepath.Clean(p), "/")
+	return strings.ToLower(strings.Trim(p, "/"))
+}
+
+func isUnderIncludePath(requestPath, includePath string) bool {
+	if includePath == "" {
+		return true
+	}
+	return requestPath == includePath || strings.HasPrefix(requestPath, includePath+"/")
 }
 
 func RoleAuth(roles ...org.RoleType) web.Handler {

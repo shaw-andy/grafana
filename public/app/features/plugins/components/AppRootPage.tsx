@@ -10,7 +10,6 @@ import {
   type AppPluginMeta,
   type NavModel,
   type NavModelItem,
-  OrgRole,
   PluginType,
   PluginContextProvider,
 } from '@grafana/data';
@@ -26,7 +25,6 @@ import PageLoader from 'app/core/components/PageLoader/PageLoader';
 import { EntityNotFound } from 'app/core/components/PageNotFound/EntityNotFound';
 import { useGrafana } from 'app/core/context/GrafanaContext';
 import { getNotFoundNav, getWarningNav, getExceptionNav } from 'app/core/navigation/errorModels';
-import { contextSrv } from 'app/core/services/context_srv';
 import { getMessageFromError } from 'app/core/utils/errors';
 
 import {
@@ -37,6 +35,7 @@ import {
   useAddedFunctionsRegistry,
 } from '../extensions/ExtensionRegistriesContext';
 import { pluginImporter } from '../importer/pluginImporter';
+import { canAccessAppPluginPath } from '../pluginPageAccess';
 import { buildPluginSectionNav } from '../utils';
 
 import { PluginErrorBoundary } from './PluginErrorBoundary';
@@ -147,36 +146,9 @@ function AppRootPage({ pluginId, pluginNavSection }: Props) {
     </PluginContextProvider>
   );
 
-  // Because of the fallback at plugin routes, we need to check
-  // if the user has permissions to see the plugin page.
-  const userHasPermissionsToPluginPage = () => {
-    // Check if plugin does not have any configurations or the user is Grafana Admin
-    if (!plugin.meta?.includes) {
-      return true;
-    }
-
-    const pluginInclude = plugin.meta?.includes.find((include) => include.path === location.pathname);
-    // Check if include configuration contains current path
-    if (!pluginInclude) {
-      return true;
-    }
-
-    // Check if action exists and give access if user has the required permission.
-    if (pluginInclude?.action) {
-      return contextSrv.hasPermission(pluginInclude.action);
-    }
-
-    if (contextSrv.isGrafanaAdmin || contextSrv.user.orgRole === OrgRole.Admin) {
-      return true;
-    }
-
-    const pathRole: string = pluginInclude?.role || '';
-    // Check if role exists  and give access to Editor to be able to see Viewer pages
-    if (!pathRole || (contextSrv.isEditor && pathRole === OrgRole.Viewer)) {
-      return true;
-    }
-    return contextSrv.hasRole(pathRole);
-  };
+  // Plugin routes are registered as catch-alls, so the plugin root must only mount for paths the user may open.
+  const userHasPermissionsToPluginPage = () =>
+    canAccessAppPluginPath(plugin.meta.id, plugin.meta.includes, location.pathname);
 
   const AccessDenied = () => {
     return (

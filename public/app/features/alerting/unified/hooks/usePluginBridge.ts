@@ -1,7 +1,7 @@
 import { useAsync } from 'react-use';
 
-import { OrgRole, type PluginMeta } from '@grafana/data';
-import { contextSrv } from 'app/core/services/context_srv';
+import { type PluginMeta } from '@grafana/data';
+import { canAccessAppPluginPath } from 'app/features/plugins/pluginPageAccess';
 
 import { type PluginID } from '../components/PluginBridge';
 import { SupportedPlugin } from '../types/pluginBridges';
@@ -51,27 +51,7 @@ export interface PluginBridgeResult {
  * semantics as the core app plugin route guard.
  */
 export function canAccessPluginPage(settings: PluginMeta<{}>, pluginPagePath: string): boolean {
-  const requestedPath = pluginPagePath.split('?')[0];
-  const pluginInclude = settings.includes?.find((include) => include.path === requestedPath);
-
-  if (!pluginInclude) {
-    return true;
-  }
-
-  if (pluginInclude.action) {
-    return contextSrv.hasPermission(pluginInclude.action);
-  }
-
-  if (contextSrv.isGrafanaAdmin || contextSrv.user.orgRole === OrgRole.Admin) {
-    return true;
-  }
-
-  const includeRole = pluginInclude.role ?? '';
-  if (!includeRole || (contextSrv.isEditor && includeRole === OrgRole.Viewer)) {
-    return true;
-  }
-
-  return contextSrv.hasRole(includeRole);
+  return canAccessAppPluginPath(settings.id, settings.includes, pluginPagePath);
 }
 
 /**

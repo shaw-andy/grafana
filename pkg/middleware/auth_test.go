@@ -294,8 +294,8 @@ func TestRoleAppPluginAuth(t *testing.T) {
 		assert.Equal(t, "", sc.resp.Body.String())
 	})
 
-	// We return success in this case because the frontend takes care of rendering the right page based on its router
-	middlewareScenario(t, "Plugin page not found returns success", func(t *testing.T, sc *scenarioContext) {
+	// The plugin's router can render anything under an undeclared path, so it is not left to the frontend
+	middlewareScenario(t, "Plugin path outside every page include is denied", func(t *testing.T, sc *scenarioContext) {
 		sc.withIdentity(&authn.Identity{
 			OrgRoles: map[int64]org.RoleType{
 				0: org.RoleViewer,
@@ -318,8 +318,8 @@ func TestRoleAppPluginAuth(t *testing.T) {
 			c.JSON(http.StatusOK, map[string]interface{}{})
 		})
 		sc.fakeReq("GET", "/a/test-app/notExistingPath").exec()
-		assert.Equal(t, 200, sc.resp.Code)
-		assert.Equal(t, "", sc.resp.Body.String())
+		assert.Equal(t, http.StatusFound, sc.resp.Code)
+		assert.Equal(t, "/", sc.resp.Header().Get("Location"))
 	})
 
 	t.Run("Plugin include with RBAC", func(t *testing.T) {
