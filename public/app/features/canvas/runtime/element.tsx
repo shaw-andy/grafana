@@ -6,6 +6,7 @@ import {
   FieldType,
   getLinksSupplier,
   type LinkModel,
+  locationUtil,
   type ScopedVars,
   type ValueLinkConfig,
   OneClickMode,
@@ -887,7 +888,7 @@ export class ElementState implements LayerElement {
     if (this.div != null) {
       if (this.oneClickMode === OneClickMode.Link) {
         const primaryDataLink = this.getPrimaryDataLink();
-        if (primaryDataLink) {
+        if (primaryDataLink && locationUtil.getOneClickUrl(primaryDataLink.href) != null) {
           this.div.style.cursor = 'pointer';
           this.div.title = `Navigate to ${primaryDataLink.title === '' ? 'data link' : primaryDataLink.title}`;
         }
@@ -984,9 +985,10 @@ export class ElementState implements LayerElement {
   onElementClick = (event: React.MouseEvent) => {
     // If one-click access is enabled, open the primary link
     if (this.oneClickMode === OneClickMode.Link) {
-      let primaryDataLink = this.getPrimaryDataLink();
-      if (primaryDataLink) {
-        window.open(primaryDataLink.href, primaryDataLink.target ?? '_self');
+      const primaryDataLink = this.getPrimaryDataLink();
+      const oneClickUrl = locationUtil.getOneClickUrl(primaryDataLink?.href);
+      if (primaryDataLink && oneClickUrl != null) {
+        window.open(oneClickUrl, primaryDataLink.target ?? '_self');
       }
     } else if (this.oneClickMode === OneClickMode.Action) {
       const primaryAction = this.getPrimaryAction();

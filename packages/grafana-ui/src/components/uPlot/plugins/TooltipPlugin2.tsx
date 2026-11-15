@@ -4,7 +4,7 @@ import * as React from 'react';
 import { createPortal } from 'react-dom';
 import type uPlot from 'uplot';
 
-import { type GrafanaTheme2, type LinkModel } from '@grafana/data';
+import { type GrafanaTheme2, type LinkModel, locationUtil } from '@grafana/data';
 import { DashboardCursorSync } from '@grafana/schema';
 
 import { useStyles2 } from '../../../themes/ThemeContext';
@@ -393,10 +393,15 @@ export const TooltipPlugin2 = ({
             dataLinks = getLinksRef.current(closestSeriesIdx, seriesIdxs[closestSeriesIdx]!);
             adHocFilters = getAdHocFiltersRef.current(closestSeriesIdx, seriesIdxs[closestSeriesIdx]!);
             const oneClickLink = dataLinks.find((dataLink) => dataLink.oneClick === true);
+            const oneClickUrl = locationUtil.getOneClickUrl(oneClickLink?.href);
 
-            if (oneClickLink != null) {
-              window.open(oneClickLink.href, oneClickLink.target ?? '_self');
+            if (oneClickLink != null && oneClickUrl != null) {
+              window.open(oneClickUrl, oneClickLink.target ?? '_self');
             } else {
+              if (oneClickLink != null) {
+                dataLinks = dataLinks.filter((dataLink) => dataLink !== oneClickLink);
+              }
+
               setTimeout(() => {
                 _isPinned = true;
                 scheduleRender(true);
@@ -578,7 +583,7 @@ export const TooltipPlugin2 = ({
             const links = getDataLinks(seriesIdx, seriesIdxs[seriesIdx]!);
             const oneClickLink = links.find((dataLink) => dataLink.oneClick === true);
 
-            if (oneClickLink) {
+            if (oneClickLink && locationUtil.getOneClickUrl(oneClickLink.href) != null) {
               return [oneClickLink];
             }
           }
