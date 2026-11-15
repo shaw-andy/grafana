@@ -21,12 +21,21 @@ type fakeResolver struct {
 	err     error
 }
 
-func (f *fakeResolver) GetDisplayList(_ context.Context, _ authlib.NamespaceInfo, keys []string) (*iam.DisplayList, error) {
+func (f *fakeResolver) GetDisplayList(_ context.Context, _ authlib.NamespaceInfo, keys []string, allow MemberFilter) (*iam.DisplayList, error) {
 	f.gotKeys = keys
 	if f.err != nil {
 		return nil, f.err
 	}
-	return f.result, nil
+	if f.result == nil {
+		return nil, nil
+	}
+	rsp := &iam.DisplayList{Keys: f.result.Keys, InvalidKeys: f.result.InvalidKeys}
+	for _, item := range f.result.Items {
+		if allow(Member{Type: item.Identity.Type, UID: item.Identity.Name, ID: item.InternalID}) {
+			rsp.Items = append(rsp.Items, item)
+		}
+	}
+	return rsp, nil
 }
 
 func selfRequest(t *testing.T, auth authlib.AuthInfo) *http.Request {
@@ -49,7 +58,7 @@ func TestDisplayHandler_handleSelf(t *testing.T) {
 	}
 
 	t.Run("missing auth info returns 401", func(t *testing.T) {
-		h := NewDisplayHandler(&fakeResolver{})
+		h := NewDisplayHandler(nil, &fakeResolver{})
 		rec := httptest.NewRecorder()
 
 		h.handleSelf(rec, selfRequest(t, nil))
@@ -64,7 +73,7 @@ func TestDisplayHandler_handleSelf(t *testing.T) {
 			InternalID:  1,
 		}
 		resolver := &fakeResolver{result: &iam.DisplayList{Items: []iam.Display{want}}}
-		h := NewDisplayHandler(resolver)
+		h := NewDisplayHandler(nil, resolver)
 		rec := httptest.NewRecorder()
 
 		h.handleSelf(rec, selfRequest(t, caller))
@@ -82,7 +91,7 @@ func TestDisplayHandler_handleSelf(t *testing.T) {
 
 	t.Run("unresolved caller returns 404", func(t *testing.T) {
 		resolver := &fakeResolver{result: &iam.DisplayList{}}
-		h := NewDisplayHandler(resolver)
+		h := NewDisplayHandler(nil, resolver)
 		rec := httptest.NewRecorder()
 
 		h.handleSelf(rec, selfRequest(t, caller))
@@ -92,7 +101,7 @@ func TestDisplayHandler_handleSelf(t *testing.T) {
 
 	t.Run("resolver error returns 500", func(t *testing.T) {
 		resolver := &fakeResolver{err: errors.New("boom")}
-		h := NewDisplayHandler(resolver)
+		h := NewDisplayHandler(nil, resolver)
 		rec := httptest.NewRecorder()
 
 		h.handleSelf(rec, selfRequest(t, caller))

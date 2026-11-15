@@ -42,7 +42,7 @@ var serviceAccountSearchDisplayFields = []string{
 	resource.SEARCH_FIELD_LEGACY_ID,
 }
 
-func (r *SearchDisplayProvider) GetDisplayList(ctx context.Context, ns authlib.NamespaceInfo, key []string) (*iam.DisplayList, error) {
+func (r *SearchDisplayProvider) GetDisplayList(ctx context.Context, ns authlib.NamespaceInfo, key []string, allow MemberFilter) (*iam.DisplayList, error) {
 	keys := parseKeys(key)
 
 	rsp := &iam.DisplayList{
@@ -75,7 +75,7 @@ func (r *SearchDisplayProvider) GetDisplayList(ctx context.Context, ns authlib.N
 		// service accounts, UID matches before ID matches) and avoid
 		// needing locks around the shared maps and slice.
 		for i, srsp := range responses {
-			if err := appendDisplayRows(rsp, srsp, jobs[i].identityType, foundUIDs, foundIDs); err != nil {
+			if err := appendDisplayRows(rsp, srsp, jobs[i].identityType, allow, foundUIDs, foundIDs); err != nil {
 				return nil, err
 			}
 		}
@@ -163,13 +163,17 @@ type displaySearchRow struct {
 	internalID int64
 }
 
-func appendDisplayRows(list *iam.DisplayList, rsp *resourcepb.ResourceSearchResponse, identityType authlib.IdentityType, foundUIDs map[string]struct{}, foundIDs map[int64]struct{}) error {
+func appendDisplayRows(list *iam.DisplayList, rsp *resourcepb.ResourceSearchResponse, identityType authlib.IdentityType, allow MemberFilter, foundUIDs map[string]struct{}, foundIDs map[int64]struct{}) error {
 	rows, err := decodeDisplayRows(rsp)
 	if err != nil {
 		return err
 	}
 
 	for _, row := range rows {
+		if allow == nil || !allow(Member{Type: identityType, UID: row.key.Name, ID: row.internalID, Login: row.login}) {
+			continue
+		}
+
 		displayName := row.title
 		if displayName == "" {
 			displayName = row.login

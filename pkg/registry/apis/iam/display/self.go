@@ -85,9 +85,10 @@ func (r *DisplayHandler) handleSelf(w http.ResponseWriter, req *http.Request) {
 	// GetUID() is already in the "<type>:<identifier>" form the resolvers expect
 	// (e.g. "user:u000000001"), so the caller identifies itself purely from context.
 	key := authInfo.GetUID()
+	allow := selfFilter(authInfo)
 
 	for _, p := range r.resolvers {
-		partial, err := p.GetDisplayList(ctx, ns, []string{key})
+		partial, err := p.GetDisplayList(ctx, ns, []string{key}, allow)
 		if err != nil {
 			errhttp.Write(ctx, fmt.Errorf("error calling GetDisplayList %w", err), w) // 500
 			return
