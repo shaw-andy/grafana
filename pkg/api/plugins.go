@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"path"
 	"path/filepath"
@@ -396,7 +397,52 @@ func (hs *HTTPServer) serveLocalPluginAsset(c *contextmodel.ReqContext, plugin p
 		c.Resp.Header().Set("Cache-Control", "public, max-age=3600")
 	}
 
+	setPluginAssetContentHeaders(c.Resp.Header(), assetPath, f.Content)
+
 	http.ServeContent(c.Resp, c.Req, assetPath, f.ModTime, bytes.NewReader(f.Content))
+}
+
+// setPluginAssetContentHeaders sets the content type of a plugin asset before http.ServeContent
+// can pick or sniff one, and stops any type that a browser could render as a document (HTML,
+// SVG, XML, sniffed content, ...) from running script on the Grafana origin. Plugin assets are
+// served without a login check, and this must hold even when the global CSP setting is off.
+func setPluginAssetContentHeaders(h http.Header, assetPath string, content []byte) {
+	ctype := mime.TypeByExtension(filepath.Ext(assetPath))
+	if ctype == "" {
+		ctype = http.DetectContentType(content)
+	}
+	h.Set("Content-Type", ctype)
+	h.Set("X-Content-Type-Options", "nosniff")
+
+	if isPassivePluginAssetType(ctype) {
+		return
+	}
+	h.Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	h.Set("Content-Disposition", "attachment")
+}
+
+// isPassivePluginAssetType reports whether a browser navigating to a response of this type
+// cannot end up running script in it. Anything not explicitly listed is treated as unsafe.
+func isPassivePluginAssetType(contentType string) bool {
+	mt, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	mt = strings.ToLower(mt)
+	if strings.Contains(mt, "xml") || strings.Contains(mt, "html") {
+		return false
+	}
+	switch mt {
+	case "text/javascript", "application/javascript", "text/css", "text/plain",
+		"application/json", "application/wasm":
+		return true
+	}
+	for _, prefix := range []string{"image/", "font/", "audio/", "video/"} {
+		if strings.HasPrefix(mt, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // redirectCDNPluginAsset redirects the http request to specified asset path on the configured plugins CDN.
