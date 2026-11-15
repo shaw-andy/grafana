@@ -290,7 +290,23 @@ func (hs *HTTPServer) loginUserWithUser(user *user.User, c *contextmodel.ReqCont
 	return nil
 }
 
+// LogoutView never ends the session: a link or a page's background request can reach a GET route.
+func (hs *HTTPServer) LogoutView(c *contextmodel.ReqContext) {
+	if c.GetCookie(hs.Cfg.LoginCookieName) == "" {
+		c.Redirect(hs.Cfg.AppSubURL + "/login")
+		return
+	}
+	c.Redirect(hs.Cfg.AppSubURL + "/logout/confirm")
+}
+
 func (hs *HTTPServer) Logout(c *contextmodel.ReqContext) {
+	// The CSRF filter only checks requests that carry the session cookie, and a
+	// cross-site form post arrives without it when the cookie is SameSite.
+	if c.GetCookie(hs.Cfg.LoginCookieName) == "" {
+		c.Redirect(hs.Cfg.AppSubURL + "/login")
+		return
+	}
+
 	// FIXME: restructure saml client to implement authn.LogoutClient
 	if hs.samlSingleLogoutEnabled(c.Req.Context()) {
 		if c.GetAuthenticatedBy() == loginservice.SAMLAuthModule {

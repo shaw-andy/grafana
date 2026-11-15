@@ -76,13 +76,17 @@ func (hs *HTTPServer) RevokeUserAuthToken(c *contextmodel.ReqContext) response.R
 }
 
 func (hs *HTTPServer) RotateUserAuthTokenRedirect(c *contextmodel.ReqContext) response.Response {
-	if err := hs.rotateToken(c); err != nil {
-		hs.log.FromContext(c.Req.Context()).Debug("Failed to rotate token", "error", err)
-		if errors.Is(err, auth.ErrInvalidSessionToken) {
-			hs.log.FromContext(c.Req.Context()).Debug("Deleting session cookie")
-			authn.DeleteSessionCookie(c.Resp, hs.Cfg)
+	// The auth middleware redirects here only when the session token needs rotation.
+	// Any page can request this GET route with the user's cookie, so rotate only in that state.
+	if _, ok := errors.AsType[authn.TokenNeedsRotationError](c.LookupTokenErr); ok {
+		if err := hs.rotateToken(c); err != nil {
+			hs.log.FromContext(c.Req.Context()).Debug("Failed to rotate token", "error", err)
+			if errors.Is(err, auth.ErrInvalidSessionToken) {
+				hs.log.FromContext(c.Req.Context()).Debug("Deleting session cookie")
+				authn.DeleteSessionCookie(c.Resp, hs.Cfg)
+			}
+			return response.Redirect(hs.Cfg.AppSubURL + "/login")
 		}
-		return response.Redirect(hs.Cfg.AppSubURL + "/login")
 	}
 
 	if !c.UseSessionStorageRedirect {

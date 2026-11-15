@@ -41,7 +41,11 @@ export const SignupInvitedPage = () => {
   const styles = useStyles2(getStyles);
 
   useAsync(async () => {
-    const invite = await getBackendSrv().get(`/api/user/invite/${code}`);
+    // encodeURIComponent leaves dots as they are, so "." and ".." would still be dot segments.
+    if (!code || code === '.' || code === '..') {
+      return;
+    }
+    const invite = await getBackendSrv().get(`/api/user/invite/${encodeURIComponent(code)}`);
 
     setInitFormModel({
       email: invite.email,

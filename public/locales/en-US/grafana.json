@@ -11953,6 +11953,13 @@
       "new-to-question": "New to Grafana?"
     }
   },
+  "logout": {
+    "confirm-page": {
+      "cancel": "Cancel",
+      "message": "Do you want to sign out?",
+      "sign-out": "Sign out"
+    }
+  },
   "logs": {
     "category-logs": "Logs",
     "deduplication-options": {
