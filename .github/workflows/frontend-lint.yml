@@ -67,7 +67,7 @@ jobs:
     name: Lint
     runs-on: ubuntu-x64
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       with:
         persist-credentials: false
     - name: Setup Node.js
@@ -119,7 +119,7 @@ jobs:
     env:
       NODE_OPTIONS: --max-old-space-size=8192
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       with:
         persist-credentials: false
     - name: Setup Node
@@ -214,7 +214,7 @@ jobs:
     name: Verify API clients (enterprise)
     runs-on: ubuntu-x64
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       with:
         persist-credentials: false
     - name: Setup Node
@@ -345,7 +345,7 @@ jobs:
     # Run this workflow for non-PR events (like pushes to `main` or `release-*`) OR for internal PRs (PRs not from forks)
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false && needs.detect-changes.outputs.changed == 'true'
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       with:
         persist-credentials: false
     - name: Get GitHub App token
