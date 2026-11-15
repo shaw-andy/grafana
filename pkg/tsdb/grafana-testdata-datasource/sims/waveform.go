@@ -51,8 +51,10 @@ func (s *waveformSim) GetValues(t time.Time) map[string]any {
 	x := 0.0
 	if s.cfg.Period > 0 {
 		periodMS := s.cfg.Period * 1000
-		ms := t.UnixMilli() % int64(periodMS)
-		x = ((float64(ms) / periodMS) * 2 * math.Pi) // 0 >> 2Pi
+		if divisor := int64(periodMS); divisor > 0 {
+			ms := t.UnixMilli() % divisor
+			x = ((float64(ms) / periodMS) * 2 * math.Pi) // 0 >> 2Pi
+		}
 	}
 
 	v := s.calculator(x, &s.cfg)
