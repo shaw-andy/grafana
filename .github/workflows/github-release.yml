@@ -54,6 +54,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: grafana/grafana/.github/workflows/deploy-storybook.yml@main
+    uses: ./.github/workflows/deploy-storybook.yml
     with:
       version: ${{ inputs.version }}

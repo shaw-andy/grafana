@@ -93,9 +93,8 @@ jobs:
           repository: ${{ inputs.repository }}
           ref: ${{ inputs.release_branch }}
 
-      # The logic is inlined rather than run from the target repo's checkout: this
-      # workflow always executes @main, so inlining keeps the naming logic current for
-      # every target repo/branch instead of trusting whatever stale script copy the
+      # The logic is inlined rather than run from the target repo's checkout, so it comes
+      # from the caller's commit instead of whatever script copy the target repo's
       # release branch happens to carry.
       - name: Create security branch
         id: branch
