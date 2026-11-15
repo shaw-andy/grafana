@@ -70,6 +70,9 @@ func (s *Service) QueryData(ctx context.Context, req *backend.QueryDataRequest) 
 }
 
 func (s *Service) QueryChunkedData(ctx context.Context, req *backend.QueryChunkedDataRequest, w backend.ChunkedDataWriter) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return s.queryMux.QueryChunkedData(ctx, req, w)
 }
 

@@ -639,11 +639,12 @@ func (s *Service) handlePredictableCSVWaveScenario(ctx context.Context, req *bac
 			return nil, err
 		}
 
-		respD := resp.Responses[q.RefID]
-		frames, err := predictableCSVWave(q, model)
+		frames, err := predictableCSVWave(ctx, q, model)
 		if err != nil {
-			return nil, err
+			resp.Responses[q.RefID] = predictableErrorResponse(err)
+			continue
 		}
+		respD := resp.Responses[q.RefID]
 		respD.Frames = append(respD.Frames, frames...)
 		resp.Responses[q.RefID] = respD
 	}
@@ -660,16 +661,24 @@ func (s *Service) handlePredictablePulseScenario(ctx context.Context, req *backe
 			continue
 		}
 
-		respD := resp.Responses[q.RefID]
-		frame, err := predictablePulse(q, model)
+		frame, err := predictablePulse(ctx, q, model)
 		if err != nil {
+			resp.Responses[q.RefID] = predictableErrorResponse(err)
 			continue
 		}
+		respD := resp.Responses[q.RefID]
 		respD.Frames = append(respD.Frames, frame)
 		resp.Responses[q.RefID] = respD
 	}
 
 	return resp, nil
+}
+
+func predictableErrorResponse(err error) backend.DataResponse {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return backend.DataResponse{Error: err, ErrorSource: backend.ErrorSourceDownstream}
+	}
+	return backend.ErrDataResponseWithSource(backend.StatusBadRequest, backend.ErrorSourceDownstream, err.Error())
 }
 
 func (s *Service) handleServerError500Scenario(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
@@ -1328,13 +1337,20 @@ func randomWalkTable(query backend.DataQuery, model kinds.TestDataQuery) *data.F
 	return frame
 }
 
-func predictableCSVWave(query backend.DataQuery, model kinds.TestDataQuery) ([]*data.Frame, error) {
+func predictableCSVWave(ctx context.Context, query backend.DataQuery, model kinds.TestDataQuery) ([]*data.Frame, error) {
 	queries := model.CsvWave
 
 	frames := make([]*data.Frame, 0, len(queries))
 
 	for _, subQ := range queries {
-		var err error
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		timeStep, err := predictableTimeStepMillis(subQ.TimeStep)
+		if err != nil {
+			return nil, err
+		}
 
 		rawValues := strings.TrimRight(strings.TrimSpace(subQ.ValuesCSV), ",") // Strip Trailing Comma
 		rawValesCSV := strings.Split(rawValues, ",")
@@ -1360,18 +1376,11 @@ func predictableCSVWave(query backend.DataQuery, model kinds.TestDataQuery) ([]*
 			values[i] = val
 		}
 
-		subQ.TimeStep *= 1000 // Seconds to Milliseconds
 		valuesLen := int64(len(values))
-		getValue := func(mod int64) (*float64, error) {
-			var i int64
-			for i = 0; i < valuesLen; i++ {
-				if mod == i*subQ.TimeStep {
-					return values[i], nil
-				}
-			}
-			return nil, fmt.Errorf("did not get value at point in waveform - should not be here")
+		getValue := func(step int64) (*float64, error) {
+			return values[step], nil
 		}
-		fields, err := predictableSeries(query.TimeRange, subQ.TimeStep, valuesLen, getValue)
+		fields, err := predictableSeries(ctx, query.TimeRange, timeStep, valuesLen, getValue)
 		if err != nil {
 			return nil, err
 		}
@@ -1388,19 +1397,46 @@ func predictableCSVWave(query backend.DataQuery, model kinds.TestDataQuery) ([]*
 	return frames, nil
 }
 
-func predictableSeries(timeRange backend.TimeRange, timeStep, length int64, getValue func(mod int64) (*float64, error)) (data.Fields, error) {
+// predictableTimeStepMillis converts a wave time step in seconds to milliseconds.
+func predictableTimeStepMillis(seconds int64) (int64, error) {
+	if seconds <= 0 {
+		return 0, fmt.Errorf("timeStep must be a positive number of seconds, got %d", seconds)
+	}
+	if seconds > math.MaxInt64/1000 {
+		return 0, fmt.Errorf("timeStep %d is too large", seconds)
+	}
+	return seconds * 1000, nil
+}
+
+// predictableSeries calls getValue with the index (0 <= step < length) of each
+// point within the repeating wave cycle.
+func predictableSeries(ctx context.Context, timeRange backend.TimeRange, timeStep, length int64, getValue func(step int64) (*float64, error)) (data.Fields, error) {
+	if timeStep <= 0 {
+		return nil, fmt.Errorf("time step must be positive, got %d", timeStep)
+	}
+	if length <= 0 {
+		return nil, fmt.Errorf("wave cycle must contain at least one step, got %d", length)
+	}
+
 	from := timeRange.From.UnixNano() / int64(time.Millisecond)
 	to := timeRange.To.UnixNano() / int64(time.Millisecond)
 
 	timeCursor := from - (from % timeStep) // Truncate Start
-	wavePeriod := timeStep * length
-	maxPoints := 10000 // Don't return too many points
+	maxPoints := 10000                     // Don't return too many points
 
 	timeVec := make([]time.Time, 0)
 	floatVec := make([]*float64, 0)
 
 	for i := 0; i < maxPoints && timeCursor < to; i++ {
-		val, err := getValue(timeCursor % wavePeriod)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		step := (timeCursor / timeStep) % length
+		if step < 0 {
+			step += length
+		}
+		val, err := getValue(step)
 		if err != nil {
 			return nil, err
 		}
@@ -1409,6 +1445,9 @@ func predictableSeries(timeRange backend.TimeRange, timeStep, length int64, getV
 		timeVec = append(timeVec, t)
 		floatVec = append(floatVec, val)
 
+		if timeCursor > math.MaxInt64-timeStep {
+			break
+		}
 		timeCursor += timeStep
 	}
 
@@ -1418,20 +1457,33 @@ func predictableSeries(timeRange backend.TimeRange, timeStep, length int64, getV
 	}, nil
 }
 
-func predictablePulse(query backend.DataQuery, model kinds.TestDataQuery) (*data.Frame, error) {
+func predictablePulse(ctx context.Context, query backend.DataQuery, model kinds.TestDataQuery) (*data.Frame, error) {
 	// Process Input
-	var timeStep int64
 	var onCount int64
 	var offCount int64
 	var onValue *float64
 	var offValue *float64
 
 	options := model.PulseWave
+	if options == nil {
+		return nil, errors.New("pulseWave options are required")
+	}
 
-	var err error
-	timeStep = options.TimeStep
+	timeStep, err := predictableTimeStepMillis(options.TimeStep)
+	if err != nil {
+		return nil, err
+	}
 	onCount = options.OnCount
 	offCount = options.OffCount
+	if onCount < 0 || offCount < 0 {
+		return nil, fmt.Errorf("onCount and offCount must not be negative, got %d and %d", onCount, offCount)
+	}
+	if onCount > math.MaxInt64-offCount {
+		return nil, fmt.Errorf("onCount %d plus offCount %d is too large", onCount, offCount)
+	}
+	if onCount+offCount == 0 {
+		return nil, errors.New("onCount plus offCount must be greater than zero")
+	}
 
 	onValue, err = fromStringOrNumber(options.OnValue)
 	if err != nil {
@@ -1442,17 +1494,13 @@ func predictablePulse(query backend.DataQuery, model kinds.TestDataQuery) (*data
 		return nil, fmt.Errorf("failed to parse offValue value '%v' into float: %v", options.OffValue, err)
 	}
 
-	timeStep *= 1000                             // Seconds to Milliseconds
-	onFor := func(mod int64) (*float64, error) { // How many items in the cycle should get the on value
-		var i int64
-		for i = 0; i < onCount; i++ {
-			if mod == i*timeStep {
-				return onValue, nil
-			}
+	onFor := func(step int64) (*float64, error) { // The first onCount steps of each cycle get the on value
+		if step < onCount {
+			return onValue, nil
 		}
 		return offValue, nil
 	}
-	fields, err := predictableSeries(query.TimeRange, timeStep, onCount+offCount, onFor)
+	fields, err := predictableSeries(ctx, query.TimeRange, timeStep, onCount+offCount, onFor)
 	if err != nil {
 		return nil, err
 	}
