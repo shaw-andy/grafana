@@ -48,9 +48,16 @@ type RateLimiter interface {
 
 var _ RateLimiter = (*ipRateLimiterImpl)(nil)
 
+// newIPRateLimiter never returns nil: the webhook endpoint accepts anonymous
+// deliveries and reads up to webhookMaxBodySize to verify their signature, so a
+// non-positive rate or burst falls back to the defaults instead of disabling
+// the limit.
 func newIPRateLimiter(rps rate.Limit, burst int, trustedIPHeader string) *ipRateLimiterImpl {
 	if rps <= 0 {
-		return nil
+		rps, burst = defaultWebhookRPS, defaultWebhookBurst
+	}
+	if burst <= 0 {
+		burst = defaultWebhookBurst
 	}
 	return &ipRateLimiterImpl{
 		rps:             rps,
@@ -63,9 +70,12 @@ func newIPRateLimiter(rps rate.Limit, burst int, trustedIPHeader string) *ipRate
 	}
 }
 
+// NewConfiguredRateLimiter builds the webhook limiter from configuration. A
+// non-positive rps uses defaultWebhookRPS and defaultWebhookBurst; the limit
+// cannot be turned off.
 func NewConfiguredRateLimiter(rps int, trustedIPHeader string) RateLimiter {
 	if rps <= 0 {
-		return nil
+		return newIPRateLimiter(defaultWebhookRPS, defaultWebhookBurst, trustedIPHeader)
 	}
 	return newIPRateLimiter(rate.Limit(rps), rps*2, trustedIPHeader)
 }

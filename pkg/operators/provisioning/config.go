@@ -640,7 +640,7 @@ func (c *ControllerConfig) RepositoryExtras() ([]repository.Extra, error) {
 					provisioningAppURL,
 					c.Registry(),
 					webhooks.NewConfiguredRateLimiter(
-						provisioningSec.Key("webhook_rate_limit_rps").MustInt(0),
+						provisioningSec.Key("webhook_rate_limit_rps").MustInt(10),
 						provisioningSec.Key("webhook_trusted_ip_header").MustString(""),
 					),
 				)

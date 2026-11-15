@@ -61,6 +61,9 @@ func NewWebhookConnector(
 	registry prometheus.Registerer,
 	rateLimiter RateLimiter,
 ) *webhookConnector {
+	if rateLimiter == nil {
+		rateLimiter = NewConfiguredRateLimiter(0, "")
+	}
 	return &webhookConnector{
 		webhooksEnabled: webhooksEnabled,
 		core:            core,
@@ -226,12 +229,9 @@ func (s *webhookConnector) Connect(ctx context.Context, name string, opts runtim
 		responder.Object(rsp.Code, rsp)
 	})
 
-	var h http.Handler = handler
-	if s.rateLimiter != nil {
-		h = s.rateLimiter.Wrap(namespace, h)
-	}
-
-	return h, nil
+	// The limiter must wrap the handler so a throttled delivery is rejected
+	// before its body is read and hashed.
+	return s.rateLimiter.Wrap(namespace, handler), nil
 }
 
 type webhookResult struct {

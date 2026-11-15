@@ -2977,7 +2977,7 @@ Set this only when the endpoint sits behind a proxy that overwrites the header w
 
 #### `webhook_rate_limit_rps`
 
-Sustained requests per second that the webhook endpoint allows per client before it returns `429 Too Many Requests`. The instantaneous burst allowance is twice this value. Default is `0`, which disables rate limiting.
+Sustained requests per second that the webhook endpoint allows per client before it returns `429 Too Many Requests`. The instantaneous burst allowance is twice this value. Default is `10`. You can't disable rate limiting: `0` or a negative value uses the default of `10` with a burst of `20`.
 
 <hr>
 

@@ -295,9 +295,16 @@ func TestNewConfiguredRateLimiter(t *testing.T) {
 		}
 	})
 
-	t.Run("non-positive rps disables the limiter", func(t *testing.T) {
-		assert.Nil(t, NewConfiguredRateLimiter(0, "X-Real-Ip"), "rps=%d should disable the limiter", 0)
-		assert.Nil(t, NewConfiguredRateLimiter(-1, "X-Real-Ip"), "rps=%d should disable the limiter", -1)
+	t.Run("non-positive rps falls back to the default limit", func(t *testing.T) {
+		for _, rps := range []int{0, -1} {
+			l := NewConfiguredRateLimiter(rps, "X-Real-Ip")
+			if assert.NotNil(t, l, "rps=%d must not disable the limiter", rps) {
+				impl := l.(*ipRateLimiterImpl)
+				assert.Equal(t, rate.Limit(defaultWebhookRPS), impl.rps)
+				assert.Equal(t, defaultWebhookBurst, impl.burst)
+				assert.Equal(t, "X-Real-Ip", impl.trustedIPHeader)
+			}
+		}
 	})
 
 	t.Run("positive rps without a trusted header enables the limiter keyed on the peer", func(t *testing.T) {
@@ -314,5 +321,9 @@ func TestNewWebhookConnectorStoresRateLimiter(t *testing.T) {
 	assert.Same(t, limiter, c.rateLimiter, "the passed-in limiter should be used as-is")
 
 	c = NewWebhookConnector(false, nil, nil, prometheus.NewRegistry(), nil)
-	assert.Nil(t, c.rateLimiter, "a nil limiter disables rate limiting")
+	if assert.NotNil(t, c.rateLimiter, "a nil limiter must not disable rate limiting") {
+		impl := c.rateLimiter.(*ipRateLimiterImpl)
+		assert.Equal(t, rate.Limit(defaultWebhookRPS), impl.rps)
+		assert.Equal(t, defaultWebhookBurst, impl.burst)
+	}
 }
