@@ -3,6 +3,7 @@ import { t } from '@grafana/i18n';
 import { locationService } from '@grafana/runtime';
 import { createErrorNotification } from 'app/core/copy/appNotification';
 import { notifyApp } from 'app/core/reducers/appNotification';
+import { getGnetProxyUrl } from 'app/core/utils/gnetProxy';
 import { interpolateV1Dashboard } from 'app/features/manage-dashboards/import/utils/inputs';
 import { type DataSourceInput, type DashboardJson } from 'app/features/manage-dashboards/types';
 import { dispatch } from 'app/types/store';
@@ -31,8 +32,8 @@ export const INCLUDE_SCREENSHOTS = true;
  * Extract thumbnail URL from dashboard screenshots
  */
 export function getThumbnailUrl(dashboard: GnetDashboard): string {
-  const thumbnail = dashboard.screenshots?.[0]?.links.find((l: Link) => l.rel === 'image')?.href ?? '';
-  return thumbnail ? `/api/gnet${thumbnail}` : '';
+  const thumbnail = dashboard.screenshots?.[0]?.links.find((l: Link) => l.rel === 'image')?.href;
+  return getGnetProxyUrl(thumbnail);
 }
 
 /**

@@ -17,6 +17,7 @@ import { markAsUrlRewrite } from 'app/core/navigation/urlRewrite';
 import { StateManagerBase } from 'app/core/services/StateManagerBase';
 import { contextSrv } from 'app/core/services/context_srv';
 import { getMessageFromError, getMessageIdFromError, getStatusFromError } from 'app/core/utils/errors';
+import { getGnetDashboardUrl } from 'app/core/utils/gnetProxy';
 import { startMeasure, stopMeasure } from 'app/core/utils/metrics';
 import {
   AnnoKeyEmbedded,
@@ -755,7 +756,7 @@ export class DashboardScenePageStateManager extends DashboardScenePageStateManag
     pluginId: string | null
   ): Promise<DashboardDTO> {
     // Fetch the community dashboard from grafana.com
-    const gnetDashboard = await getBackendSrv().get(`/api/gnet/dashboards/${gnetId}`);
+    const gnetDashboard = await getBackendSrv().get(getGnetDashboardUrl(gnetId));
 
     // The dashboard JSON is in the 'json' property
     const dashboardJson = gnetDashboard.json;
@@ -791,7 +792,7 @@ export class DashboardScenePageStateManager extends DashboardScenePageStateManag
     }
 
     // Fetch the community dashboard from grafana.com
-    const gnetDashboard = await getBackendSrv().get(`/api/gnet/dashboards/${gnetId}`);
+    const gnetDashboard = await getBackendSrv().get(getGnetDashboardUrl(gnetId));
 
     // The dashboard JSON is in the 'json' property
     const dashboardJson = gnetDashboard.json;

@@ -7,6 +7,7 @@ import { Trans } from '@grafana/i18n';
 import { config } from '@grafana/runtime';
 import { type PageInfoItem } from '@grafana/runtime/internal';
 import { type CellProps, type Column, InteractiveTable, Stack, useStyles2, Carousel } from '@grafana/ui';
+import { getGnetProxyUrl } from 'app/core/utils/gnetProxy';
 
 import { AssistantOverview } from '../components/AssistantOverview/AssistantOverview';
 import { ASSISTANT_PLUGIN_ID } from '../components/AssistantOverview/constants';
@@ -50,7 +51,10 @@ export function PluginDetailsBody({ plugin, queryParams, pageId, info, showDetai
   );
 
   const buildScreenshotPath = (plugin: CatalogPlugin, path: string) => {
-    return `${config.appSubUrl}/api/gnet/plugins/${plugin.id}/versions/${plugin.latestVersion}/images/${path}`;
+    const proxyUrl = getGnetProxyUrl(
+      `plugins/${encodeURIComponent(plugin.id)}/versions/${encodeURIComponent(plugin.latestVersion ?? '')}/images/${path}`
+    );
+    return proxyUrl ? `${config.appSubUrl}${proxyUrl}` : '';
   };
 
   if (pageId === PluginTabIds.OVERVIEW) {
@@ -90,10 +94,12 @@ export function PluginDetailsBody({ plugin, queryParams, pageId, info, showDetai
   }
 
   if (pageId === PluginTabIds.SCREENSHOTS && plugin?.details?.screenshots?.length) {
-    const carouselImages: Screenshots[] = plugin?.details?.screenshots.map((screenshot) => ({
-      path: buildScreenshotPath(plugin, screenshot.path),
-      name: screenshot.name,
-    }));
+    const carouselImages: Screenshots[] = plugin.details.screenshots
+      .map((screenshot) => ({
+        path: buildScreenshotPath(plugin, screenshot.path),
+        name: screenshot.name,
+      }))
+      .filter((screenshot) => screenshot.path !== '');
     return <Carousel images={carouselImages} />;
   }
 
