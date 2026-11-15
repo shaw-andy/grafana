@@ -220,10 +220,30 @@ jobs:
         uses: grafana/shared-workflows/actions/create-github-app-token@46f48da11e78ebdba7a8747ae456b11062fac83e # create-github-app-token/v0.3.1
         with:
           github_app: grafana-ci-bot
+      # The token must only be used inline here, before any code from the checkout
+      # (local actions, make, scripts) runs, and must not outlive this step.
+      - name: Clone Grafana Enterprise
+        env:
+          GH_TOKEN: ${{ steps.get-github-app-token.outputs.token }}
+        run: |
+          trap '[ "${revoked:-}" = 1 ] || rm -rf ../grafana-enterprise' EXIT
+          for i in 1 2 3 4 5; do
+            git clone "https://x-access-token:${GH_TOKEN}@github.com/grafana/grafana-enterprise.git" ../grafana-enterprise && break
+            [ "$i" -lt 5 ] || { echo "Clone failed after 5 attempts"; exit 1; }
+            sleep "$i"
+          done
+          git -C ../grafana-enterprise remote set-url origin https://github.com/grafana/grafana-enterprise.git
+          for i in 1 2 3; do
+            if printf 'Authorization: Bearer %s\n' "$GH_TOKEN" | curl -fsS -o /dev/null -X DELETE -H @- https://api.github.com/installation/token; then
+              revoked=1
+              exit 0
+            fi
+            sleep "$i"
+          done
+          echo "Failed to revoke the GitHub App token"
+          exit 1
       - name: Setup Enterprise
         uses: ./.github/actions/setup-enterprise
-        with:
-          token: ${{ steps.get-github-app-token.outputs.token }}
       # Enterprise must be cloned before setup-go so that enterprise
       # modules are visible when the Go cache key is computed.
       - name: Setup Go
@@ -263,17 +283,37 @@ jobs:
         uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - name: Start MySQL via docker compose
-        run: make devenv sources=mysql_tests mysql_version=8.0.43
       - name: Get GitHub App token
         id: get-github-app-token
         uses: grafana/shared-workflows/actions/create-github-app-token@46f48da11e78ebdba7a8747ae456b11062fac83e # create-github-app-token/v0.3.1
         with:
           github_app: grafana-ci-bot
+      # The token must only be used inline here, before any code from the checkout
+      # (local actions, make, scripts) runs, and must not outlive this step.
+      - name: Clone Grafana Enterprise
+        env:
+          GH_TOKEN: ${{ steps.get-github-app-token.outputs.token }}
+        run: |
+          trap '[ "${revoked:-}" = 1 ] || rm -rf ../grafana-enterprise' EXIT
+          for i in 1 2 3 4 5; do
+            git clone "https://x-access-token:${GH_TOKEN}@github.com/grafana/grafana-enterprise.git" ../grafana-enterprise && break
+            [ "$i" -lt 5 ] || { echo "Clone failed after 5 attempts"; exit 1; }
+            sleep "$i"
+          done
+          git -C ../grafana-enterprise remote set-url origin https://github.com/grafana/grafana-enterprise.git
+          for i in 1 2 3; do
+            if printf 'Authorization: Bearer %s\n' "$GH_TOKEN" | curl -fsS -o /dev/null -X DELETE -H @- https://api.github.com/installation/token; then
+              revoked=1
+              exit 0
+            fi
+            sleep "$i"
+          done
+          echo "Failed to revoke the GitHub App token"
+          exit 1
+      - name: Start MySQL via docker compose
+        run: make devenv sources=mysql_tests mysql_version=8.0.43
       - name: Setup Enterprise
         uses: ./.github/actions/setup-enterprise
-        with:
-          token: ${{ steps.get-github-app-token.outputs.token }}
       # Enterprise must be cloned before setup-go so that enterprise
       # modules are visible when the Go cache key is computed.
       - name: Setup Go
@@ -327,18 +367,38 @@ jobs:
         uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - name: Start Postgres via docker compose
-        run: |
-          make devenv sources=postgres_tests
       - name: Get GitHub App token
         id: get-github-app-token
         uses: grafana/shared-workflows/actions/create-github-app-token@46f48da11e78ebdba7a8747ae456b11062fac83e # create-github-app-token/v0.3.1
         with:
           github_app: grafana-ci-bot
+      # The token must only be used inline here, before any code from the checkout
+      # (local actions, make, scripts) runs, and must not outlive this step.
+      - name: Clone Grafana Enterprise
+        env:
+          GH_TOKEN: ${{ steps.get-github-app-token.outputs.token }}
+        run: |
+          trap '[ "${revoked:-}" = 1 ] || rm -rf ../grafana-enterprise' EXIT
+          for i in 1 2 3 4 5; do
+            git clone "https://x-access-token:${GH_TOKEN}@github.com/grafana/grafana-enterprise.git" ../grafana-enterprise && break
+            [ "$i" -lt 5 ] || { echo "Clone failed after 5 attempts"; exit 1; }
+            sleep "$i"
+          done
+          git -C ../grafana-enterprise remote set-url origin https://github.com/grafana/grafana-enterprise.git
+          for i in 1 2 3; do
+            if printf 'Authorization: Bearer %s\n' "$GH_TOKEN" | curl -fsS -o /dev/null -X DELETE -H @- https://api.github.com/installation/token; then
+              revoked=1
+              exit 0
+            fi
+            sleep "$i"
+          done
+          echo "Failed to revoke the GitHub App token"
+          exit 1
+      - name: Start Postgres via docker compose
+        run: |
+          make devenv sources=postgres_tests
       - name: Setup Enterprise
         uses: ./.github/actions/setup-enterprise
-        with:
-          token: ${{ steps.get-github-app-token.outputs.token }}
       # Enterprise must be cloned before setup-go so that enterprise
       # modules are visible when the Go cache key is computed.
       - name: Setup Go

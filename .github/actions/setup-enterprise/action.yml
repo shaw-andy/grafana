@@ -1,37 +1,22 @@
 name: 'Setup Grafana Enterprise'
-description: 'Clones and sets up Grafana Enterprise repository for testing'
-
-inputs:
-  token:
-    description: 'GitHub token for cloning grafana-enterprise (when provided, skips vault and token generation)'
-    required: true
+description: >-
+  Checks out the matching branch of an existing ../grafana-enterprise clone and overlays it onto this repository.
+  Callers must clone grafana-enterprise in an inline workflow step first; this action runs from the
+  pull request checkout, so it must never receive a token.
 
 runs:
   using: "composite"
   steps:
     - name: Setup Enterprise
       shell: bash
-      env:
-        GH_TOKEN: ${{ inputs.token }}
       run: |
         RETRIES="5"
         grafana_root="$PWD"
 
-        for i in $(seq 1 $RETRIES); do
-          echo "Attempt $i to clone..."
-
-          if git clone https://x-access-token:${GH_TOKEN}@github.com/grafana/grafana-enterprise.git ../grafana-enterprise; then
-            echo "Clone succeeded on attempt $i"
-            break
-          fi
-
-          if [ $i -eq $RETRIES ]; then
-            echo "Clone failed after $RETRIES attempts, failing pipeline."
-            exit 1
-          fi
-
-          sleep "$i"
-        done
+        if [ ! -d ../grafana-enterprise/.git ]; then
+          echo "../grafana-enterprise is missing; clone it before running this action."
+          exit 1
+        fi
 
         cd ../grafana-enterprise
 
