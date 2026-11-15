@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -333,49 +334,61 @@ func (a *dashboardSqlAccess) MigrateFolders(ctx context.Context, orgId int64, op
 // MigrateLibraryPanels handles the library panel migration logic
 func (a *dashboardSqlAccess) MigrateLibraryPanels(ctx context.Context, orgId int64, opts migrations.MigrateOptions, stream resourcepb.BulkStore_BulkProcessClient) error {
 	opts.Progress(-1, "migrating library panels...")
-	panels, err := a.GetLibraryPanels(ctx, LibraryPanelQuery{
+	query := LibraryPanelQuery{
 		OrgID: orgId,
-		Limit: 1000000,
-	})
-	if err != nil {
-		return err
+		Limit: 1000,
 	}
-	for i, panel := range panels.Items {
-		meta, err := utils.MetaAccessor(&panel)
+	count := 0
+	for {
+		panels, err := a.GetLibraryPanels(ctx, query)
 		if err != nil {
 			return err
 		}
-		body, err := json.Marshal(panel)
-		if err != nil {
-			return err
-		}
-
-		req := &resourcepb.BulkRequest{
-			Key: &resourcepb.ResourceKey{
-				Namespace: opts.Namespace,
-				Group:     dashboardV1.GROUP,
-				Resource:  dashboardV1.LIBRARY_PANEL_RESOURCE,
-				Name:      panel.Name,
-			},
-			Value:  body,
-			Folder: meta.GetFolder(),
-			Action: resourcepb.BulkRequest_ADDED,
-		}
-		if panel.Generation > 1 {
-			req.Action = resourcepb.BulkRequest_MODIFIED
-		}
-
-		opts.Progress(i, fmt.Sprintf("[v:%d] %s (%d)", i, meta.GetName(), len(req.Value)))
-
-		err = stream.Send(req)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				err = nil
+		for _, panel := range panels.Items {
+			meta, err := utils.MetaAccessor(&panel)
+			if err != nil {
+				return err
 			}
+			body, err := json.Marshal(panel)
+			if err != nil {
+				return err
+			}
+
+			req := &resourcepb.BulkRequest{
+				Key: &resourcepb.ResourceKey{
+					Namespace: opts.Namespace,
+					Group:     dashboardV1.GROUP,
+					Resource:  dashboardV1.LIBRARY_PANEL_RESOURCE,
+					Name:      panel.Name,
+				},
+				Value:  body,
+				Folder: meta.GetFolder(),
+				Action: resourcepb.BulkRequest_ADDED,
+			}
+			if panel.Generation > 1 {
+				req.Action = resourcepb.BulkRequest_MODIFIED
+			}
+
+			opts.Progress(count, fmt.Sprintf("[v:%d] %s (%d)", count, meta.GetName(), len(req.Value)))
+			count++
+
+			err = stream.Send(req)
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					err = nil
+				}
+				return err
+			}
+		}
+		if panels.Continue == "" {
+			break
+		}
+		query.LastID, err = strconv.ParseInt(panels.Continue, 10, 64)
+		if err != nil {
 			return err
 		}
 	}
-	opts.Progress(-2, fmt.Sprintf("finished panels... (%d)", len(panels.Items)))
+	opts.Progress(-2, fmt.Sprintf("finished panels... (%d)", count))
 	return nil
 }
 
@@ -635,12 +648,17 @@ func (a *dashboardSqlAccess) GetLibraryPanels(ctx context.Context, query Library
 	ctx, span := tracer.Start(ctx, "legacy.dashboardSqlAccess.GetLibraryPanels")
 	defer span.End()
 
-	limit := int(query.Limit)
-	// Access control is evaluated after reading SQL rows, so stream all remaining
-	// candidates until we find one more readable item than the requested page.
-	query.Limit = 0
 	if query.OrgID == 0 {
 		return nil, fmt.Errorf("expected non zero orgID")
+	}
+	if query.Limit < 1 {
+		return nil, fmt.Errorf("expected positive limit")
+	}
+	limit := query.Limit
+	// Access control is evaluated per row after the read, so a page may hold fewer
+	// readable items than requested. One extra row tells us whether to continue.
+	if query.Limit < math.MaxInt64 {
+		query.Limit++
 	}
 
 	user, err := identity.GetRequester(ctx)
@@ -669,10 +687,10 @@ func (a *dashboardSqlAccess) GetLibraryPanels(ctx context.Context, query Library
 		return nil, err
 	}
 
-	res, err := collectLibraryPanelPage(rows, limit, func(item dashboardV0.LibraryPanel) (bool, error) {
+	res, err := collectLibraryPanelPage(rows, limit, func(uid string) (bool, error) {
 		return a.accessControl.Evaluate(ctx, user, accesscontrol.EvalPermission(
 			libraryelements.ActionLibraryPanelsRead,
-			libraryelements.ScopeLibraryPanelsProvider.GetResourceScopeUID(item.Name),
+			libraryelements.ScopeLibraryPanelsProvider.GetResourceScopeUID(uid),
 		))
 	})
 	if err != nil {
@@ -687,14 +705,22 @@ func (a *dashboardSqlAccess) GetLibraryPanels(ctx context.Context, query Library
 	return res, nil
 }
 
+// collectLibraryPanelPage reads at most limit rows into the page and sets the
+// continue token to the last read row when another row follows. Rows the caller
+// cannot read are skipped, so the page may hold fewer than limit items.
 func collectLibraryPanelPage(
 	rows *sql.Rows,
-	limit int,
-	evaluate func(dashboardV0.LibraryPanel) (bool, error),
+	limit int64,
+	evaluate func(uid string) (bool, error),
 ) (*dashboardV0.LibraryPanelList, error) {
 	res := &dashboardV0.LibraryPanelList{}
-	var lastReturnedID int64
+	var read int64
+	var lastReadID int64
 	for rows.Next() {
+		if read >= limit {
+			res.Continue = strconv.FormatInt(lastReadID, 10)
+			break
+		}
 		p := panel{}
 		err := rows.Scan(&p.ID, &p.UID, &p.FolderUID,
 			&p.Created, &p.CreatedBy,
@@ -704,23 +730,19 @@ func collectLibraryPanelPage(
 		if err != nil {
 			return res, err
 		}
+		read++
+		lastReadID = p.ID
+
+		ok, err := evaluate(p.UID)
+		if err != nil || !ok {
+			continue
+		}
 
 		item, err := parseLibraryPanelRow(p)
 		if err != nil {
 			return res, err
 		}
-
-		ok, err := evaluate(item)
-		if err != nil || !ok {
-			continue
-		}
-
-		if limit > 0 && len(res.Items) >= limit {
-			res.Continue = strconv.FormatInt(lastReturnedID, 10)
-			break
-		}
 		res.Items = append(res.Items, item)
-		lastReturnedID = p.ID
 	}
 	return res, rows.Err()
 }

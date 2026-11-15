@@ -34,6 +34,9 @@ var (
 	_ rest.Storage              = (*LibraryPanelStore)(nil)
 )
 
+// Larger requests are served as several pages through the continue token.
+const maxLibraryPanelListLimit = 100
+
 type LibraryPanelStore struct {
 	Access       legacy.DashboardAccessor
 	ResourceInfo utils.ResourceInfo
@@ -183,6 +186,9 @@ func (s *LibraryPanelStore) List(ctx context.Context, options *internalversion.L
 	}
 	if query.Limit < 1 {
 		query.Limit = 25
+	}
+	if query.Limit > maxLibraryPanelListLimit {
+		query.Limit = maxLibraryPanelListLimit
 	}
 	return s.Access.GetLibraryPanels(ctx, query)
 }
