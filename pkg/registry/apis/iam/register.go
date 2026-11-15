@@ -59,6 +59,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/apiserver/versionpolicy"
 	"github.com/grafana/grafana/pkg/services/authz/zanzana"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
+	"github.com/grafana/grafana/pkg/services/licensing"
 	"github.com/grafana/grafana/pkg/services/login"
 	"github.com/grafana/grafana/pkg/services/org"
 	settingsvc "github.com/grafana/grafana/pkg/services/setting"
@@ -103,13 +104,13 @@ func RegisterAPIService(
 	mappers *resourcepermission.MappersRegistry,
 	authInfoStore login.Store,
 	remoteCache remotecache.CacheStorage,
+	license licensing.Licensing,
 ) (*IdentityAccessManagementAPIBuilder, error) {
 	dbProvider := legacysql.NewDatabaseProvider(sql)
 	store := legacy.NewLegacySQLStores(dbProvider)
 	legacyAccessClient := newLegacyAccessClient(ac, store)
 	authorizer := newIAMAuthorizer(
 		accessClient,
-		legacyAccessClient,
 		roleApiInstaller,
 		globalRoleApiInstaller,
 		teamLBACApiInstaller,
@@ -192,6 +193,7 @@ func RegisterAPIService(
 			SingleOrganization: cfg.RBAC.SingleOrganization,
 		},
 		display: display.NewDisplayHandler(
+			newDisplayAccessPolicy(ac, license, cfg),
 			display.NewLegacyDisplayProvider(store),   // Do legacy first
 			display.NewSearchDisplayProvider(unified), // then use search index
 		),
@@ -250,6 +252,7 @@ func NewAPIService(
 		externalGroupReconciler: legacy.NoopExternalGroupReconciler{},
 		teamBindingLegacyStore:  teambinding.NewLegacyBindingStore(store, tracingService),
 		display: display.NewDisplayHandler(
+			nil,
 			display.NewLegacyDisplayProvider(store),
 			// TODO: include the search client here
 		),

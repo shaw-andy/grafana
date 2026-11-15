@@ -82,7 +82,7 @@ func TestAppendDisplayRowsDecodesBothResultFormats(t *testing.T) {
 		list := &iam.DisplayList{}
 		foundUIDs := map[string]struct{}{}
 		foundIDs := map[int64]struct{}{}
-		require.NoError(t, appendDisplayRows(list, response, authlib.TypeUser, foundUIDs, foundIDs))
+		require.NoError(t, appendDisplayRows(list, response, authlib.TypeUser, allowAll, foundUIDs, foundIDs))
 		return list, foundUIDs, foundIDs
 	}
 
@@ -93,4 +93,51 @@ func TestAppendDisplayRowsDecodesBothResultFormats(t *testing.T) {
 	require.Equal(t, tableIDs, typedIDs)
 	require.Equal(t, "login", typedList.Items[0].DisplayName)
 	require.Equal(t, int64(42), typedList.Items[0].InternalID)
+}
+
+func TestAppendDisplayRowsAppliesFilter(t *testing.T) {
+	response := &resourcepb.ResourceSearchResponse{
+		ResultFormat: resourcepb.ResourceSearchRequest_FIELD_VALUES,
+		Fields: []*resourcepb.ResourceSearchField{
+			{Name: resource.SEARCH_FIELD_TITLE, Type: resourcepb.ResourceSearchField_STRING},
+			{Name: builders.USER_LOGIN, Type: resourcepb.ResourceSearchField_STRING},
+			{Name: resource.SEARCH_FIELD_LEGACY_ID, Type: resourcepb.ResourceSearchField_INT64},
+		},
+		Rows: []*resourcepb.ResourceSearchRow{
+			{
+				Key: &resourcepb.ResourceKey{Name: "user-1"},
+				Values: []*resourcepb.ResourceSearchValue{
+					{FieldIndex: 0, StringValues: []string{"Allowed"}},
+					{FieldIndex: 1, StringValues: []string{"allowed"}},
+					{FieldIndex: 2, Int64Values: []int64{1}},
+				},
+			},
+			{
+				Key: &resourcepb.ResourceKey{Name: "user-2"},
+				Values: []*resourcepb.ResourceSearchValue{
+					{FieldIndex: 0, StringValues: []string{"Denied"}},
+					{FieldIndex: 1, StringValues: []string{"denied"}},
+					{FieldIndex: 2, Int64Values: []int64{2}},
+				},
+			},
+		},
+	}
+
+	var seen []Member
+	list := &iam.DisplayList{}
+	foundUIDs := map[string]struct{}{}
+	foundIDs := map[int64]struct{}{}
+	require.NoError(t, appendDisplayRows(list, response, authlib.TypeUser, func(m Member) bool {
+		seen = append(seen, m)
+		return m.Login == "allowed"
+	}, foundUIDs, foundIDs))
+
+	require.Equal(t, []Member{
+		{Type: authlib.TypeUser, UID: "user-1", ID: 1, Login: "allowed"},
+		{Type: authlib.TypeUser, UID: "user-2", ID: 2, Login: "denied"},
+	}, seen)
+	require.Len(t, list.Items, 1)
+	require.Equal(t, "user-1", list.Items[0].Identity.Name)
+	require.Equal(t, map[string]struct{}{"user-1": {}}, foundUIDs)
+	require.Equal(t, map[int64]struct{}{1: {}}, foundIDs)
 }

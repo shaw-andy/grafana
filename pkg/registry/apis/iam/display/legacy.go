@@ -26,7 +26,7 @@ func NewLegacyDisplayProvider(store LegacyIdentityStore) *LegacyDisplayProvider 
 // This will always have an empty app url
 var fakeCfgForGravatar = &setting.Cfg{}
 
-func (r *LegacyDisplayProvider) GetDisplayList(ctx context.Context, ns authlib.NamespaceInfo, key []string) (*iam.DisplayList, error) {
+func (r *LegacyDisplayProvider) GetDisplayList(ctx context.Context, ns authlib.NamespaceInfo, key []string, allow MemberFilter) (*iam.DisplayList, error) {
 	keys := parseKeys(key)
 
 	users, err := r.store.ListDisplay(ctx, ns, legacy.ListDisplayQuery{
@@ -44,16 +44,20 @@ func (r *LegacyDisplayProvider) GetDisplayList(ctx context.Context, ns authlib.N
 		Items:       make([]iam.Display, 0, len(users.Items)+len(keys.disp)+1),
 	}
 	for _, user := range users.Items {
+		identityType := authlib.TypeUser
+		if user.IsServiceAccount {
+			identityType = authlib.TypeServiceAccount
+		}
+		if allow == nil || !allow(Member{Type: identityType, UID: user.UID, ID: user.ID, Login: user.Login}) {
+			continue
+		}
 		disp := iam.Display{
 			Identity: iam.IdentityRef{
-				Type: authlib.TypeUser,
+				Type: identityType,
 				Name: user.UID,
 			},
 			DisplayName: user.NameOrFallback(),
 			InternalID:  user.ID, // nolint:staticcheck
-		}
-		if user.IsServiceAccount {
-			disp.Identity.Type = authlib.TypeServiceAccount
 		}
 		disp.AvatarURL = dtos.GetGravatarUrlWithDefault(fakeCfgForGravatar, user.Email, disp.DisplayName)
 		rsp.Items = append(rsp.Items, disp)

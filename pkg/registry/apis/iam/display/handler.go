@@ -19,18 +19,61 @@ import (
 	"github.com/grafana/grafana/pkg/util/errhttp"
 )
 
+// Member is a resolved identity before it is returned to the caller.
+type Member struct {
+	Type  authlib.IdentityType
+	UID   string
+	ID    int64
+	Login string
+}
+
+// MemberFilter reports whether a resolved identity may be returned to the caller.
+type MemberFilter func(Member) bool
+
+// AccessPolicy builds the MemberFilter for the caller in ctx when resolving
+// identities of the organization in ns.
+type AccessPolicy func(ctx context.Context, ns authlib.NamespaceInfo) (MemberFilter, error)
+
 type Resolver interface {
-	GetDisplayList(ctx context.Context, ns authlib.NamespaceInfo, keys []string) (*iam.DisplayList, error)
+	// GetDisplayList resolves keys in ns. Identities rejected by allow must not
+	// appear in the result.
+	GetDisplayList(ctx context.Context, ns authlib.NamespaceInfo, keys []string, allow MemberFilter) (*iam.DisplayList, error)
 }
 
 type DisplayHandler struct {
+	access    AccessPolicy
 	resolvers []Resolver
 }
 
 // NewDisplayHandler creates a new DisplayHandler with the given resolvers.
-// We have multiple resolvers to allow the transition from SQL to search
-func NewDisplayHandler(resolvers ...Resolver) *DisplayHandler {
-	return &DisplayHandler{resolvers}
+// We have multiple resolvers to allow the transition from SQL to search.
+// With a nil access policy, callers can only resolve their own identity.
+func NewDisplayHandler(access AccessPolicy, resolvers ...Resolver) *DisplayHandler {
+	return &DisplayHandler{access: access, resolvers: resolvers}
+}
+
+func selfFilter(user authlib.AuthInfo) MemberFilter {
+	selfType := user.GetIdentityType()
+	selfUID := user.GetIdentifier()
+	return func(m Member) bool {
+		return selfUID != "" && m.UID == selfUID && m.Type == selfType
+	}
+}
+
+// memberFilter returns the filter for the caller in ns. The caller can always
+// resolve itself; any other identity requires the access policy.
+func (r *DisplayHandler) memberFilter(ctx context.Context, user authlib.AuthInfo, ns authlib.NamespaceInfo) (MemberFilter, error) {
+	isSelf := selfFilter(user)
+	if r.access == nil {
+		return isSelf, nil
+	}
+	allowed, err := r.access(ctx, ns)
+	if err != nil {
+		return nil, err
+	}
+	return func(m Member) bool {
+		return isSelf(m) || (allowed != nil && allowed(m))
+	}, nil
 }
 
 func (r *DisplayHandler) GetAPIRoutes(defs map[string]common.OpenAPIDefinition) *builder.APIRoutes {
@@ -123,6 +166,12 @@ func (r *DisplayHandler) handleDisplay(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
+	allow, err := r.memberFilter(ctx, user, ns)
+	if err != nil {
+		errhttp.Write(ctx, fmt.Errorf("error checking display access %w", err), w)
+		return
+	}
+
 	rsp := &iam.DisplayList{Keys: keys}
 	seen := make(map[string]struct{}, len(keys))
 	pending := keys
@@ -130,7 +179,7 @@ func (r *DisplayHandler) handleDisplay(w http.ResponseWriter, req *http.Request)
 		if len(pending) == 0 {
 			break
 		}
-		partial, err := p.GetDisplayList(ctx, ns, pending)
+		partial, err := p.GetDisplayList(ctx, ns, pending, allow)
 		if err != nil {
 			errhttp.Write(ctx, fmt.Errorf("error calling GetDisplayList %w", err), w) // 500
 			return

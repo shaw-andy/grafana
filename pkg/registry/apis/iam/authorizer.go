@@ -24,7 +24,6 @@ type iamAuthorizer struct {
 
 func newIAMAuthorizer(
 	accessClient authlib.AccessClient,
-	legacyAccessClient authlib.AccessClient,
 	roleApiInstaller RoleApiInstaller,
 	globalRoleApiInstaller GlobalRoleApiInstaller,
 	teamLbacApiInstaller TeamLBACApiInstaller,
@@ -51,8 +50,7 @@ func newIAMAuthorizer(
 	})
 
 	// Identity specific resources
-	legacyAuthorizer := gfauthorizer.NewResourceAuthorizer(legacyAccessClient)
-	resourceAuthorizer["display"] = legacyAuthorizer
+	resourceAuthorizer["display"] = displayAuthorizer
 
 	// Temporary security fix: Block Watch on ResourcePermissions until proper filtering is implemented
 	blockWatchAuthorizer := authorizer.AuthorizerFunc(func(
@@ -102,6 +100,19 @@ func newIAMAuthorizer(
 
 	return &iamAuthorizer{resourceAuthorizer: resourceAuthorizer}
 }
+
+// displayAuthorizer only lets authenticated identities reach the display route
+// (a nameless list). The handler then filters every resolved identity through
+// the display access policy for the organization it resolves.
+var displayAuthorizer = authorizer.AuthorizerFunc(func(ctx context.Context, attr authorizer.Attributes) (authorizer.Decision, string, error) {
+	if !attr.IsResourceRequest() || attr.GetVerb() != utils.VerbList || attr.GetName() != "" || attr.GetSubresource() != "" {
+		return authorizer.DecisionDeny, "display only supports list", nil
+	}
+	if _, ok := authlib.AuthInfoFrom(ctx); !ok {
+		return authorizer.DecisionDeny, "cannot resolve display without an identity", nil
+	}
+	return authorizer.DecisionAllow, "", nil
+})
 
 func newTeamLBACRuleAuthorizer(base authorizer.Authorizer) authorizer.Authorizer {
 	return authorizer.AuthorizerFunc(func(ctx context.Context, attr authorizer.Attributes) (authorizer.Decision, string, error) {
@@ -318,13 +329,6 @@ func newServiceAccountAuthorizer(accessClient authlib.AccessClient) authorizer.A
 func newLegacyAccessClient(ac accesscontrol.AccessControl, store legacy.LegacyIdentityStore) authlib.AccessClient {
 	client := accesscontrol.NewLegacyAccessClient(
 		ac,
-		accesscontrol.ResourceAuthorizerOptions{
-			Resource: "display",
-			Unchecked: map[string]bool{
-				utils.VerbGet:  true,
-				utils.VerbList: true,
-			},
-		},
 		accesscontrol.ResourceAuthorizerOptions{
 			Resource: "searchTeams",
 			Unchecked: map[string]bool{
