@@ -15,19 +15,49 @@ XSSWL.iframe = ['src', 'width', 'height'];
 // Event handlers (onclick etc.) are stripped by the xss library automatically.
 XSSWL.button = ['class', 'style', 'type', 'disabled'];
 
+// Attributes in XSSWL that the browser fetches as soon as the element renders.
+const RESOURCE_ATTRIBUTES: Record<string, string[]> = {
+  audio: ['src'],
+  iframe: ['src'],
+  img: ['src'],
+  video: ['src', 'poster'],
+};
+
 const sanitizeTextPanelWhitelist = new xss.FilterXSS({
   // Add sandbox attribute to iframe tags if an attribute is allowed.
   onTagAttr(tag, name, value, isWhiteAttr) {
     if (tag === 'iframe') {
-      return isWhiteAttr
-        ? ` ${name}="${xss.escapeAttrValue(sanitizeUrl(value))}" sandbox credentialless referrerpolicy=no-referrer`
-        : '';
+      if (!isWhiteAttr) {
+        return '';
+      }
+      const safeValue = xss.escapeAttrValue(sanitizeUrl(value));
+      if (isResourceAttribute(tag, name) && loadsFromCurrentHost(parseAttributeValue(safeValue))) {
+        return '';
+      }
+      return ` ${name}="${safeValue}" sandbox credentialless referrerpolicy=no-referrer`;
+    }
+    if (
+      isWhiteAttr &&
+      isResourceAttribute(tag, name) &&
+      loadsFromCurrentHost(parseAttributeValue(xss.safeAttrValue(tag, name, value, xss.cssFilter)))
+    ) {
+      return '';
     }
     return;
+  },
+  safeAttrValue(tag, name, value, cssFilter) {
+    const safeValue = xss.safeAttrValue(tag, name, value, cssFilter);
+    if (name === 'style' && cssLoadsFromCurrentHost(parseAttributeValue(safeValue))) {
+      return '';
+    }
+    return safeValue;
   },
   onTag(tag, html, options) {
     if (html === '<input disabled="" type="checkbox">' || html === '<input checked="" disabled="" type="checkbox">') {
       return html;
+    }
+    if (tag === 'img' && !options.isClosing && imageTagLoadsFromCurrentHost(html)) {
+      return '';
     }
     return;
   },
@@ -118,6 +148,91 @@ export function sanitizeUrl(url: string): string {
   return braintreeSanitizeUrl(url);
 }
 
+/**
+ * Returns the URL unchanged if an image element can load it without sending this Grafana server's session
+ * cookie: an http(s) URL on another host, or a data URL. Returns an empty string for anything else, including
+ * relative and protocol-relative paths and absolute URLs that resolve to this host.
+ */
+export function sanitizeImageUrl(url: string): string {
+  const resolved = resolveUrl(url);
+  if (!resolved) {
+    return '';
+  }
+  if (resolved.protocol === 'data:') {
+    return url;
+  }
+  if ((resolved.protocol === 'http:' || resolved.protocol === 'https:') && !isCurrentHost(resolved.hostname)) {
+    return url;
+  }
+  return '';
+}
+
+function resolveUrl(url: string): URL | undefined {
+  try {
+    return new URL(url, document.baseURI);
+  } catch {
+    return undefined;
+  }
+}
+
+// Session cookies are scoped to the host, not the port or scheme, so any URL on this host carries them.
+function isCurrentHost(hostname: string): boolean {
+  const withoutTrailingDot = (host: string) => host.replace(/\.$/, '');
+  return withoutTrailingDot(hostname) === withoutTrailingDot(window.location.hostname);
+}
+
+function loadsFromCurrentHost(url: string): boolean {
+  const resolved = resolveUrl(url);
+  return resolved !== undefined && isCurrentHost(resolved.hostname);
+}
+
+function imageTagLoadsFromCurrentHost(html: string): boolean {
+  const attributesStart = html.search(/\s/);
+  if (attributesStart === -1) {
+    return false;
+  }
+  let loads = false;
+  xss.parseAttr(html.slice(attributesStart + 1, -1), (name, value) => {
+    if (
+      name === 'src' &&
+      loadsFromCurrentHost(parseAttributeValue(xss.safeAttrValue('img', name, value, xss.cssFilter)))
+    ) {
+      loads = true;
+    }
+    return '';
+  });
+  return loads;
+}
+
+function isResourceAttribute(tag: string, name: string): boolean {
+  return RESOURCE_ATTRIBUTES[tag]?.includes(name) ?? false;
+}
+
+// Returns the value the browser will see for an escaped attribute, after it decodes character references.
+function parseAttributeValue(escapedValue: string): string {
+  const template = document.createElement('template');
+  template.innerHTML = `<i title="${escapedValue}"></i>`;
+  return template.content.firstElementChild?.getAttribute('title') ?? '';
+}
+
+const CSS_URL = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s]*))\s*\)/gi;
+const CSS_URL_START = /url\s*\(/gi;
+const CSS_IMAGE_FUNCTION = /(?:image-set|image|cross-fade|element|src)\s*\(/i;
+
+function cssLoadsFromCurrentHost(css: string): boolean {
+  // Escapes can spell out url( or any part of the address, and the other image functions take bare strings.
+  if (css.includes('\\') || CSS_IMAGE_FUNCTION.test(css)) {
+    return true;
+  }
+  const urls = Array.from(css.matchAll(CSS_URL));
+  if (urls.length !== (css.match(CSS_URL_START) ?? []).length) {
+    return true;
+  }
+  return urls.some(([, doubleQuoted, singleQuoted, bare]) =>
+    loadsFromCurrentHost(doubleQuoted ?? singleQuoted ?? bare)
+  );
+}
+
 // Returns true if the string contains ANSI color codes.
 function hasAnsiCodes(input: string): boolean {
   return /\u001b\[\d{1,2}m/.test(input);
@@ -185,6 +300,7 @@ export const textUtil = {
   sanitize,
   sanitizeTextPanelContent,
   sanitizeUrl,
+  sanitizeImageUrl,
   sanitizeSVGContent,
   sanitizeTrustedTypes,
   sanitizeTrustedTypesRSS,

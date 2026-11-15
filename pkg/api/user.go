@@ -520,6 +520,11 @@ func (hs *HTTPServer) UserSetUsingOrg(c *contextmodel.ReqContext) response.Respo
 
 // GET /profile/switch-org/:id
 func (hs *HTTPServer) ChangeActiveOrgAndRedirectToHome(c *contextmodel.ReqContext) {
+	if !isDocumentNavigation(c.Req) {
+		c.JsonApiErr(http.StatusForbidden, "Switching organization requires a page navigation", nil)
+		return
+	}
+
 	orgID, err := strconv.ParseInt(web.Params(c.Req)[":id"], 10, 64)
 	if err != nil {
 		c.JsonApiErr(http.StatusBadRequest, "id is invalid", err)
