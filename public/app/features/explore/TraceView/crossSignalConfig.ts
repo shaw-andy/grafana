@@ -39,11 +39,33 @@ export function getSpanTags(span: TraceSpan) {
   ];
 }
 
+/**
+ * Escapes a span-provided value for use inside a double-quoted string literal. Backslash escapes for `\` and `"`
+ * are understood by every query language trace links are built for.
+ */
+export function escapeQuotedValue(value: unknown): string {
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/**
+ * Escapes a span-provided value for use inside a double-quoted PromQL, LogQL or Pyroscope label matcher string.
+ * Links built from these queries are interpolated with Grafana template variables, so `$` and `[[` are written as
+ * hex escapes to keep variable syntax in the value from being expanded into the query.
+ */
+export function escapePromQLStringValue(value: unknown): string {
+  return escapeQuotedValue(value)
+    .replace(/\n/g, '\\n')
+    .replace(/\$/g, '\\x24')
+    .replace(/\[(?=\[)/g, '\\x5b');
+}
+
 type TagFormatOptions = {
   labelValueSign?: string;
   joinBy?: string;
   /** Transform the label name written into the query (e.g. dots → underscores for Loki). */
   normalizeLabelName?: (name: string) => string;
+  /** Escape the tag value written between the double quotes. */
+  escapeValue?: (value: unknown) => string;
 };
 
 /**
@@ -63,7 +85,7 @@ export function getFormattedTags(
 export function getFilteredTags(
   allTags: TraceToLogsTag[],
   tagsToUse: TraceToLogsTag[],
-  { labelValueSign = '=', normalizeLabelName }: Omit<TagFormatOptions, 'joinBy'> = {}
+  { labelValueSign = '=', normalizeLabelName, escapeValue = escapeQuotedValue }: Omit<TagFormatOptions, 'joinBy'> = {}
 ) {
   return allTags
     .map((tag) => {
@@ -73,7 +95,7 @@ export function getFilteredTags(
         if (normalizeLabelName) {
           labelName = normalizeLabelName(labelName);
         }
-        return `${labelName}${labelValueSign}"${tag.value}"`;
+        return `${labelName}${labelValueSign}"${escapeValue(tag.value)}"`;
       }
       return undefined;
     })

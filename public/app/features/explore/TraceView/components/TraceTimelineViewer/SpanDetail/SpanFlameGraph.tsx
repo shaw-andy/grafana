@@ -27,7 +27,7 @@ import {
   scopedVarsFromTags,
 } from '../../../createSpanLink';
 import { scopedVarsFromTrace } from '../../../createTraceLink';
-import { getFormattedTags, getSpanTags } from '../../../crossSignalConfig';
+import { escapePromQLStringValue, getFormattedTags, getSpanTags } from '../../../crossSignalConfig';
 import { type TraceSpan } from '../../types/trace';
 
 import { type TraceFlameGraphs } from '.';
@@ -113,7 +113,7 @@ export default function SpanFlameGraph(props: SpanFlameGraphProps) {
           traceToProfilesOptions.tags && traceToProfilesOptions.tags.length > 0
             ? traceToProfilesOptions.tags
             : defaultProfilingKeys;
-        labelSelector = `{${getFormattedTags(getSpanTags(span), tags)}}`;
+        labelSelector = `{${getFormattedTags(getSpanTags(span), tags, { escapeValue: escapePromQLStringValue })}}`;
       }
 
       const request = {

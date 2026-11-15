@@ -10,6 +10,7 @@ import { FlagKeys, getFeatureFlagClient } from '@grafana/runtime/internal';
 import { type LokiQuery } from 'app/features/loki-helpers/types';
 
 import {
+  escapePromQLStringValue,
   getDefaultLogsTags,
   getFilteredTags,
   getFormattedTags,
@@ -117,8 +118,9 @@ export function getTraceToLogsQuery(
   switch (logsDataSourceSettings?.type) {
     case 'loki':
       // Trace/OTel attributes use dots; Loki label names require underscores.
-      tags = getFormattedTags(allTags, tagsToUse, { normalizeLabelName: toLokiLabelName });
-      const tagMatchers = getFilteredTags(allTags, tagsToUse, { normalizeLabelName: toLokiLabelName });
+      const lokiTagOptions = { normalizeLabelName: toLokiLabelName, escapeValue: escapePromQLStringValue };
+      tags = getFormattedTags(allTags, tagsToUse, lokiTagOptions);
+      const tagMatchers = getFilteredTags(allTags, tagsToUse, lokiTagOptions);
       query = getQueryForLoki(
         traceID,
         spanID,
@@ -214,7 +216,9 @@ function getQueryForLoki(
 
   const tagSelector = `{${tags.join(', ')}}`;
   const jobSelector =
-    serviceNames.length > 0 ? `{job=~"(.*/)?(${serviceNames.map(escapeRegExp).join('|')})"}` : undefined;
+    serviceNames.length > 0
+      ? `{job=~"(.*/)?(${serviceNames.map((name) => escapePromQLStringValue(escapeRegExp(name))).join('|')})"}`
+      : undefined;
 
   const queries: LokiQuery[] = [];
 
