@@ -673,19 +673,33 @@ func (s *Service) handlePredictablePulseScenario(ctx context.Context, req *backe
 }
 
 func (s *Service) handleServerError500Scenario(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
+	resp := backend.NewQueryDataResponse()
+
 	for _, q := range req.Queries {
 		model, err := GetJSONModel(q.JSON)
 		if err != nil {
 			continue
 		}
 
-		stringInput := model.StringInput
-		if stringInput == "" {
-			panic("Test Data Panic!")
+		if strings.TrimSpace(model.StringInput) == "" {
+			resp.Responses[q.RefID] = backend.ErrDataResponseWithSource(backend.StatusInternal, backend.ErrorSourcePlugin, "Scenario returned an error because the String Input was empty")
+			continue
 		}
+
+		// Each query is handled on its own so one query's error does not drop the others.
+		qResp, err := s.handleCSVMetricValuesScenario(ctx, &backend.QueryDataRequest{
+			PluginContext: req.PluginContext,
+			Headers:       req.Headers,
+			Queries:       []backend.DataQuery{q},
+		})
+		if err != nil {
+			resp.Responses[q.RefID] = backend.ErrDataResponseWithSource(backend.StatusBadRequest, backend.ErrorSourceDownstream, err.Error())
+			continue
+		}
+		resp.Responses[q.RefID] = qResp.Responses[q.RefID]
 	}
 
-	return s.handleCSVMetricValuesScenario(ctx, req)
+	return resp, nil
 }
 
 func (s *Service) handleClientSideScenario(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
