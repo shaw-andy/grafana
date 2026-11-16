@@ -1,7 +1,7 @@
 import { isString } from 'lodash';
 import { lastValueFrom } from 'rxjs';
 
-import { type DataSourceSettings, type DataSourceJsonData } from '@grafana/data';
+import { type DataSourceSettings, type DataSourceJsonData, PathValidationError } from '@grafana/data';
 import { config } from '@grafana/runtime';
 import { FlagKeys, getFeatureFlagClient } from '@grafana/runtime/internal';
 import { getDataSourceInstanceList } from '@grafana/runtime/unstable';
@@ -9,6 +9,15 @@ import { getBackendSrv } from 'app/core/services/backend_srv';
 import { accessControlQueryParam } from 'app/core/utils/accessControl';
 
 import { DeprecatedInternalId } from '../apiserver/types';
+
+// The uid can come from the page URL. encodeURIComponent keeps "/" from splitting it into
+// several segments, but leaves "." and ".." as is, which the browser resolves as dot segments.
+const dataSourceUidPathSegment = (uid: string): string => {
+  if (uid === '.' || uid === '..') {
+    throw new PathValidationError();
+  }
+  return encodeURIComponent(uid);
+};
 
 export const getDataSources = async (): Promise<DataSourceSettings[]> => {
   return await getBackendSrv().get('/api/datasources');
@@ -201,12 +210,14 @@ const getDataSourceFromK8sAPI = async (k8sName: string, namespace: string) => {
   if (k8sGroup === '') {
     throw Error(`Could not find data source group with uid: "${k8sName}"`);
   }
+  const k8sNameSegment = dataSourceUidPathSegment(k8sName);
 
   const response = await lastValueFrom(
     getBackendSrv().fetch<DataSourceSettingsK8s>({
       method: 'GET',
-      url: `/apis/${k8sGroup}/${k8sVersion}/namespaces/${namespace}/datasources/${k8sName}`,
+      url: `/apis/${k8sGroup}/${k8sVersion}/namespaces/${namespace}/datasources/${k8sNameSegment}`,
       showErrorAlert: false,
+      validatePath: true,
     })
   );
   if (!response.ok) {
@@ -217,8 +228,9 @@ const getDataSourceFromK8sAPI = async (k8sName: string, namespace: string) => {
   const accessResponse = await lastValueFrom(
     getBackendSrv().fetch<DatasourceAccessK8s>({
       method: 'GET',
-      url: `/apis/${k8sGroup}/${k8sVersion}/namespaces/${namespace}/datasources/${k8sName}/access`,
+      url: `/apis/${k8sGroup}/${k8sVersion}/namespaces/${namespace}/datasources/${k8sNameSegment}/access`,
       showErrorAlert: false,
+      validatePath: true,
     })
   );
   if (!accessResponse.ok) {
@@ -238,9 +250,10 @@ export const getDataSourceByUid = async (uid: string) => {
   const response = await lastValueFrom(
     getBackendSrv().fetch<DataSourceSettings>({
       method: 'GET',
-      url: `/api/datasources/uid/${uid}`,
+      url: `/api/datasources/uid/${dataSourceUidPathSegment(uid)}`,
       params: accessControlQueryParam(),
       showErrorAlert: false,
+      validatePath: true,
     })
   );
 
@@ -315,7 +328,7 @@ export const updateDataSource = async (dataSource: DataSourceSettings) => {
     }
     return convertK8sDatasourceSettingsToLegacyDatasourceSettings(
       await getBackendSrv().put<DataSourceSettingsK8s>(
-        `/apis/${dsK8sSettings.apiVersion}/namespaces/${config.namespace}/datasources/${dsK8sSettings.metadata.name}`,
+        `/apis/${dsK8sSettings.apiVersion}/namespaces/${config.namespace}/datasources/${dataSourceUidPathSegment(dataSource.uid)}`,
         dsK8sSettings,
         {
           showErrorAlert: false,
@@ -329,16 +342,21 @@ export const updateDataSource = async (dataSource: DataSourceSettings) => {
   // we're setting showErrorAlert and showSuccessAlert to false to suppress the popover notifications. Request result will now be
   // handled by the data source config page
   return getBackendSrv()
-    .put<{ datasource: DataSourceSettings }>(`/api/datasources/uid/${dataSource.uid}`, dataSource, {
-      showErrorAlert: false,
-      showSuccessAlert: false,
-      validatePath: true,
-    })
+    .put<{ datasource: DataSourceSettings }>(
+      `/api/datasources/uid/${dataSourceUidPathSegment(dataSource.uid)}`,
+      dataSource,
+      {
+        showErrorAlert: false,
+        showSuccessAlert: false,
+        validatePath: true,
+      }
+    )
     .then((response) => response.datasource);
 };
 
 export const deleteDataSource = async (uid: string) => {
-  let deleteUrl = `/api/datasources/uid/${uid}`;
+  const uidSegment = dataSourceUidPathSegment(uid);
+  let deleteUrl = `/api/datasources/uid/${uidSegment}`;
   if (getFeatureFlagClient().getBooleanValue(FlagKeys.DatasourcesConfigUiUseNewDatasourceCRUDAPIs, false)) {
     let namespace = config.namespace;
     let k8sGroup = await getDataSourceK8sGroup(uid);
@@ -346,7 +364,7 @@ export const deleteDataSource = async (uid: string) => {
       throw Error(`Could not find data source group with uid: "${uid}"`);
     }
     let apiVersion = `${k8sGroup}/v0alpha1`;
-    deleteUrl = `/apis/${apiVersion}/namespaces/${namespace}/datasources/${uid}`;
+    deleteUrl = `/apis/${apiVersion}/namespaces/${namespace}/datasources/${uidSegment}`;
   }
-  return getBackendSrv().delete(deleteUrl);
+  return getBackendSrv().delete(deleteUrl, undefined, { validatePath: true });
 };
