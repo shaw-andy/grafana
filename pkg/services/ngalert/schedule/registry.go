@@ -99,7 +99,7 @@ func (e *Evaluation) Fingerprint() fingerprint {
 }
 
 type alertRulesRegistry struct {
-	ruleSequenceFingerprints map[string]uint64
+	ruleSequenceFingerprints map[models.RuleSequenceKey]uint64
 	rules                    map[models.AlertRuleKey]*models.AlertRule
 	folderTitles             map[models.FolderKey]string
 	mu                       sync.RWMutex
@@ -138,9 +138,9 @@ func (r *alertRulesRegistry) set(rules []*models.AlertRule, folders map[models.F
 	r.rules = rulesMap
 	// return the map as is without copying because it is not mutated
 	r.folderTitles = folders
-	fingerprints := make(map[string]uint64, len(ruleSequences))
+	fingerprints := make(map[models.RuleSequenceKey]uint64, len(ruleSequences))
 	for _, seq := range ruleSequences {
-		fingerprints[seq.UID] = ruleSequenceFingerprint(seq)
+		fingerprints[seq.GetKey()] = ruleSequenceFingerprint(seq)
 	}
 	r.ruleSequenceFingerprints = fingerprints
 	return d
@@ -179,7 +179,7 @@ func (r *alertRulesRegistry) ruleSequencesNeedUpdate(ruleSequences []models.Sche
 		return true
 	}
 	for _, seq := range ruleSequences {
-		if fp, ok := r.ruleSequenceFingerprints[seq.UID]; !ok || fp != ruleSequenceFingerprint(seq) {
+		if fp, ok := r.ruleSequenceFingerprints[seq.GetKey()]; !ok || fp != ruleSequenceFingerprint(seq) {
 			return true
 		}
 	}

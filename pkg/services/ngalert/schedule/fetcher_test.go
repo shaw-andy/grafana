@@ -20,6 +20,7 @@ func sequenceGroupName(t *testing.T, sequenceUID string) string {
 
 func TestEnrichRulesWithSequenceMembership(t *testing.T) {
 	gen := models.RuleGen.With(
+		models.RuleGen.WithOrgID(1),
 		models.RuleGen.WithNamespaceUID("ns1"),
 		models.RuleGen.WithGroupName("original-group"),
 		models.RuleGen.WithIntervalSeconds(60),
@@ -33,6 +34,7 @@ func TestEnrichRulesWithSequenceMembership(t *testing.T) {
 
 		sequences := []models.SchedulableRuleSequence{
 			{
+				OrgID:             1,
 				UID:               "seq-abc",
 				IntervalSeconds:   30,
 				RecordingRuleRefs: []string{"rec-1", "rec-2"},
@@ -63,6 +65,7 @@ func TestEnrichRulesWithSequenceMembership(t *testing.T) {
 
 		sequences := []models.SchedulableRuleSequence{
 			{
+				OrgID:             1,
 				UID:               "seq-order",
 				IntervalSeconds:   10,
 				RecordingRuleRefs: []string{"rec-1"},
@@ -90,6 +93,7 @@ func TestEnrichRulesWithSequenceMembership(t *testing.T) {
 
 		sequences := []models.SchedulableRuleSequence{
 			{
+				OrgID:             1,
 				UID:               "seq-xyz",
 				IntervalSeconds:   15,
 				RecordingRuleRefs: []string{"seq-rule"},
@@ -112,6 +116,7 @@ func TestEnrichRulesWithSequenceMembership(t *testing.T) {
 
 		sequences := []models.SchedulableRuleSequence{
 			{
+				OrgID:             1,
 				UID:               "seq-ghost",
 				IntervalSeconds:   10,
 				RecordingRuleRefs: []string{"non-existent-uid"},
@@ -143,6 +148,7 @@ func TestEnrichRulesWithSequenceMembership(t *testing.T) {
 	t.Run("empty rules with sequences is a no-op", func(t *testing.T) {
 		sequences := []models.SchedulableRuleSequence{
 			{
+				OrgID:             1,
 				UID:               "seq-no-rules",
 				IntervalSeconds:   10,
 				RecordingRuleRefs: []string{"rec-1"},
@@ -160,12 +166,14 @@ func TestEnrichRulesWithSequenceMembership(t *testing.T) {
 
 		sequences := []models.SchedulableRuleSequence{
 			{
+				OrgID:             1,
 				UID:               "seq-A",
 				IntervalSeconds:   10,
 				RecordingRuleRefs: []string{"r1"},
 				AlertRuleRefs:     []string{"r2"},
 			},
 			{
+				OrgID:           1,
 				UID:             "seq-B",
 				IntervalSeconds: 20,
 				AlertRuleRefs:   []string{"r3"},
@@ -197,11 +205,13 @@ func TestEnrichRulesWithSequenceMembership(t *testing.T) {
 
 		sequences := []models.SchedulableRuleSequence{
 			{
+				OrgID:             1,
 				UID:               "seq-first",
 				IntervalSeconds:   10,
 				RecordingRuleRefs: []string{"shared"},
 			},
 			{
+				OrgID:           1,
 				UID:             "seq-second",
 				IntervalSeconds: 20,
 				AlertRuleRefs:   []string{"shared"},

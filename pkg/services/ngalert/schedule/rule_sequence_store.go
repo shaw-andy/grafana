@@ -10,12 +10,15 @@ import (
 )
 
 // ruleSequenceFingerprint returns a hash that covers every field that affects
-// scheduling behavior: UID, interval, and the ordered membership lists. Two
-// sequences that differ in any of these fields will produce different
+// scheduling behavior: org, UID, interval, and the ordered membership lists.
+// Two sequences that differ in any of these fields will produce different
 // fingerprints.
 func ruleSequenceFingerprint(s models.SchedulableRuleSequence) uint64 {
 	h := fnv.New64()
 	buf := make([]byte, 8)
+
+	binary.LittleEndian.PutUint64(buf, uint64(s.OrgID))
+	_, _ = h.Write(buf)
 
 	_, _ = h.Write([]byte(s.UID))
 	_, _ = h.Write([]byte{0xff})

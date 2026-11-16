@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	claims "github.com/grafana/authlib/types"
 	"github.com/grafana/grafana-app-sdk/resource"
 	alertingv0alpha1 "github.com/grafana/grafana/apps/alerting/rules/pkg/apis/alerting/v0alpha1"
 	"github.com/grafana/grafana/pkg/infra/log"
@@ -82,7 +83,7 @@ func (s *K8sRuleSequenceStore) GetRuleSequencesForScheduling(ctx context.Context
 	for _, seq := range list.Items {
 		sc, err := convertRuleSequence(seq)
 		if err != nil {
-			s.log.Warn("Skipping rule sequence with invalid spec", "uid", seq.Name, "error", err)
+			s.log.Warn("Skipping rule sequence with invalid spec", "namespace", seq.Namespace, "uid", seq.Name, "error", err)
 			continue
 		}
 		result = append(result, sc)
@@ -94,6 +95,14 @@ func (s *K8sRuleSequenceStore) GetRuleSequencesForScheduling(ctx context.Context
 // convertRuleSequence maps a k8s RuleSequence resource into the
 // models.SchedulableRuleSequence the scheduler expects.
 func convertRuleSequence(seq alertingv0alpha1.RuleSequence) (models.SchedulableRuleSequence, error) {
+	nsInfo, err := claims.ParseNamespace(seq.Namespace)
+	if err != nil {
+		return models.SchedulableRuleSequence{}, fmt.Errorf("invalid namespace %q: %w", seq.Namespace, err)
+	}
+	if nsInfo.OrgID < 1 {
+		return models.SchedulableRuleSequence{}, fmt.Errorf("namespace %q does not map to an organization", seq.Namespace)
+	}
+
 	interval, err := seq.Spec.Trigger.Interval.ToDuration()
 	if err != nil {
 		return models.SchedulableRuleSequence{}, fmt.Errorf("invalid interval: %w", err)
@@ -109,6 +118,7 @@ func convertRuleSequence(seq alertingv0alpha1.RuleSequence) (models.SchedulableR
 	}
 
 	return models.SchedulableRuleSequence{
+		OrgID:             nsInfo.OrgID,
 		UID:               seq.Name,
 		IntervalSeconds:   int64(interval.Seconds()),
 		RecordingRuleRefs: recRefs,

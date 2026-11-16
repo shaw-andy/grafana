@@ -14,6 +14,7 @@ import (
 type sequence readyToRunItem
 
 type groupKey struct {
+	orgID       int64
 	folderTitle string
 	folderUID   string
 	groupName   string
@@ -36,6 +37,7 @@ func (sch *schedule) buildSequences(items []readyToRunItem, runJobFn func(next r
 	var keys []groupKey
 	for _, item := range items {
 		g := groupKey{
+			orgID:       item.rule.OrgID,
 			folderTitle: item.folderTitle,
 			folderUID:   item.rule.NamespaceUID,
 			groupName:   item.rule.RuleGroup,
@@ -50,6 +52,7 @@ func (sch *schedule) buildSequences(items []readyToRunItem, runJobFn func(next r
 	// Step 2: Sort group keys to ensure consistent ordering
 	slices.SortFunc(keys, func(a, b groupKey) int {
 		return cmp.Or(
+			cmp.Compare(a.orgID, b.orgID),
 			cmp.Compare(a.folderTitle, b.folderTitle),
 			cmp.Compare(a.folderUID, b.folderUID),
 			cmp.Compare(a.groupName, b.groupName),

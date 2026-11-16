@@ -53,7 +53,7 @@ func TestSequence(t *testing.T) {
 	ruleStore := newFakeRulesStore()
 	reg := prometheus.NewPedanticRegistry()
 	sch := setupScheduler(t, ruleStore, nil, reg, nil, nil, nil)
-	gen := models.RuleGen.With(models.RuleGen.WithNamespaceUID("ns1"))
+	gen := models.RuleGen.With(models.RuleGen.WithOrgID(1), models.RuleGen.WithNamespaceUID("ns1"))
 
 	t.Run("should set callbacks in correct order", func(t *testing.T) {
 		nextByGroup := map[string][]string{}
