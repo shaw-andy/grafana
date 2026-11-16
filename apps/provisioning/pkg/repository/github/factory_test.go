@@ -52,3 +52,26 @@ func TestNewRepository_ServerURL(t *testing.T) {
 		})
 	}
 }
+
+func TestIsDotComURL(t *testing.T) {
+	for rawURL, expected := range map[string]bool{
+		"https://github.com/owner/repo":                 true,
+		"https://www.github.com/owner/repo":             true,
+		"https://GitHub.com/owner/repo":                 true,
+		"https://github.com:443/owner/repo":             true,
+		"http://github.com/owner/repo":                  false,
+		"https://github.com:8443/owner/repo":            false,
+		"https://github.com@git.example.com/owner/repo": false,
+		"https://user@github.com/owner/repo":            false,
+		"https://github.com.git.example.com/owner/repo": false,
+		"https://git.example.com/github.com/owner":      false,
+		"https://acme.ghe.com/owner/repo":               false,
+		"https://api.github.com/owner/repo":             false,
+		"github.com/owner/repo":                         false,
+		"":                                              false,
+	} {
+		t.Run(rawURL, func(t *testing.T) {
+			require.Equal(t, expected, IsDotComURL(rawURL))
+		})
+	}
+}

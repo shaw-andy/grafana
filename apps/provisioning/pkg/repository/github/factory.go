@@ -63,6 +63,21 @@ func WithCustomServerURL(serverURL string) ClientOption {
 	}
 }
 
+// IsDotComURL reports whether rawURL addresses github.com over HTTPS. Userinfo
+// and non-default ports are rejected: they change which host git and the API
+// client actually send credentials to while the URL still reads as github.com.
+func IsDotComURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "https" || u.User != nil || u.Opaque != "" {
+		return false
+	}
+	if port := u.Port(); port != "" && port != "443" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "github.com" || host == "www.github.com"
+}
+
 func (r *Factory) New(owner, repo string, ghToken common.RawSecureValue, opts ...ClientOption) (Client, error) {
 	var options ClientOptions
 	for _, opt := range opts {

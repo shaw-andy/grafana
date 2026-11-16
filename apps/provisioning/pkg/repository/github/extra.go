@@ -51,6 +51,12 @@ func (e *extra) Build(ctx context.Context, r *provisioning.Repository) (reposito
 	logger := logging.FromContext(ctx).With("url", r.Spec.GitHub.URL, "branch", r.Spec.GitHub.Branch, "path", r.Spec.GitHub.Path)
 	logger.Info("Instantiating Github repository")
 
+	// Connections serving this repository type issue github.com credentials,
+	// so a connection-issued token must never reach another host.
+	if r.HasConnection() && !IsDotComURL(r.Spec.GitHub.URL) {
+		return nil, fmt.Errorf("repositories that use a connection must have an https://github.com URL")
+	}
+
 	secure := e.decrypter(r)
 	token, err := secure.Token(ctx)
 	if err != nil {
