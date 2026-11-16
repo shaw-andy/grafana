@@ -12,12 +12,13 @@ export const dataSourcesApi = alertingApi.injectEndpoints({
       },
     }),
     getDataSourceSettingsForUID: build.query<DataSourceSettings, string>({
-      query: (uid) => ({ url: `api/datasources/uid/${uid}` }),
+      query: (uid) => ({ url: `api/datasources/uid/${encodeURIComponent(uid)}`, validatePath: true }),
       providesTags: (_result, _error, uid) => [{ type: 'DataSourceSettings', id: uid }],
     }),
     updateDataSourceSettingsForUID: build.mutation<unknown, { uid: string; settings: DataSourceSettings }>({
       query: ({ uid, settings }) => ({
-        url: `api/datasources/uid/${uid}`,
+        url: `api/datasources/uid/${encodeURIComponent(uid)}`,
+        validatePath: true,
         method: 'PUT',
         data: settings,
         showSuccessAlert: false,

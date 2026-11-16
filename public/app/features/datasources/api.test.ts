@@ -229,7 +229,7 @@ describe('Datasources / API', () => {
 
       const result = await deleteDataSource('abc123');
 
-      expect(deleteFn).toHaveBeenCalledWith('/api/datasources/uid/abc123');
+      expect(deleteFn).toHaveBeenCalledWith('/api/datasources/uid/abc123', undefined, { validatePath: true });
       expect(result).toEqual(deleteResult);
     });
 
@@ -241,7 +241,9 @@ describe('Datasources / API', () => {
       await deleteDataSource('abc123');
 
       expect(deleteFn).toHaveBeenCalledWith(
-        '/apis/marvin.datasource.grafana.app/v0alpha1/namespaces/default/datasources/abc123'
+        '/apis/marvin.datasource.grafana.app/v0alpha1/namespaces/default/datasources/abc123',
+        undefined,
+        { validatePath: true }
       );
     });
 
