@@ -66,7 +66,7 @@ const injectedRtkApi = api
       }),
       getPlaylist: build.query<GetPlaylistApiResponse, GetPlaylistApiArg>({
         query: (queryArg) => ({
-          url: `/playlists/${queryArg.name}`,
+          url: `/playlists/${encodeURIComponent(String(queryArg.name))}`,
           params: {
             pretty: queryArg.pretty,
           },
@@ -75,7 +75,7 @@ const injectedRtkApi = api
       }),
       replacePlaylist: build.mutation<ReplacePlaylistApiResponse, ReplacePlaylistApiArg>({
         query: (queryArg) => ({
-          url: `/playlists/${queryArg.name}`,
+          url: `/playlists/${encodeURIComponent(String(queryArg.name))}`,
           method: 'PUT',
           body: queryArg.playlist,
           params: {
@@ -89,7 +89,7 @@ const injectedRtkApi = api
       }),
       deletePlaylist: build.mutation<DeletePlaylistApiResponse, DeletePlaylistApiArg>({
         query: (queryArg) => ({
-          url: `/playlists/${queryArg.name}`,
+          url: `/playlists/${encodeURIComponent(String(queryArg.name))}`,
           method: 'DELETE',
           params: {
             pretty: queryArg.pretty,
@@ -104,7 +104,7 @@ const injectedRtkApi = api
       }),
       updatePlaylist: build.mutation<UpdatePlaylistApiResponse, UpdatePlaylistApiArg>({
         query: (queryArg) => ({
-          url: `/playlists/${queryArg.name}`,
+          url: `/playlists/${encodeURIComponent(String(queryArg.name))}`,
           method: 'PATCH',
           body: queryArg.patch,
           params: {
@@ -119,7 +119,7 @@ const injectedRtkApi = api
       }),
       getPlaylistStatus: build.query<GetPlaylistStatusApiResponse, GetPlaylistStatusApiArg>({
         query: (queryArg) => ({
-          url: `/playlists/${queryArg.name}/status`,
+          url: `/playlists/${encodeURIComponent(String(queryArg.name))}/status`,
           params: {
             pretty: queryArg.pretty,
           },
@@ -128,7 +128,7 @@ const injectedRtkApi = api
       }),
       replacePlaylistStatus: build.mutation<ReplacePlaylistStatusApiResponse, ReplacePlaylistStatusApiArg>({
         query: (queryArg) => ({
-          url: `/playlists/${queryArg.name}/status`,
+          url: `/playlists/${encodeURIComponent(String(queryArg.name))}/status`,
           method: 'PUT',
           body: queryArg.playlist,
           params: {
@@ -142,7 +142,7 @@ const injectedRtkApi = api
       }),
       updatePlaylistStatus: build.mutation<UpdatePlaylistStatusApiResponse, UpdatePlaylistStatusApiArg>({
         query: (queryArg) => ({
-          url: `/playlists/${queryArg.name}/status`,
+          url: `/playlists/${encodeURIComponent(String(queryArg.name))}/status`,
           method: 'PATCH',
           body: queryArg.patch,
           params: {

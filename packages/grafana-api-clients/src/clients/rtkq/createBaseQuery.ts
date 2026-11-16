@@ -44,6 +44,9 @@ export function createBaseQuery(options: CreateBaseQueryOptions): BaseQueryFn<Re
           showErrorAlert: requestOptions.showErrorAlert ?? false,
           data: requestOptions.body,
           headers,
+          // Path params are interpolated into the URL, and backend_srv makes it relative to the
+          // page base, so a `..` segment in a resource name would reach routes outside the API.
+          validatePath: true,
         })
       );
       return { data: responseData, meta };

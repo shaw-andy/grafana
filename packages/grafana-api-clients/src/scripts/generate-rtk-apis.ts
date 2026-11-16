@@ -125,7 +125,7 @@ const config: ConfigFile = {
     ...createAPIConfig('dashboard', 'v2'),
     ...createAPIConfig('folder', 'v1beta1'),
     ...createAPIConfig('iam', 'v0alpha1'),
-    ...createAPIConfig('playlist', 'v1'),
+    ...createAPIConfig('playlist', 'v1', undefined, { encodePathParams: true }),
     ...createAPIConfig('collections', 'v1alpha1'),
     ...createAPIConfig('preferences', 'v1alpha1'),
     ...createAPIConfig('provisioning', 'v0alpha1'),
