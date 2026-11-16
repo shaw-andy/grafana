@@ -21,7 +21,6 @@ func (s *Service) registerRoutes() *http.ServeMux {
 	mux.HandleFunc("/stream", s.testStreamHandler)
 	mux.Handle("/test", createJSONHandler(s.logger))
 	mux.Handle("/test/json", createJSONHandler(s.logger))
-	mux.HandleFunc("/boom", s.testPanicHandler)
 	mux.HandleFunc("/sims", s.sims.GetSimulationHandler)
 	mux.HandleFunc("/sim/", s.sims.GetSimulationHandler)
 	return mux
@@ -209,8 +208,4 @@ func createJSONHandler(logger log.Logger) http.Handler {
 			ctxLogger.Error("Failed to write response", "error", err)
 		}
 	})
-}
-
-func (s *Service) testPanicHandler(rw http.ResponseWriter, req *http.Request) {
-	panic("BOOM")
 }

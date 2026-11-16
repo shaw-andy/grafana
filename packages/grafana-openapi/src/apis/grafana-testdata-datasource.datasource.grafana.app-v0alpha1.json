@@ -939,53 +939,6 @@
         }
       ]
     },
-    "/datasources/{name}/resources/boom": {
-      "summary": "force a panic",
-      "get": {
-        "tags": ["Resources"],
-        "operationId": "get_resources_boom",
-        "responses": {
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": ["Resources"],
-        "operationId": "post_resources_boom",
-        "responses": {
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          }
-        }
-      },
-      "parameters": [
-        {
-          "name": "name",
-          "in": "path",
-          "description": "name of the DataSource",
-          "required": true,
-          "schema": {
-            "type": "string",
-            "uniqueItems": true
-          }
-        }
-      ]
-    },
     "/datasources/{name}/resources/scenarios": {
       "summary": "hello world",
       "get": {

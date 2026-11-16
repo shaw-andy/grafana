@@ -673,19 +673,23 @@ func (s *Service) handlePredictablePulseScenario(ctx context.Context, req *backe
 }
 
 func (s *Service) handleServerError500Scenario(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
+	resp, err := s.handleCSVMetricValuesScenario(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
 	for _, q := range req.Queries {
 		model, err := GetJSONModel(q.JSON)
 		if err != nil {
 			continue
 		}
 
-		stringInput := model.StringInput
-		if stringInput == "" {
-			panic("Test Data Panic!")
+		if model.StringInput == "" {
+			resp.Responses[q.RefID] = backend.ErrDataResponseWithSource(backend.StatusInternal, backend.ErrorSourcePlugin, "Scenario returned an error because the input was empty.")
 		}
 	}
 
-	return s.handleCSVMetricValuesScenario(ctx, req)
+	return resp, nil
 }
 
 func (s *Service) handleClientSideScenario(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {

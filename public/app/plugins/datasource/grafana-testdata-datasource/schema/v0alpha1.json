@@ -37,23 +37,6 @@
         "summary": "hello world",
         "get": { "responses": { "default": { "content": { "text/plain": { "schema": { "type": "string" } } } } } }
       },
-      "/resources/boom": {
-        "summary": "force a panic",
-        "get": {
-          "responses": {
-            "default": {
-              "content": { "application/json": { "schema": { "type": "object", "additionalProperties": true } } }
-            }
-          }
-        },
-        "post": {
-          "responses": {
-            "default": {
-              "content": { "application/json": { "schema": { "type": "object", "additionalProperties": true } } }
-            }
-          }
-        }
-      },
       "/resources/scenarios": {
         "summary": "hello world",
         "get": {

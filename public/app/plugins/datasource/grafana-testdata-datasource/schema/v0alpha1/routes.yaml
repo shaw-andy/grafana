@@ -8,24 +8,6 @@ paths:
               schema:
                 type: string
     summary: hello world
-  /resources/boom:
-    get:
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                additionalProperties: true
-                type: object
-    post:
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                additionalProperties: true
-                type: object
-    summary: force a panic
   /resources/scenarios:
     get:
       responses:
