@@ -70,13 +70,37 @@ func (hs *HTTPServer) GetAnnotations(c *contextmodel.ReqContext) response.Respon
 		return response.Error(http.StatusInternalServerError, "Failed to get annotations", err)
 	}
 
+	filterByAuthor := query.UserID != 0 || query.UserUID != ""
+	visible := make([]*annotations.ItemDTO, 0, len(items))
 	for _, item := range items {
-		if item.Email != "" {
-			item.AvatarURL = dtos.GetGravatarUrl(hs.Cfg, item.Email)
+		hidden := hs.setAnnotationAuthor(c, item)
+		// An author filter that matches a hidden user would otherwise confirm that user's id.
+		if hidden && filterByAuthor {
+			continue
 		}
+		visible = append(visible, item)
 	}
 
-	return response.JSON(http.StatusOK, items)
+	return response.JSON(http.StatusOK, visible)
+}
+
+// setAnnotationAuthor fills in the author's avatar URL, or clears the author's identity
+// when the author is in hidden_users and the caller may not see them. It reports whether
+// the author was hidden.
+func (hs *HTTPServer) setAnnotationAuthor(c *contextmodel.ReqContext, item *annotations.ItemDTO) bool {
+	if dtos.IsHiddenUser(item.Login, c.SignedInUser, hs.Cfg) {
+		item.UserID = 0
+		item.UserUID = ""
+		item.Login = ""
+		item.Email = ""
+		item.AvatarURL = ""
+		return true
+	}
+
+	if item.Email != "" {
+		item.AvatarURL = dtos.GetGravatarUrl(hs.Cfg, item.Email)
+	}
+	return false
 }
 
 type AnnotationError struct {
@@ -427,9 +451,7 @@ func (hs *HTTPServer) GetAnnotationByID(c *contextmodel.ReqContext) response.Res
 		return resp
 	}
 
-	if annotation.Email != "" {
-		annotation.AvatarURL = dtos.GetGravatarUrl(hs.Cfg, annotation.Email)
-	}
+	hs.setAnnotationAuthor(c, annotation)
 
 	return response.JSON(http.StatusOK, annotation)
 }
