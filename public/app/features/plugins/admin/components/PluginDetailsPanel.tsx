@@ -20,6 +20,7 @@ import {
 } from '@grafana/ui';
 import { formatDate } from 'app/core/internationalization/dates';
 
+import { EXTERNAL_PLUGIN_LINK_REL } from '../externalLinks';
 import { type CatalogPlugin } from '../types';
 
 import { PluginInsights } from './PluginInsights';
@@ -118,6 +119,7 @@ export function PluginDetailsPanel(props: Props): React.ReactElement | null {
                     fill="solid"
                     icon="code-branch"
                     target="_blank"
+                    rel={EXTERNAL_PLUGIN_LINK_REL}
                     data-testid="plugin-details-repository-link"
                   >
                     <Trans i18nKey="plugins.details.labels.repository">Repository</Trans>
@@ -130,6 +132,7 @@ export function PluginDetailsPanel(props: Props): React.ReactElement | null {
                     fill="solid"
                     icon="bug"
                     target="_blank"
+                    rel={EXTERNAL_PLUGIN_LINK_REL}
                     data-testid="plugin-details-raise-issue-link"
                   >
                     <Trans i18nKey="plugins.details.labels.raiseAnIssue">Raise an issue</Trans>
@@ -142,6 +145,7 @@ export function PluginDetailsPanel(props: Props): React.ReactElement | null {
                     fill="solid"
                     icon={'document-info'}
                     target="_blank"
+                    rel={EXTERNAL_PLUGIN_LINK_REL}
                     data-testid="plugin-details-license-link"
                   >
                     <Trans i18nKey="plugins.details.labels.license">License</Trans>
@@ -154,6 +158,7 @@ export function PluginDetailsPanel(props: Props): React.ReactElement | null {
                     fill="solid"
                     icon={'list-ui-alt'}
                     target="_blank"
+                    rel={EXTERNAL_PLUGIN_LINK_REL}
                     data-testid="plugin-details-documentation-link"
                   >
                     <Trans i18nKey="plugins.details.labels.documentation">Documentation</Trans>
@@ -166,6 +171,7 @@ export function PluginDetailsPanel(props: Props): React.ReactElement | null {
                     fill="solid"
                     icon={'heart'}
                     target="_blank"
+                    rel={EXTERNAL_PLUGIN_LINK_REL}
                     data-testid="plugin-details-sponsorship-link"
                   >
                     <Trans i18nKey="plugins.details.labels.sponsorDeveloper">Sponsor this developer</Trans>

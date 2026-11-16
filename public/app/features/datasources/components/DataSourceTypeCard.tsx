@@ -4,6 +4,7 @@ import { type DataSourcePluginMeta, type GrafanaTheme2 } from '@grafana/data';
 import { selectors as e2eSelectors } from '@grafana/e2e-selectors';
 import { t } from '@grafana/i18n';
 import { Card, LinkButton, PluginSignatureBadge, useStyles2 } from '@grafana/ui';
+import { EXTERNAL_PLUGIN_LINK_REL } from 'app/features/plugins/admin/externalLinks';
 
 export type Props = {
   dataSourcePlugin: DataSourcePluginMeta;
@@ -53,7 +54,7 @@ export function DataSourceTypeCard({ onClick, dataSourcePlugin }: Props) {
             )}
             href={`${learnMoreLink.url}?utm_source=grafana_add_ds`}
             onClick={(e) => e.stopPropagation()}
-            rel="noopener"
+            rel={EXTERNAL_PLUGIN_LINK_REL}
             target={learnMoreLinkTarget}
             variant="secondary"
           >

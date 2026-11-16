@@ -13,6 +13,7 @@ import { ASSISTANT_PLUGIN_ID } from '../components/AssistantOverview/constants';
 import { Changelog } from '../components/Changelog';
 import { PluginDetailsPanel } from '../components/PluginDetailsPanel';
 import { VersionList } from '../components/VersionList';
+import { isPluginCatalogProxyPath } from '../externalLinks';
 import { usePluginConfig } from '../hooks/usePluginConfig';
 import { type CatalogPlugin, type Permission, PluginTabIds, type Screenshots } from '../types';
 
@@ -90,10 +91,10 @@ export function PluginDetailsBody({ plugin, queryParams, pageId, info, showDetai
   }
 
   if (pageId === PluginTabIds.SCREENSHOTS && plugin?.details?.screenshots?.length) {
-    const carouselImages: Screenshots[] = plugin?.details?.screenshots.map((screenshot) => ({
-      path: buildScreenshotPath(plugin, screenshot.path),
-      name: screenshot.name,
-    }));
+    const carouselImages: Screenshots[] = plugin.details.screenshots.flatMap((screenshot) => {
+      const path = buildScreenshotPath(plugin, screenshot.path);
+      return isPluginCatalogProxyPath(path) ? [{ path, name: screenshot.name }] : [];
+    });
     return <Carousel images={carouselImages} />;
   }
 

@@ -5,7 +5,7 @@ import { accessControlQueryParam } from 'app/core/utils/accessControl';
 import { isVersionGtOrEq } from 'app/core/utils/version';
 
 import { API_ROOT, GCOM_API_ROOT, INSTANCE_API_ROOT } from './constants';
-import { getSafeExternalPluginLinks, getSafeExternalPluginUrl, removeUnsafePluginHtmlLinks } from './externalLinks';
+import { getSafeExternalPluginLinks, getSafeExternalPluginUrl, sanitizePluginHtml } from './externalLinks';
 import { isLocalPluginVisibleByConfig, isRemotePluginVisibleByConfig } from './helpers';
 import {
   type LocalPlugin,
@@ -52,11 +52,11 @@ export async function getPluginDetails(id: string): Promise<CatalogPluginDetails
     grafanaDependency: dependencies?.grafanaDependency ?? dependencies?.grafanaVersion ?? '',
     pluginDependencies: dependencies?.plugins || [],
     links: getSafeExternalPluginLinks(local?.info.links || remote?.json?.info.links),
-    readme: readme && removeUnsafePluginHtmlLinks(readme),
+    readme: readme && sanitizePluginHtml(readme),
     versions,
     statusContext: remote?.statusContext ?? '',
     iam: remote?.json?.iam,
-    changelog: changelog && removeUnsafePluginHtmlLinks(changelog),
+    changelog: changelog && sanitizePluginHtml(changelog),
     licenseUrl: getSafeExternalPluginUrl(remote?.licenseUrl),
     documentationUrl: getSafeExternalPluginUrl(remote?.documentationUrl),
     sponsorshipUrl: getSafeExternalPluginUrl(remote?.sponsorshipUrl),
