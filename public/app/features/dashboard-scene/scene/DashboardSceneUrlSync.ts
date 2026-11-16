@@ -103,8 +103,9 @@ export class DashboardSceneUrlSync implements SceneObjectUrlSyncHandler {
     }
 
     // Same reason as editview above: the branch below calls onEnterEditMode() unconditionally
-    // if not already editing, so this must be checked first.
-    if (typeof values.editPanel === 'string' && !refuseWhilePlanning(this._scene)) {
+    // if not already editing, so this must be checked first. Permission is decided once, here: the
+    // library panel wait and the code-split editor below act later, and only for an allowed request.
+    if (typeof values.editPanel === 'string' && this._scene.canEditDashboard() && !refuseWhilePlanning(this._scene)) {
       const panel = findEditPanel(this._scene, values.editPanel);
 
       if (!panel) {
@@ -137,8 +138,9 @@ export class DashboardSceneUrlSync implements SceneObjectUrlSyncHandler {
 
       this._enterPanelEdit(values.editPanel, panel);
     } else if (typeof values.editPanel === 'string') {
-      // Refused while planning: clear the param rather than leaving it to keep re-triggering on
-      // every sync tick.
+      // Refused (no edit permission, or planning): drop any re-open still pending from an earlier
+      // request, and clear the param rather than leaving it to keep re-triggering on every sync tick.
+      this._releaseEditPanel();
       update.editPanel = undefined;
     } else if (values.editPanel === null) {
       // Closing the pane supersedes a re-open still waiting on a library panel.
