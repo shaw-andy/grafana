@@ -16,6 +16,8 @@ import { type ServiceAccountDTO, type ServiceAccountCreateApiResponse } from 'ap
 
 import { OrgRolePicker } from '../admin/OrgRolePicker';
 
+import { serviceAccountApiUrl } from './state/serviceAccountApiUrl';
+
 export interface Props {}
 
 const createServiceAccount = async (sa: ServiceAccountDTO) => {
@@ -25,7 +27,7 @@ const createServiceAccount = async (sa: ServiceAccountDTO) => {
 };
 
 const updateServiceAccount = async (uid: string, sa: ServiceAccountDTO) =>
-  getBackendSrv().patch(`/api/serviceaccounts/${uid}`, sa);
+  getBackendSrv().patch(serviceAccountApiUrl(uid), sa);
 
 const defaultServiceAccount = {
   id: 0,

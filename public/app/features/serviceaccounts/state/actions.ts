@@ -20,8 +20,7 @@ import {
   serviceAccountsFetchEnd,
   stateFilterChanged,
 } from './reducers';
-
-const BASE_URL = `/api/serviceaccounts`;
+import { serviceAccountApiUrl } from './serviceAccountApiUrl';
 
 export function fetchACOptions(): ThunkResult<void> {
   return async (dispatch) => {
@@ -89,7 +88,7 @@ const fetchServiceAccountsWithDebounce = debounce((dispatch) => dispatch(fetchSe
 
 export function updateServiceAccount(serviceAccount: ServiceAccountDTO): ThunkResult<void> {
   return async (dispatch) => {
-    await getBackendSrv().patch(`${BASE_URL}/${serviceAccount.uid}?accesscontrol=true`, {
+    await getBackendSrv().patch(`${serviceAccountApiUrl(serviceAccount.uid)}?accesscontrol=true`, {
       ...serviceAccount,
     });
     dispatch(fetchServiceAccounts());
@@ -98,7 +97,7 @@ export function updateServiceAccount(serviceAccount: ServiceAccountDTO): ThunkRe
 
 export function deleteServiceAccount(serviceAccountUid: string): ThunkResult<void> {
   return async (dispatch) => {
-    await getBackendSrv().delete(`${BASE_URL}/${serviceAccountUid}`);
+    await getBackendSrv().delete(serviceAccountApiUrl(serviceAccountUid));
     dispatch(fetchServiceAccounts());
   };
 }
@@ -109,7 +108,7 @@ export function createServiceAccountToken(
   onTokenCreated: (key: string) => void
 ): ThunkResult<void> {
   return async (dispatch) => {
-    const result = await getBackendSrv().post(`${BASE_URL}/${saUid}/tokens`, token);
+    const result = await getBackendSrv().post(serviceAccountApiUrl(saUid, 'tokens'), token);
     onTokenCreated(result.key);
     dispatch(fetchServiceAccounts());
   };
