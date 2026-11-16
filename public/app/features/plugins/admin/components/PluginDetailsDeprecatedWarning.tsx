@@ -5,6 +5,7 @@ import { renderMarkdown } from '@grafana/data';
 import { Trans, t } from '@grafana/i18n';
 import { Alert, TextLink } from '@grafana/ui';
 
+import { sanitizePluginHtml } from '../externalLinks';
 import { type CatalogPlugin } from '../types';
 
 type Props = {
@@ -40,7 +41,7 @@ export function PluginDetailsDeprecatedWarning(props: Props): React.ReactElement
         <div
           className="markdown-html"
           dangerouslySetInnerHTML={{
-            __html: renderMarkdown(plugin.details.statusContext),
+            __html: sanitizePluginHtml(renderMarkdown(plugin.details.statusContext)),
           }}
         />
       )}
