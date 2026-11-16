@@ -76,7 +76,7 @@ jobs:
           permission_set: ${{ steps.app-config.outputs.permission_set }}
       - name: Create release branch
         id: branch
-        uses: grafana/grafana-github-actions-go/bump-release@main # zizmor: ignore[unpinned-uses]
+        uses: grafana/grafana-github-actions-go/bump-release@015e217f58ce35182230e20ac721e8351258f0ad # main
         with:
           ownerRepo: ${{ inputs.ownerRepo }}
           source: ${{ inputs.source }}
