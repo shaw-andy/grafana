@@ -38,7 +38,7 @@ export function publicDashboardQueryHandler(request: DataQueryRequest<DataQuery>
 
   return getBackendSrv()
     .fetch<BackendDataSourceResponse>({
-      url: `/api/public/dashboards/${config.publicDashboardAccessToken!}/panels/${panelId}/query`,
+      url: `/api/public/dashboards/${encodeURIComponent(config.publicDashboardAccessToken!)}/panels/${panelId}/query`,
       method: 'POST',
       data: body,
       requestId,

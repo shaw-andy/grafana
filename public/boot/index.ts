@@ -113,7 +113,7 @@ async function fetchBootData(): Promise<FetchBootDataResult> {
   // call a special bootdata url with the public access token
   // this is needed to set the access token and correct org for public dashboards on the ST backend
   if (publicDashboardAccessToken) {
-    path += `/${publicDashboardAccessToken}`;
+    path += `/${encodeURIComponent(publicDashboardAccessToken)}`;
   }
   // pass the search params through to the bootdata request
   // this allows for overriding the theme/language etc

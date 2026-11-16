@@ -68,7 +68,7 @@ export class PublicAnnotationsDataSource extends DataSourceApi<DataQuery, DataSo
     };
 
     const annotations = await getBackendSrv().get(
-      `/api/public/dashboards/${config.publicDashboardAccessToken}/annotations`,
+      `/api/public/dashboards/${encodeURIComponent(config.publicDashboardAccessToken!)}/annotations`,
       params
     );
 
