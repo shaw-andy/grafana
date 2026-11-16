@@ -8,6 +8,7 @@ import { type ThunkResult } from 'app/types/store';
 
 import { getAuthProviderStatus, getRegisteredAuthProviders } from '..';
 import { type AuthProviderStatus, type SettingsError, type SSOProvider } from '../types';
+import { getSSOSettingsUrl } from '../utils/url';
 
 import {
   loadingBegin,
@@ -39,7 +40,8 @@ export function loadSettings(showSpinner = true): ThunkResult<Promise<Settings>>
 
 export function loadProviders(provider = ''): ThunkResult<Promise<SSOProvider[]>> {
   return async (dispatch) => {
-    const result = await getBackendSrv().get(`/api/v1/sso-settings${provider ? `/${provider}` : ''}`);
+    const url = provider ? getSSOSettingsUrl(provider) : '/api/v1/sso-settings';
+    const result = await getBackendSrv().get(url, undefined, undefined, { validatePath: true });
     dispatch(providersLoaded(provider ? [result] : result));
     return result;
   };

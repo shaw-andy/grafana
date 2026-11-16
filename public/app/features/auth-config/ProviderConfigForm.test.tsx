@@ -171,7 +171,7 @@ describe('ProviderConfigForm', () => {
             useRefreshToken: false,
           },
         },
-        { showErrorAlert: false }
+        { showErrorAlert: false, validatePath: true }
       );
 
       expect(reportInteractionMock).toHaveBeenCalledWith('grafana_authentication_ssosettings_saved', {
@@ -221,7 +221,7 @@ describe('ProviderConfigForm', () => {
             orgMapping: '[]',
           },
         },
-        { showErrorAlert: false }
+        { showErrorAlert: false, validatePath: true }
       );
 
       expect(reportInteractionMock).toHaveBeenCalledWith('grafana_authentication_ssosettings_saved', {
@@ -258,7 +258,10 @@ describe('ProviderConfigForm', () => {
     await user.click(screen.getByTestId('data-testid Confirm Modal Danger Button'));
 
     await waitFor(() => {
-      expect(deleteMock).toHaveBeenCalledWith('/api/v1/sso-settings/github', undefined, { showSuccessAlert: false });
+      expect(deleteMock).toHaveBeenCalledWith('/api/v1/sso-settings/github', undefined, {
+        showSuccessAlert: false,
+        validatePath: true,
+      });
 
       expect(reportInteractionMock).toHaveBeenCalledWith('grafana_authentication_ssosettings_removed', {
         provider: 'github',
