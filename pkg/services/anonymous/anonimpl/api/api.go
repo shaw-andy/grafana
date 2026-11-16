@@ -107,8 +107,8 @@ func (api *AnonDeviceServiceAPI) ListDevices(c *contextmodel.ReqContext) respons
 //	500: internalServerError
 func (api *AnonDeviceServiceAPI) SearchDevices(c *contextmodel.ReqContext) response.Response {
 	perPage := c.QueryInt("perpage")
-	if perPage <= 0 {
-		perPage = 100
+	if perPage <= 0 || perPage > anonstore.MaxDevicesPerPage {
+		perPage = anonstore.MaxDevicesPerPage
 	}
 	page := max(c.QueryInt("page"), 1)
 

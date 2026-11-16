@@ -3,6 +3,7 @@ package anonstore
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -16,6 +17,9 @@ import (
 const cacheKeyPrefix = "anon-device"
 const anonymousDeviceExpiration = 30 * 24 * time.Hour
 const tableName = "anon_device"
+
+// MaxDevicesPerPage bounds how many anon_device rows a single list or search reads.
+const MaxDevicesPerPage = 100
 
 var ErrDeviceLimitReached = fmt.Errorf("device limit reached")
 
@@ -63,7 +67,8 @@ func (a *Device) CacheKey() string {
 }
 
 type AnonStore interface {
-	// ListDevices returns all devices that have been updated between the given times.
+	// ListDevices returns the most recently updated devices, up to MaxDevicesPerPage,
+	// that have been updated between the given times.
 	ListDevices(ctx context.Context, from *time.Time, to *time.Time) ([]*Device, error)
 	// CreateOrUpdateDevice creates or updates a device.
 	CreateOrUpdateDevice(ctx context.Context, device *Device) error
@@ -83,15 +88,12 @@ func ProvideAnonDBStore(sqlStore db.DB, deviceLimit int64) *AnonDBStore {
 
 func (s *AnonDBStore) ListDevices(ctx context.Context, from *time.Time, to *time.Time) ([]*Device, error) {
 	devices := []*Device{}
-	query := "SELECT * FROM anon_device"
-	args := []any{}
-	if from != nil && to != nil {
-		query += " WHERE updated_at BETWEEN ? AND ?"
-		args = append(args, from.UTC(), to.UTC())
-	}
-
 	err := s.sqlStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
-		return dbSession.SQL(query, args...).Find(&devices)
+		sess := dbSession.Table(tableName)
+		if from != nil && to != nil {
+			sess.Where("updated_at BETWEEN ? AND ?", from.UTC(), to.UTC())
+		}
+		return sess.Desc("updated_at").Limit(MaxDevicesPerPage).Find(&devices)
 	})
 
 	return devices, err
@@ -236,12 +238,28 @@ func (s *AnonDBStore) SearchDevices(ctx context.Context, query *SearchDeviceQuer
 			query.To = time.Now()
 		}
 
-		sess := dbSess.Table(tableName).Alias("d")
-
-		if query.Limit > 0 {
-			offset := query.Limit * (query.Page - 1)
-			sess.Limit(query.Limit, offset)
+		limit := query.Limit
+		if limit <= 0 || limit > MaxDevicesPerPage {
+			limit = MaxDevicesPerPage
 		}
+		page := min(max(query.Page, 1), math.MaxInt/limit)
+
+		where := "d.updated_at BETWEEN ? AND ?"
+		whereArgs := []any{query.From.UTC(), query.To.UTC()}
+		if query.Query != "" {
+			sql, param := s.sqlStore.GetDialect().LikeOperator("d.client_ip", true, strings.ReplaceAll(query.Query, "\\", ""), true)
+			where += " AND " + sql
+			whereArgs = append(whereArgs, param)
+		}
+
+		total, err := dbSess.Table(tableName).Alias("d").Where(where, whereArgs...).Count()
+		if err != nil {
+			return err
+		}
+		result.TotalCount = total
+
+		sess := dbSess.Table(tableName).Alias("d")
+		sess.Limit(limit, limit*(page-1))
 		sess.Cols("d.id", "d.device_id", "d.client_ip", "d.user_agent", "d.updated_at")
 
 		if len(query.SortOpts) > 0 {
@@ -254,26 +272,12 @@ func (s *AnonDBStore) SearchDevices(ctx context.Context, query *SearchDeviceQuer
 			sess.Asc("d.user_agent")
 		}
 
-		// add to query about from and to session
-		sess.Where("d.updated_at BETWEEN ? AND ?", query.From.UTC(), query.To.UTC())
-
-		if query.Query != "" {
-			sql, param := s.sqlStore.GetDialect().LikeOperator("d.client_ip", true, strings.ReplaceAll(query.Query, "\\", ""), true)
-			sess.Where(sql, param)
-		}
-
-		// get total
-		devices, err := s.ListDevices(ctx, &query.From, &query.To)
-		if err != nil {
-			return err
-		}
-		// cast to int64
-		result.TotalCount = int64(len(devices))
+		sess.Where(where, whereArgs...)
 		if err := sess.Find(&result.Devices); err != nil {
 			return err
 		}
-		result.Page = query.Page
-		result.PerPage = query.Limit
+		result.Page = page
+		result.PerPage = limit
 		return nil
 	})
 	return &result, err
