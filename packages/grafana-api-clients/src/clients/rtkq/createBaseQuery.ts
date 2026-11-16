@@ -39,6 +39,10 @@ export function createBaseQuery(options: CreateBaseQueryOptions): BaseQueryFn<Re
         getBackendSrv().fetch({
           ...requestOptions,
           url: baseURL + requestOptions.url,
+          // Generated endpoints interpolate resource names into the path without encoding. Valid resource
+          // names never contain parent-directory segments, so reject them before the browser resolves the
+          // URL to a different route on this origin.
+          validatePath: requestOptions.validatePath || baseURL.startsWith('/apis/'),
           // Default to GET so backend_srv correctly skips success alerts for queries
           method: requestOptions.method ?? 'GET',
           showErrorAlert: requestOptions.showErrorAlert ?? false,

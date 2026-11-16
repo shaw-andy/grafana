@@ -18,7 +18,7 @@ import { Title } from '../common/Title';
 import { PoliciesTree } from './PoliciesTree';
 
 const PoliciesTreeWrapper = () => {
-  const { name = '' } = useParams();
+  const { name: routeName = '' } = useParams();
   const { selectedAlertmanager = '' } = useAlertmanager();
   const { granted: canSeeAlertGroups } = useAlertGroupAbility(AlertGroupAction.View);
   const { getRouteGroupsMap } = useRouteGroupsMatcher();
@@ -27,8 +27,6 @@ const PoliciesTreeWrapper = () => {
     skipAlertGroups ? skipToken : { amSourceName: selectedAlertmanager }
   );
   const refetchAlertGroups = skipAlertGroups ? undefined : refetch;
-
-  const routeName = decodeURIComponent(name);
 
   if (!routeName) {
     return (
@@ -55,7 +53,7 @@ const PoliciesTreeWrapper = () => {
 
 function PolicyPage() {
   const { name = '' } = useParams();
-  const routeName = isDefaultRoutingTreeName(name) ? 'Default Policy' : decodeURIComponent(name);
+  const routeName = isDefaultRoutingTreeName(name) ? 'Default Policy' : name;
   const { navId, pageNav } = useNotificationPoliciesNav();
 
   return (
