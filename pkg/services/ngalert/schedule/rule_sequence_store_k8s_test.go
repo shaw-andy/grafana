@@ -129,7 +129,7 @@ func TestConvertRuleSequence(t *testing.T) {
 		{
 			name: "recording and alerting rules converted",
 			seq: alertingv0alpha1.RuleSequence{
-				ObjectMeta: metav1.ObjectMeta{Name: "seq-1"},
+				ObjectMeta: metav1.ObjectMeta{Name: "seq-1", Namespace: "default"},
 				Spec: alertingv0alpha1.RuleSequenceSpec{
 					Trigger: alertingv0alpha1.RuleSequenceIntervalTrigger{
 						Interval: alertingv0alpha1.RuleSequencePromDuration("30s"),
@@ -143,6 +143,7 @@ func TestConvertRuleSequence(t *testing.T) {
 				},
 			},
 			want: models.SchedulableRuleSequence{
+				OrgID:             1,
 				UID:               "seq-1",
 				IntervalSeconds:   30,
 				RecordingRuleRefs: []string{"rec-1", "rec-2"},
@@ -152,7 +153,7 @@ func TestConvertRuleSequence(t *testing.T) {
 		{
 			name: "recording only sequence with minute interval",
 			seq: alertingv0alpha1.RuleSequence{
-				ObjectMeta: metav1.ObjectMeta{Name: "seq-rec-only"},
+				ObjectMeta: metav1.ObjectMeta{Name: "seq-rec-only", Namespace: "org-2"},
 				Spec: alertingv0alpha1.RuleSequenceSpec{
 					Trigger: alertingv0alpha1.RuleSequenceIntervalTrigger{
 						Interval: alertingv0alpha1.RuleSequencePromDuration("1m"),
@@ -163,6 +164,7 @@ func TestConvertRuleSequence(t *testing.T) {
 				},
 			},
 			want: models.SchedulableRuleSequence{
+				OrgID:             2,
 				UID:               "seq-rec-only",
 				IntervalSeconds:   60,
 				RecordingRuleRefs: []string{"rec-1"},
@@ -172,7 +174,7 @@ func TestConvertRuleSequence(t *testing.T) {
 		{
 			name: "invalid interval returns error",
 			seq: alertingv0alpha1.RuleSequence{
-				ObjectMeta: metav1.ObjectMeta{Name: "seq-bad"},
+				ObjectMeta: metav1.ObjectMeta{Name: "seq-bad", Namespace: "default"},
 				Spec: alertingv0alpha1.RuleSequenceSpec{
 					Trigger: alertingv0alpha1.RuleSequenceIntervalTrigger{
 						Interval: alertingv0alpha1.RuleSequencePromDuration("not-a-duration"),

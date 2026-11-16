@@ -60,7 +60,7 @@ func ValidateWrite(cfg config.RuntimeConfig) validation.ValidateFunc[*model.Rule
 					allUIDs = append(allUIDs, uid)
 				}
 			}
-			resolved, err := cfg.MembershipResolver.Resolve(ctx, allUIDs)
+			resolved, err := cfg.MembershipResolver.Resolve(ctx, r.Namespace, allUIDs)
 			if err != nil {
 				return fmt.Errorf("failed to resolve sequence memberships: %w", err)
 			}

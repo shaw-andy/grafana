@@ -47,7 +47,7 @@ func validateFolderAndSequenceMembership(ctx context.Context, r *model.AlertRule
 			oldFolderUID = oldRule.Annotations[model.FolderAnnotationKey]
 		}
 		if oldFolderUID != folderUID {
-			memberships, err := cfg.MembershipResolver.Resolve(ctx, []string{r.Name})
+			memberships, err := cfg.MembershipResolver.Resolve(ctx, r.Namespace, []string{r.Name})
 			if err != nil {
 				return fmt.Errorf("failed to resolve sequence membership for rule %q: %w", r.Name, err)
 			}
@@ -85,7 +85,7 @@ func ValidateDelete(cfg config.RuntimeConfig) validation.ValidateFunc[*model.Ale
 	return func(ctx context.Context, req validation.Request[*model.AlertRule]) error {
 		oldRule := req.OldObject
 		if cfg.MembershipResolver != nil {
-			memberships, err := cfg.MembershipResolver.Resolve(ctx, []string{oldRule.Name})
+			memberships, err := cfg.MembershipResolver.Resolve(ctx, oldRule.Namespace, []string{oldRule.Name})
 			if err != nil {
 				return fmt.Errorf("failed to resolve sequence membership for rule %q: %w", oldRule.Name, err)
 			}

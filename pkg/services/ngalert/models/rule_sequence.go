@@ -76,16 +76,28 @@ func ParseRuleSequenceGroup(ruleGroup string) (*RuleSequenceGroup, error) {
 
 // SchedulableRuleSequence describes a sequence of rules that should be
 // evaluated sequentially. Recording rules run first, followed by alert rules,
-// all at the sequence's interval.
+// all at the sequence's interval. Rule refs are UIDs, which are only unique
+// within an organization, so they always resolve within OrgID.
 type SchedulableRuleSequence struct {
+	OrgID             int64
 	UID               string
 	IntervalSeconds   int64
 	RecordingRuleRefs []string
 	AlertRuleRefs     []string
 }
 
+// RuleSequenceKey uniquely identifies a rule sequence across organizations.
+type RuleSequenceKey struct {
+	OrgID int64
+	UID   string
+}
+
+func (s SchedulableRuleSequence) GetKey() RuleSequenceKey {
+	return RuleSequenceKey{OrgID: s.OrgID, UID: s.UID}
+}
+
 // EnrichRulesWithSequenceMembership overrides in-memory fields on rules that
-// belong to a sequence. For each sequence member it sets:
+// belong to a sequence in the same organization. For each sequence member it sets:
 //   - RuleGroup to a padded sentinel group name that exceeds the storage
 //     validation limit (so it cannot collide with user-created groups)
 //   - RuleGroupIndex to the rule's position (recording rules first, then alert rules, 1-indexed)
@@ -99,21 +111,21 @@ func EnrichRulesWithSequenceMembership(rules []*AlertRule, sequences []Schedulab
 		intervalSeconds int64
 		index           int
 	}
-	lookup := make(map[string]membership)
+	lookup := make(map[AlertRuleKey]membership)
 	for _, seq := range sequences {
 		idx := 1
 		for _, uid := range seq.RecordingRuleRefs {
-			lookup[uid] = membership{seq.UID, seq.IntervalSeconds, idx}
+			lookup[AlertRuleKey{OrgID: seq.OrgID, UID: uid}] = membership{seq.UID, seq.IntervalSeconds, idx}
 			idx++
 		}
 		for _, uid := range seq.AlertRuleRefs {
-			lookup[uid] = membership{seq.UID, seq.IntervalSeconds, idx}
+			lookup[AlertRuleKey{OrgID: seq.OrgID, UID: uid}] = membership{seq.UID, seq.IntervalSeconds, idx}
 			idx++
 		}
 	}
 
 	for _, rule := range rules {
-		m, ok := lookup[rule.UID]
+		m, ok := lookup[rule.GetKey()]
 		if !ok {
 			continue
 		}

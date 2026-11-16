@@ -57,7 +57,7 @@ func ruleSequenceValidator(t *testing.T, cfg config.RuntimeConfig) *simple.Valid
 // interface for use in tests.
 type funcMembershipResolver func(ctx context.Context, uids []string) (map[string]config.RuleSequenceMembership, error)
 
-func (f funcMembershipResolver) Resolve(ctx context.Context, uids []string) (map[string]config.RuleSequenceMembership, error) {
+func (f funcMembershipResolver) Resolve(ctx context.Context, _ string, uids []string) (map[string]config.RuleSequenceMembership, error) {
 	return f(ctx, uids)
 }
 
