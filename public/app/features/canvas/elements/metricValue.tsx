@@ -25,6 +25,7 @@ import {
   defaultTextColor,
 } from '../element';
 import { type ElementState } from '../runtime/element';
+import { cssColor, cssPixels, cssTextAlign, cssVerticalAlign } from '../styleValues';
 import { Align, type TextConfig, type TextData, VAlign } from '../types';
 
 // eslint-disable-next-line
@@ -136,10 +137,10 @@ const getStyles = (data: TextData | undefined) => (theme: GrafanaTheme2) => ({
   }),
   span: css({
     display: 'table-cell',
-    verticalAlign: data?.valign,
-    textAlign: data?.align,
-    fontSize: `${data?.size}px`,
-    color: data?.color,
+    verticalAlign: cssVerticalAlign(data?.valign),
+    textAlign: cssTextAlign(data?.align),
+    fontSize: cssPixels(data?.size),
+    color: cssColor(data?.color),
   }),
 });
 

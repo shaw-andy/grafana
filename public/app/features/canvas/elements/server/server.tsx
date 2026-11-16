@@ -8,6 +8,7 @@ import { ColorDimensionEditor } from 'app/features/dimensions/editors/ColorDimen
 import { ScalarDimensionEditor } from 'app/features/dimensions/editors/ScalarDimensionEditor';
 
 import { type CanvasElementItem, type CanvasElementOptions, type CanvasElementProps } from '../../element';
+import { cssColor } from '../../styleValues';
 
 import { ServerDatabase } from './types/database';
 import { ServerSingle } from './types/single';
@@ -169,13 +170,13 @@ export const getServerStyles = (data: ServerData | undefined) => (theme: Grafana
       },
     }),
     server: css({
-      fill: data?.statusColor ?? 'transparent',
+      fill: cssColor(data?.statusColor) ?? 'transparent',
     }),
     circle: css({
       [theme.transitions.handleMotion('no-preference', 'reduce')]: {
         animation: `blink ${data?.blinkRate ? 1 / data.blinkRate : 0}s infinite step-end`,
       },
-      fill: data?.bulbColor,
+      fill: cssColor(data?.bulbColor),
       stroke: 'none',
     }),
     circleBack: css({

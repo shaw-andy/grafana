@@ -15,6 +15,7 @@ import {
   defaultBgColor,
   defaultTextColor,
 } from '../element';
+import { cssColor, cssNumber, cssPixels } from '../styleValues';
 import { Align, type CanvasElementConfig, type CanvasElementData, VAlign } from '../types';
 
 const Parallelogram = (props: CanvasElementProps<CanvasElementConfig, CanvasElementData>) => {
@@ -221,13 +222,13 @@ const getStyles = (theme: GrafanaTheme2, data: CanvasElementData | undefined) =>
       top: textTop,
       left: textLeft,
       transform: textTransform,
-      fontSize: `${data?.size}px`,
-      color: data?.color,
+      fontSize: cssPixels(data?.size),
+      color: cssColor(data?.color),
     }),
     elementBorder: css({
       fill: 'none',
-      stroke: data?.borderColor ?? 'none',
-      strokeWidth: data?.borderWidth ?? 0,
+      stroke: cssColor(data?.borderColor) ?? 'none',
+      strokeWidth: cssNumber(data?.borderWidth) ?? 0,
       strokeLinejoin: 'round',
     }),
   };
