@@ -342,11 +342,13 @@ export const alertRuleApi = alertingApi.injectEndpoints({
     getAlertRule: build.query<RulerGrafanaRuleDTO, { uid: string }>({
       // TODO: In future, if supported in other rulers, parametrize ruler source name
       // For now, to make the consumption of this hook clearer, only support Grafana ruler
-      query: ({ uid }) => ({ url: `/api/ruler/${GRAFANA_RULES_SOURCE_NAME}/api/v1/rule/${uid}` }),
+      query: ({ uid }) => ({ url: `/api/ruler/${GRAFANA_RULES_SOURCE_NAME}/api/v1/rule/${encodeURIComponent(uid)}` }),
       providesTags: (_result, _error, { uid }) => [{ type: 'GrafanaRulerRule', id: uid }],
     }),
     getAlertVersionHistory: build.query<RulerGrafanaRuleDTO[], { uid: string }>({
-      query: ({ uid }) => ({ url: `/api/ruler/${GRAFANA_RULES_SOURCE_NAME}/api/v1/rule/${uid}/versions` }),
+      query: ({ uid }) => ({
+        url: `/api/ruler/${GRAFANA_RULES_SOURCE_NAME}/api/v1/rule/${encodeURIComponent(uid)}/versions`,
+      }),
       providesTags: (_result, _error, { uid }) => [{ type: 'GrafanaRulerRuleVersion', id: uid }],
     }),
 
@@ -387,7 +389,7 @@ export const alertRuleApi = alertingApi.injectEndpoints({
       { payload: PostableRulerRuleGroupDTO; format: ExportFormats; nameSpaceUID: string }
     >({
       query: ({ payload, format, nameSpaceUID }) => ({
-        url: `/api/ruler/grafana/api/v1/rules/${nameSpaceUID}/export/`,
+        url: `/api/ruler/grafana/api/v1/rules/${encodeURIComponent(nameSpaceUID)}/export/`,
         params: { format: format },
         responseType: 'text',
         data: payload,
@@ -404,7 +406,7 @@ export const alertRuleApi = alertingApi.injectEndpoints({
     }),
     exportMuteTiming: build.query<string, { format: ExportFormats; muteTiming: string }>({
       query: ({ format, muteTiming }) => ({
-        url: `/api/v1/provisioning/mute-timings/${muteTiming}/export/`,
+        url: `/api/v1/provisioning/mute-timings/${encodeURIComponent(muteTiming)}/export/`,
         params: { format: format },
         responseType: 'text',
       }),
@@ -424,7 +426,7 @@ export const alertRuleApi = alertingApi.injectEndpoints({
     }),
     permanentlyDeleteRule: build.mutation<void, { guid: string }>({
       query: ({ guid }) => ({
-        url: `/api/ruler/${GRAFANA_RULES_SOURCE_NAME}/api/v1/trash/rule/guid/${guid}`,
+        url: `/api/ruler/${GRAFANA_RULES_SOURCE_NAME}/api/v1/trash/rule/guid/${encodeURIComponent(guid)}`,
         method: 'DELETE',
       }),
       invalidatesTags: ['DeletedRules'],

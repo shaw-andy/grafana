@@ -23,7 +23,7 @@ export const labelsApi = alertingApi.injectEndpoints({
     }),
     getLabelValues: build.query<LabelKeyAndValues, { key: string }>({
       query: ({ key }) => ({
-        url: `/api/plugins/${SupportedPlugin.Labels}/resources/v2alpha1/labels/name/${key}`,
+        url: `/api/plugins/${SupportedPlugin.Labels}/resources/v2alpha1/labels/name/${encodeURIComponent(key)}`,
       }),
       providesTags: ['GrafanaLabels'],
     }),
