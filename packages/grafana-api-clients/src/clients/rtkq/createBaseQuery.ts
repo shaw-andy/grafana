@@ -12,6 +12,14 @@ export interface RequestOptions extends BackendSrvRequest {
 
 export type CreateBaseQueryOptions = { baseURL: string } | { getBaseURL: () => Promise<string> };
 
+// backend_srv sends API URLs relative to <base href>, so the browser resolves "." and ".." segments
+// (including their %2e forms, "\" separators, and with tabs/newlines removed) before the request is
+// sent. A path param holding one would move the request outside the API prefix.
+function hasDotSegment(url: string): boolean {
+  const path = url.replace(/[\t\n\r]/g, '').split(/[?#]/, 1)[0];
+  return path.split(/[\/\\]/).some((segment) => /^(\.|%2e){1,2}$/i.test(segment));
+}
+
 export function createBaseQuery(options: CreateBaseQueryOptions): BaseQueryFn<RequestOptions> {
   // Get the correct resolver once for all API calls
   const resolveBaseURL = 'getBaseURL' in options ? options.getBaseURL : () => Promise.resolve(options.baseURL);
@@ -19,6 +27,11 @@ export function createBaseQuery(options: CreateBaseQueryOptions): BaseQueryFn<Re
   async function backendSrvBaseQuery(requestOptions: RequestOptions) {
     try {
       const baseURL = await resolveBaseURL();
+      const url = baseURL + requestOptions.url;
+      if (hasDotSegment(url)) {
+        throw new Error('Invalid request path');
+      }
+
       const headers: Record<string, string> = {
         ...requestOptions.headers,
       };
@@ -38,7 +51,7 @@ export function createBaseQuery(options: CreateBaseQueryOptions): BaseQueryFn<Re
       const { data: responseData, ...meta } = await lastValueFrom(
         getBackendSrv().fetch({
           ...requestOptions,
-          url: baseURL + requestOptions.url,
+          url,
           // Default to GET so backend_srv correctly skips success alerts for queries
           method: requestOptions.method ?? 'GET',
           showErrorAlert: requestOptions.showErrorAlert ?? false,
