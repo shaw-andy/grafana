@@ -37,6 +37,10 @@ func OrgRedirect(cfg *setting.Cfg, userSvc user.Service) web.Handler {
 			return
 		}
 
+		if isSameSiteEmbeddedRequest(req) {
+			return
+		}
+
 		if !validRedirectPath(c.Req.URL.Path) {
 			// Do not switch orgs or perform the redirect because the new path is not valid
 			return
