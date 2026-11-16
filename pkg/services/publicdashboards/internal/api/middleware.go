@@ -30,7 +30,13 @@ func SetPublicDashboardOrgIdOnContext(publicDashboardService publicdashboards.Se
 
 // SetPublicDashboardAccessToken Adds public dashboard flag on context
 func SetPublicDashboardAccessToken(c *contextmodel.ReqContext) {
-	c.PublicDashboardAccessToken = web.Params(c.Req)[":accessToken"]
+	// The token is rendered into the page and used to build request paths, so
+	// anything other than a valid token must never reach the context.
+	accessToken := web.Params(c.Req)[":accessToken"]
+	if !validation.IsValidAccessToken(accessToken) {
+		return
+	}
+	c.PublicDashboardAccessToken = accessToken
 }
 
 // RequiresExistingAccessToken Middleware to enforce that a public dashboards exists before continuing to handler. This
