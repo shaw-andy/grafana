@@ -1,9 +1,33 @@
 import { waitFor } from '@testing-library/react';
+import { of } from 'rxjs';
+import { seedDataSources } from 'test/helpers/seedDataSources';
 
-import { locationService } from '@grafana/runtime';
-import { NewSceneObjectAddedEvent, SceneQueryRunner, VizPanel } from '@grafana/scenes';
+import {
+  type DataQuery,
+  type DataSourceInstanceSettings,
+  type DataSourceJsonData,
+  type DataSourcePluginMeta,
+  PluginType,
+} from '@grafana/data';
+import {
+  type BackendSrv,
+  type BackendSrvRequest,
+  config,
+  DataSourceWithBackend,
+  getBackendSrv,
+  locationService,
+  setBackendSrv,
+  setRunRequest,
+} from '@grafana/runtime';
+import { NewSceneObjectAddedEvent, SceneQueryRunner, UrlSyncManager, VizPanel } from '@grafana/scenes';
+import { runRequest } from 'app/features/query/state/runRequest';
+import { type DashboardMeta } from 'app/types/dashboard';
+
+import { PanelDataQueriesTab } from '../panel-edit/PanelDataPane/PanelDataQueriesTab';
+import { PanelDataPaneNext } from '../panel-edit/PanelEditNext/PanelDataPaneNext';
 
 import { DashboardScene } from './DashboardScene';
+import { LibraryPanelBehavior } from './LibraryPanelBehavior';
 import { DefaultGridLayoutManager } from './layout-default/DefaultGridLayoutManager';
 import { RowItem } from './layout-rows/RowItem';
 import { RowsLayoutManager } from './layout-rows/RowsLayoutManager';
@@ -280,7 +304,10 @@ describe('DashboardSceneUrlSync', () => {
 
     it('it should be possible to go from the view panel view to the edit view when the dashboard is not in edit mdoe', async () => {
       const scene = buildTestScene();
-      scene.setState({ isEditing: false });
+      scene.setState({
+        isEditing: false,
+        meta: { ...scene.state.meta, canEdit: true, canSave: true, canMakeEditable: false },
+      });
       scene.urlSync?.updateFromUrl({ viewPanel: 'panel-1' });
       expect(scene.state.viewPanel).toBeDefined();
       scene.urlSync?.updateFromUrl({ editPanel: 'panel-1' });
@@ -349,6 +376,345 @@ describe('DashboardSceneUrlSync', () => {
     });
   });
 });
+
+const SAVED_EXPR = 'up{job="api"}';
+const ATTACKER_EXPR = 'up{job="attacker"}';
+const PROM_UID = 'prom-uid';
+
+describe('editPanel permission', () => {
+  const previousViewersCanEdit = config.viewersCanEdit;
+  const previousPublicToken = config.publicDashboardAccessToken;
+  let previousBackendSrv: BackendSrv | undefined;
+
+  beforeEach(() => {
+    config.viewersCanEdit = false;
+    config.publicDashboardAccessToken = '';
+    previousBackendSrv = getBackendSrv();
+    locationService.push('/d/dash-1/slug');
+  });
+
+  afterEach(() => {
+    config.viewersCanEdit = previousViewersCanEdit;
+    config.publicDashboardAccessToken = previousPublicToken;
+    if (previousBackendSrv) {
+      setBackendSrv(previousBackendSrv);
+    }
+  });
+
+  it('does not enter edit mode or open the editor when a viewer sets editPanel to a panel key', () => {
+    const scene = buildPermissionScene({ meta: viewerMeta() });
+
+    scene.urlSync?.updateFromUrl({ editPanel: 'panel-1' });
+
+    expectEditRefused(scene);
+    expect(scene.state.editable).toBe(false);
+  });
+
+  it('does not enter edit mode when a viewer sets editPanel to the numeric panel id', () => {
+    const scene = buildPermissionScene({ meta: viewerMeta() });
+
+    scene.urlSync?.updateFromUrl({ editPanel: '1' });
+
+    expectEditRefused(scene);
+  });
+
+  it('does not enter edit mode when a viewer sets editPanel to a different panel id than the first panel', () => {
+    const scene = buildPermissionScene({ meta: viewerMeta() });
+
+    scene.urlSync?.updateFromUrl({ editPanel: '2' });
+
+    expectEditRefused(scene);
+  });
+
+  it('does not enter edit mode for a snapshot even when canEdit is true', () => {
+    const scene = buildPermissionScene({
+      meta: viewerMeta({ canEdit: true, canSave: true, isSnapshot: true }),
+    });
+
+    scene.urlSync?.updateFromUrl({ editPanel: '1' });
+
+    expectEditRefused(scene);
+  });
+
+  it('does not enter edit mode for an embedded dashboard even when canEdit is true', () => {
+    const scene = buildPermissionScene({
+      meta: viewerMeta({ canEdit: true, canSave: true, isEmbedded: true }),
+    });
+
+    scene.urlSync?.updateFromUrl({ editPanel: '1' });
+
+    expectEditRefused(scene);
+  });
+
+  it('does not enter edit mode on a public dashboard', () => {
+    config.publicDashboardAccessToken = 'public-access-token';
+    const scene = buildPermissionScene({ meta: viewerMeta() });
+
+    scene.urlSync?.updateFromUrl({ editPanel: '1' });
+
+    expectEditRefused(scene);
+  });
+
+  it('does not open the editor when canEditDashboard is denied for the request and later reports allowed', async () => {
+    const scene = buildPermissionScene({ meta: viewerMeta() });
+    let allowEdit = false;
+    jest.spyOn(scene, 'canEditDashboard').mockImplementation(() => allowEdit);
+
+    scene.urlSync?.updateFromUrl({ editPanel: '1' });
+    // The import that mounts the editor resolves after this returns. A check that runs again
+    // on that later turn must not treat a new allow as permission for this request.
+    allowEdit = true;
+
+    await expect(waitFor(() => expect(scene.state.editPanel).toBeDefined(), { timeout: 1500 })).rejects.toThrow();
+    expectEditRefused(scene);
+  });
+
+  it('does not enter edit mode, then open the editor, when an unloaded library panel later finishes loading', async () => {
+    const libraryPanel = new LibraryPanelBehavior({ uid: 'lib-1', name: 'Library', isLoaded: false });
+    const scene = buildPermissionScene({ meta: viewerMeta(), behaviors: [libraryPanel] });
+
+    scene.urlSync?.updateFromUrl({ editPanel: '1' });
+    expectEditRefused(scene);
+
+    libraryPanel.setState({ isLoaded: true });
+
+    await expect(waitFor(() => expect(scene.state.editPanel).toBeDefined(), { timeout: 1500 })).rejects.toThrow();
+    expectEditRefused(scene);
+  });
+
+  it('still opens the named panel for a user who can edit', async () => {
+    const scene = buildPermissionScene({
+      meta: viewerMeta({ canEdit: true, canSave: true }),
+      editable: true,
+    });
+
+    scene.urlSync?.updateFromUrl({ editPanel: '2' });
+
+    expect(scene.state.isEditing).toBe(true);
+    await waitFor(() => expect(scene.state.editPanel?.getUrlKey()).toBe('2'));
+    expect(scene.state.editPanel?.getPanel().state.key).toBe('panel-2');
+  });
+
+  it('still opens the editor when viewersCanEdit is enabled', async () => {
+    config.viewersCanEdit = true;
+    const scene = buildPermissionScene({ meta: viewerMeta(), editable: true });
+
+    scene.urlSync?.updateFromUrl({ editPanel: '1' });
+
+    expect(scene.state.isEditing).toBe(true);
+    await waitFor(() => expect(scene.state.editPanel).toBeDefined());
+  });
+
+  it('still opens the editor when the dashboard can be made editable', async () => {
+    const scene = buildPermissionScene({
+      meta: viewerMeta({ canMakeEditable: true }),
+      editable: false,
+    });
+
+    scene.urlSync?.updateFromUrl({ editPanel: '1' });
+
+    expect(scene.state.isEditing).toBe(true);
+    await waitFor(() => expect(scene.state.editPanel).toBeDefined());
+  });
+
+  it('still refuses dashboard settings for a viewer', () => {
+    const scene = buildPermissionScene({ meta: viewerMeta(), editable: true });
+
+    scene.urlSync?.updateFromUrl({ editview: 'settings' });
+
+    expect(scene.state.editview).toBeUndefined();
+    expect(scene.state.isEditing).toBe(false);
+  });
+
+  it('strips editPanel from the location when a viewer loads it through url sync', () => {
+    const scene = buildPermissionScene({ meta: viewerMeta() });
+    locationService.push('/d/dash-1/slug?editPanel=1');
+    const manager = new UrlSyncManager({ updateUrlOnInit: true, createBrowserHistorySteps: true });
+
+    manager.initSync(scene);
+
+    expectEditRefused(scene);
+    expect(locationService.getSearch().get('editPanel')).toBeNull();
+    manager.cleanUp(scene);
+  });
+
+  it('keeps editPanel in the location when a user who can edit loads it through url sync', async () => {
+    const scene = buildPermissionScene({
+      meta: viewerMeta({ canEdit: true, canSave: true }),
+      editable: true,
+    });
+    locationService.push('/d/dash-1/slug?editPanel=2');
+    const manager = new UrlSyncManager({ updateUrlOnInit: true, createBrowserHistorySteps: true });
+
+    manager.initSync(scene);
+
+    expect(scene.state.isEditing).toBe(true);
+    await waitFor(() => expect(scene.state.editPanel?.getPanel().state.key).toBe('panel-2'));
+    expect(locationService.getSearch().get('editPanel')).toBe('2');
+    manager.cleanUp(scene);
+  });
+
+  it.each([
+    ['queries tab', 'legacy'],
+    ['next query editor', 'next'],
+  ] as const)(
+    'does not post a replaced query when a viewer opens the editor via editPanel and runs it from the %s',
+    async (_label, editor) => {
+      const posted: BackendSrvRequest[] = [];
+      setBackendSrv({
+        fetch: (options: BackendSrvRequest) => {
+          posted.push(options);
+          return of({
+            data: { results: {} },
+            status: 200,
+            statusText: 'OK',
+            ok: true,
+            headers: new Headers(),
+            url: options.url ?? '',
+            config: options,
+            type: 'basic',
+            redirected: false,
+          });
+        },
+      } as unknown as BackendSrv);
+      setRunRequest(runRequest);
+      const datasource = new RecordingDatasource(prometheusSettings());
+      seedDataSources([{ settings: prometheusSettings(), api: datasource }], { legacySrv: 'mock' });
+
+      const scene = buildPermissionScene({ meta: viewerMeta() });
+      locationService.push('/d/dash-1/slug?editPanel=1');
+      const manager = new UrlSyncManager({ updateUrlOnInit: true, createBrowserHistorySteps: true });
+      manager.initSync(scene);
+
+      try {
+        await waitFor(() => expect(scene.state.editPanel).toBeDefined(), { timeout: 1500 });
+      } catch {
+        // The editor stayed closed. The assertions below require that, and that no replaced query was posted.
+      }
+
+      const editPanel = scene.state.editPanel;
+      if (editPanel) {
+        const panelRef = editPanel.getPanel().getRef();
+        const attacker = { refId: 'A', expr: ATTACKER_EXPR, datasource: { type: 'prometheus', uid: PROM_UID } };
+        if (editor === 'legacy') {
+          const tab = new PanelDataQueriesTab({ panelRef });
+          tab.onQueriesChange([attacker]);
+          tab.onRunQueries();
+        } else {
+          const pane = new PanelDataPaneNext({ panelRef });
+          pane.updateQueries([attacker]);
+          pane.runQueries();
+        }
+        await waitFor(() => expect(posted.length).toBeGreaterThan(0));
+      }
+
+      expect(posted.map((request) => ({ url: request.url, expressions: queriesFromRequest(request) }))).toEqual([]);
+      expectEditRefused(scene);
+      expect(locationService.getSearch().get('editPanel')).toBeNull();
+      manager.cleanUp(scene);
+    }
+  );
+});
+
+function viewerMeta(overrides: Partial<DashboardMeta> = {}): DashboardMeta {
+  return {
+    canEdit: false,
+    canSave: false,
+    canMakeEditable: false,
+    isSnapshot: false,
+    isEmbedded: false,
+    ...overrides,
+  };
+}
+
+function expectEditRefused(scene: DashboardScene) {
+  expect(scene.state.isEditing).toBe(false);
+  expect(scene.state.editable).toBe(false);
+  expect(scene.state.editPanel).toBeUndefined();
+  expect(scene.urlSync?.getUrlState().editPanel).toBeUndefined();
+}
+
+function queriesFromRequest(request: BackendSrvRequest): Array<string | undefined> {
+  const data = request.data as { queries?: DataQuery[] } | undefined;
+  return (data?.queries ?? []).map((query) => {
+    if ('expr' in query && typeof query.expr === 'string') {
+      return query.expr;
+    }
+    return undefined;
+  });
+}
+
+function prometheusSettings(): DataSourceInstanceSettings<DataSourceJsonData> {
+  const meta = {
+    id: 'prometheus',
+    name: 'Prometheus',
+    type: PluginType.datasource,
+    info: {
+      author: { name: '' },
+      description: '',
+      links: [],
+      logos: { large: '', small: '' },
+      screenshots: [],
+      updated: '',
+      version: '',
+    },
+    module: '',
+    baseUrl: '',
+  } as DataSourcePluginMeta;
+  return {
+    id: 1,
+    uid: PROM_UID,
+    type: 'prometheus',
+    name: 'Prometheus',
+    meta,
+    jsonData: {},
+    access: 'proxy',
+    readOnly: false,
+  };
+}
+
+class RecordingDatasource extends DataSourceWithBackend<DataQuery, DataSourceJsonData> {
+  constructor(instanceSettings: DataSourceInstanceSettings<DataSourceJsonData>) {
+    super(instanceSettings);
+  }
+}
+
+function buildPermissionScene({
+  meta,
+  editable = false,
+  behaviors,
+}: {
+  meta: DashboardMeta;
+  editable?: boolean;
+  behaviors?: LibraryPanelBehavior[];
+}) {
+  return new DashboardScene({
+    title: 'hello',
+    uid: 'dash-1',
+    isEditing: false,
+    editable,
+    meta,
+    body: DefaultGridLayoutManager.fromVizPanels([
+      new VizPanel({
+        title: 'Panel A',
+        key: 'panel-1',
+        pluginId: 'table',
+        $behaviors: behaviors,
+        $data: new SceneQueryRunner({
+          key: 'data-query-runner',
+          datasource: { type: 'prometheus', uid: PROM_UID },
+          queries: [{ refId: 'A', expr: SAVED_EXPR }],
+          runQueriesMode: 'manual',
+        }),
+      }),
+      new VizPanel({
+        title: 'Panel B',
+        key: 'panel-2',
+        pluginId: 'table',
+      }),
+    ]),
+  });
+}
 
 function buildTestSceneWithRow(title: string, { collapse }: { collapse?: boolean } = {}) {
   const row = new RowItem({ title, collapse });
