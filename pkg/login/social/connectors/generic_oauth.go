@@ -61,14 +61,9 @@ func NewGenericOAuthProvider(ctx context.Context, info *social.OAuthInfo, cfgPro
 		return nil, err
 	}
 
-	teamIds, err := util.SplitStringWithError(info.Extra[teamIdsKey])
+	teamIds, allowedOrganizations, err := parseGenericOAuthAllowlists(info)
 	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", teamIdsKey, "provider", social.GenericOAuthProviderName, "error", err)
-	}
-
-	allowedOrganizations, err := util.SplitStringWithError(info.Extra[allowedOrganizationsKey])
-	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.GenericOAuthProviderName, "error", err)
+		return nil, err
 	}
 
 	provider := &SocialGenericOAuth{
@@ -143,20 +138,16 @@ func (s *SocialGenericOAuth) Reload(ctx context.Context, settings ssoModels.SSOS
 		return ssosettings.ErrInvalidSettings.Errorf("SSO settings map cannot be converted to OAuthInfo: %v", err)
 	}
 
+	teamIds, allowedOrganizations, err := parseGenericOAuthAllowlists(newInfo)
+	if err != nil {
+		return ssosettings.ErrInvalidSettings.Errorf("%v", err)
+	}
+
 	s.reloadMutex.Lock()
 	defer s.reloadMutex.Unlock()
 
 	if err := s.updateInfo(ctx, social.GenericOAuthProviderName, newInfo); err != nil {
 		return err
-	}
-
-	teamIds, err := util.SplitStringWithError(newInfo.Extra[teamIdsKey])
-	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", teamIdsKey, "provider", social.GenericOAuthProviderName, "error", err)
-	}
-	allowedOrganizations, err := util.SplitStringWithError(newInfo.Extra[allowedOrganizationsKey])
-	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.GenericOAuthProviderName, "error", err)
 	}
 
 	s.teamsUrl = newInfo.TeamsUrl
@@ -171,6 +162,20 @@ func (s *SocialGenericOAuth) Reload(ctx context.Context, settings ssoModels.SSOS
 	s.allowedOrganizations = allowedOrganizations
 
 	return nil
+}
+
+func parseGenericOAuthAllowlists(info *social.OAuthInfo) ([]string, []string, error) {
+	teamIds, err := util.SplitStringWithError(info.Extra[teamIdsKey])
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid %s for %s: %w", teamIdsKey, social.GenericOAuthProviderName, err)
+	}
+
+	allowedOrganizations, err := util.SplitStringWithError(info.Extra[allowedOrganizationsKey])
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid %s for %s: %w", allowedOrganizationsKey, social.GenericOAuthProviderName, err)
+	}
+
+	return teamIds, allowedOrganizations, nil
 }
 
 func (s *SocialGenericOAuth) isTeamMember(ctx context.Context, client *http.Client) bool {
