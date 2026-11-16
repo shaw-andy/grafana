@@ -67,25 +67,15 @@ func NewGitHubProvider(ctx context.Context, info *social.OAuthInfo, cfgProvider 
 		return nil, err
 	}
 
-	teamIdsSplitted, err := util.SplitStringWithError(info.Extra[teamIdsKey])
+	teamIds, allowedOrganizations, err := parseGithubAllowlists(info)
 	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", teamIdsKey, "provider", social.GitHubProviderName, "error", err)
-	}
-	teamIds := mustInts(teamIdsSplitted)
-
-	allowedOrganizations, err := util.SplitStringWithError(info.Extra[allowedOrganizationsKey])
-	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.GitHubProviderName, "error", err)
+		return nil, err
 	}
 
 	provider := &SocialGithub{
 		SocialBase:           s,
 		teamIds:              teamIds,
 		allowedOrganizations: allowedOrganizations,
-	}
-
-	if len(teamIdsSplitted) != len(teamIds) {
-		provider.log.Warn("Failed to parse team ids. Team ids must be a list of numbers.", "teamIds", teamIdsSplitted)
 	}
 
 	if ssoSettings != nil {
@@ -119,10 +109,7 @@ func (s *SocialGithub) Validate(ctx context.Context, newSettings ssoModels.SSOSe
 }
 
 func teamIdsNumbersValidator(info *social.OAuthInfo, requester identity.Requester) error {
-	teamIdsSplitted := util.SplitString(info.Extra[teamIdsKey])
-	teamIds := mustInts(teamIdsSplitted)
-
-	if len(teamIdsSplitted) != len(teamIds) {
+	if _, err := parseTeamIds(info.Extra[teamIdsKey]); err != nil {
 		return ssosettings.ErrInvalidOAuthConfig("Failed to parse Team Ids. Team Ids must be a list of numbers.")
 	}
 
@@ -135,19 +122,9 @@ func (s *SocialGithub) Reload(ctx context.Context, settings ssoModels.SSOSetting
 		return ssosettings.ErrInvalidSettings.Errorf("SSO settings map cannot be converted to OAuthInfo: %v", err)
 	}
 
-	teamIdsSplitted, err := util.SplitStringWithError(newInfo.Extra[teamIdsKey])
+	teamIds, allowedOrganizations, err := parseGithubAllowlists(newInfo)
 	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", teamIdsKey, "provider", social.GitHubProviderName, "error", err)
-	}
-	teamIds := mustInts(teamIdsSplitted)
-
-	allowedOrganizations, err := util.SplitStringWithError(newInfo.Extra[allowedOrganizationsKey])
-	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.GitHubProviderName, "error", err)
-	}
-
-	if len(teamIdsSplitted) != len(teamIds) {
-		s.log.Warn("Failed to parse team ids. Team ids must be a list of numbers.", "teamIds", teamIdsSplitted)
+		return ssosettings.ErrInvalidSettings.Errorf("%v", err)
 	}
 
 	s.reloadMutex.Lock()
@@ -419,14 +396,35 @@ func convertToGroupList(t []GithubTeam) []string {
 	return groups
 }
 
-func mustInts(s []string) []int {
-	result := make([]int, 0, len(s))
-	for _, v := range s {
+// An empty team or organization list disables that restriction, so a value that
+// cannot be fully parsed must be rejected rather than reduced to an empty list.
+func parseGithubAllowlists(info *social.OAuthInfo) ([]int, []string, error) {
+	teamIds, err := parseTeamIds(info.Extra[teamIdsKey])
+	if err != nil {
+		return nil, nil, err
+	}
+
+	allowedOrganizations, err := util.SplitStringWithError(info.Extra[allowedOrganizationsKey])
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid %s for %s: %w", allowedOrganizationsKey, social.GitHubProviderName, err)
+	}
+
+	return teamIds, allowedOrganizations, nil
+}
+
+func parseTeamIds(value string) ([]int, error) {
+	teamIdsSplitted, err := util.SplitStringWithError(value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s for %s: %w", teamIdsKey, social.GitHubProviderName, err)
+	}
+
+	teamIds := make([]int, 0, len(teamIdsSplitted))
+	for _, v := range teamIdsSplitted {
 		num, err := strconv.Atoi(v)
 		if err != nil {
-			return []int{}
+			return nil, fmt.Errorf("invalid %s for %s: team ids must be a list of numbers: %q is not a number", teamIdsKey, social.GitHubProviderName, v)
 		}
-		result = append(result, num)
+		teamIds = append(teamIds, num)
 	}
-	return result
+	return teamIds, nil
 }
