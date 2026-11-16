@@ -2,6 +2,7 @@ import { lastValueFrom } from 'rxjs';
 
 import { getBackendSrv, isFetchError } from '@grafana/runtime';
 import { contextSrv } from 'app/core/services/context_srv';
+import { isSafeIdPathSegment } from 'app/core/utils/pathSegment';
 import { AccessControlAction } from 'app/types/accessControl';
 import { type Settings, type UpdateSettingsQuery } from 'app/types/settings';
 import { type ThunkResult } from 'app/types/store';
@@ -39,7 +40,16 @@ export function loadSettings(showSpinner = true): ThunkResult<Promise<Settings>>
 
 export function loadProviders(provider = ''): ThunkResult<Promise<SSOProvider[]>> {
   return async (dispatch) => {
-    const result = await getBackendSrv().get(`/api/v1/sso-settings${provider ? `/${provider}` : ''}`);
+    if (provider && !isSafeIdPathSegment(provider)) {
+      dispatch(providersLoaded([]));
+      return [];
+    }
+    const result = await getBackendSrv().get(
+      `/api/v1/sso-settings${provider ? `/${encodeURIComponent(provider)}` : ''}`,
+      undefined,
+      undefined,
+      { validatePath: true }
+    );
     dispatch(providersLoaded(provider ? [result] : result));
     return result;
   };

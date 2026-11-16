@@ -10,7 +10,6 @@ import { Button, Field, Input, useStyles2 } from '@grafana/ui';
 import { Form } from 'app/core/components/Form/Form';
 import { Page } from 'app/core/components/Page/Page';
 import { getConfig } from 'app/core/config';
-
 import { w3cStandardEmailValidator } from '../admin/utils';
 
 interface FormModel {
@@ -41,7 +40,14 @@ export const SignupInvitedPage = () => {
   const styles = useStyles2(getStyles);
 
   useAsync(async () => {
-    const invite = await getBackendSrv().get(`/api/user/invite/${code}`);
+    const invite = await getBackendSrv().get(
+      `/api/user/invite/${encodeURIComponent(code ?? '')}`,
+      undefined,
+      undefined,
+      {
+        validatePath: true,
+      }
+    );
 
     setInitFormModel({
       email: invite.email,

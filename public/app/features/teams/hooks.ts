@@ -24,6 +24,7 @@ import {
 } from 'app/api/clients/legacy';
 import { updateNavIndex } from 'app/core/reducers/navModel';
 import { contextSrv } from 'app/core/services/context_srv';
+import { isSafeIdPathSegment } from 'app/core/utils/pathSegment';
 import { addFilteredDisplayName } from 'app/core/utils/roles';
 import { AccessControlAction } from 'app/types/accessControl';
 import { useDispatch } from 'app/types/store';
@@ -91,7 +92,7 @@ export const useGetTeams = ({
  * Get a single team by UID
  */
 export const useGetTeam = ({ uid }: { uid: string }) => {
-  const response = useGetTeamByIdQuery({ teamId: uid, accesscontrol: true });
+  const response = useGetTeamByIdQuery(isSafeIdPathSegment(uid) ? { teamId: uid, accesscontrol: true } : skipToken);
   const dispatch = useDispatch();
 
   // TODO: Eventually remove and handle nav index logic elsewhere

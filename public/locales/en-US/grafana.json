@@ -240,6 +240,8 @@
       "title": "Enterprise license"
     },
     "user-admin-page": {
+      "invalid-user-id-body": "The user id in the address is not valid.",
+      "invalid-user-id-title": "User not found",
       "page-nav": {
         "subTitle": {
           "manage-settings-for-an-individual-user": "Manage settings for an individual user."

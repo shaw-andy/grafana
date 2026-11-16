@@ -73,7 +73,7 @@ export const ProviderConfigForm = ({ config, provider, isLoading }: ProviderConf
     const requestData = dtoToData(data, provider);
     try {
       await getBackendSrv().put(
-        `/api/v1/sso-settings/${provider}`,
+        `/api/v1/sso-settings/${encodeURIComponent(provider)}`,
         {
           id: config?.id,
           provider: config?.provider,
@@ -81,6 +81,7 @@ export const ProviderConfigForm = ({ config, provider, isLoading }: ProviderConf
         },
         {
           showErrorAlert: false,
+          validatePath: true,
         }
       );
 
@@ -116,7 +117,10 @@ export const ProviderConfigForm = ({ config, provider, isLoading }: ProviderConf
 
   const onResetConfig = async () => {
     try {
-      await getBackendSrv().delete(`/api/v1/sso-settings/${provider}`, undefined, { showSuccessAlert: false });
+      await getBackendSrv().delete(`/api/v1/sso-settings/${encodeURIComponent(provider)}`, undefined, {
+        showSuccessAlert: false,
+        validatePath: true,
+      });
       reportInteraction('grafana_authentication_ssosettings_removed', {
         provider,
       });
