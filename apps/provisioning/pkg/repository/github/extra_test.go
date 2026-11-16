@@ -108,6 +108,30 @@ func TestExtra_Build(t *testing.T) {
 			expectedError: "unable to decrypt token",
 		},
 		{
+			name: "connection repository outside github.com",
+			repo: &provisioning.Repository{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-repo",
+					Namespace: "default",
+				},
+				Spec: provisioning.RepositorySpec{
+					Type: provisioning.GitHubRepositoryType,
+					GitHub: &provisioning.GitHubRepositoryConfig{
+						URL:    "https://git.example.com/test/repo",
+						Branch: "main",
+					},
+					Connection: &provisioning.ConnectionInfo{Name: "my-connection"},
+				},
+			},
+			setupDecrypter: func() repository.Decrypter {
+				return func(r *provisioning.Repository) repository.SecureValues {
+					return &mockSecureValues{token: "token"}
+				}
+			},
+			setupWebhook:  func(t *testing.T, repo *provisioning.Repository) github.WebhookURLBuilder { return nil },
+			expectedError: "repositories that use a connection must have an https://github.com URL",
+		},
+		{
 			name: "success without webhooks",
 			repo: &provisioning.Repository{
 				ObjectMeta: metav1.ObjectMeta{

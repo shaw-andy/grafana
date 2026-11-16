@@ -1803,6 +1803,34 @@ func TestConnection_GenerateRepositoryToken(t *testing.T) {
 			expectedError: "failed to parse repo URL",
 		},
 		{
+			name: "repository URL outside github.com returns error",
+			connection: &provisioning.Connection{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-connection"},
+				Spec: provisioning.ConnectionSpec{
+					Type: provisioning.GithubConnectionType,
+					GitHub: &provisioning.GitHubConnectionConfig{
+						AppID:          "123",
+						InstallationID: "456",
+					},
+				},
+				Secure: provisioning.ConnectionSecure{
+					Token: common.InlineSecureValue{
+						Create: common.RawSecureValue("jwt-token"),
+					},
+				},
+			},
+			repo: &provisioning.Repository{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-repo"},
+				Spec: provisioning.RepositorySpec{
+					Type: provisioning.GitHubRepositoryType,
+					GitHub: &provisioning.GitHubRepositoryConfig{
+						URL: "https://git.example.com/test-owner/test-repo",
+					},
+				},
+			},
+			expectedError: "is not on the GitHub server this connection is installed on",
+		},
+		{
 			name: "GitHub API error",
 			connection: &provisioning.Connection{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-connection"},
@@ -2210,6 +2238,66 @@ func TestNewConnectionWithCustomConfig(t *testing.T) {
 	claims, ok := parsedToken.Claims.(jwt.MapClaims)
 	require.True(t, ok)
 	assert.Equal(t, "custom-app-id", claims["iss"], "issuer should come from the injected config, not spec.github")
+}
+
+func TestConnection_GenerateRepositoryToken_CustomServerHost(t *testing.T) {
+	tests := []struct {
+		name      string
+		serverURL string
+		repoURL   string
+		allowed   bool
+	}{
+		{name: "same host", serverURL: "https://ghes.example.com", repoURL: "https://ghes.example.com/owner/repo", allowed: true},
+		{name: "server with api path", serverURL: "https://ghes.example.com/api/v3", repoURL: "https://ghes.example.com/owner/repo", allowed: true},
+		{name: "data residency api host", serverURL: "https://api.acme.ghe.com", repoURL: "https://acme.ghe.com/owner/repo", allowed: true},
+		{name: "other host", serverURL: "https://ghes.example.com", repoURL: "https://git.example.com/owner/repo"},
+		{name: "github.com", serverURL: "https://ghes.example.com", repoURL: "https://github.com/owner/repo"},
+		{name: "suffix host", serverURL: "https://ghes.example.com", repoURL: "https://ghes.example.com.git.example.com/owner/repo"},
+		{name: "userinfo", serverURL: "https://ghes.example.com", repoURL: "https://ghes.example.com@git.example.com/owner/repo"},
+		{name: "scheme change", serverURL: "https://ghes.example.com", repoURL: "http://ghes.example.com/owner/repo"},
+		{name: "port change", serverURL: "https://ghes.example.com", repoURL: "https://ghes.example.com:8443/owner/repo"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := github.NewMockConnectionConfig(t)
+			cfg.EXPECT().CustomServerURL().Return(tt.serverURL)
+			cfg.EXPECT().InstallationID().Return("456").Maybe()
+
+			mockFactory := github.NewMockGithubFactory(t)
+			if tt.allowed {
+				mockClient := github.NewMockClient(t)
+				mockFactory.EXPECT().New(mock.Anything, common.RawSecureValue("jwt-token"), mock.Anything).Return(mockClient, nil)
+				mockClient.EXPECT().CreateInstallationAccessToken(mock.Anything, "456", "repo").
+					Return(github.InstallationToken{Token: "installation-token"}, nil)
+			}
+
+			obj := &provisioning.Connection{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-connection"},
+				Spec: provisioning.ConnectionSpec{
+					Type:             provisioning.GithubEnterpriseConnectionType,
+					GitHubEnterprise: &provisioning.GitHubEnterpriseConnectionConfig{},
+				},
+			}
+			conn := github.NewConnectionWithCustomConfig(obj, mockFactory, github.ConnectionSecrets{
+				Token: common.RawSecureValue("jwt-token"),
+			}, cfg)
+
+			token, err := conn.GenerateRepositoryToken(t.Context(), &provisioning.Repository{
+				Spec: provisioning.RepositorySpec{
+					Type:             provisioning.GitHubEnterpriseRepositoryType,
+					GitHubEnterprise: &provisioning.GitHubEnterpriseRepositoryConfig{URL: tt.repoURL},
+				},
+			})
+			if tt.allowed {
+				require.NoError(t, err)
+				require.Equal(t, common.RawSecureValue("installation-token"), token.Token)
+				return
+			}
+			require.ErrorIs(t, err, connection.ErrRepositoryAccess)
+			require.Nil(t, token)
+		})
+	}
 }
 
 func getIssuingAndExpirationTimeFromToken(token common.RawSecureValue) (time.Time, time.Time, error) {

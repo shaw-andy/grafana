@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -329,6 +331,11 @@ func (c *Connection) GenerateRepositoryToken(ctx context.Context, repo *provisio
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse repo URL: %w", err)
 	}
+	// The installation token is scoped by repository name only, so the URL host
+	// decides who receives it.
+	if !isOnServer(repo.URL(), c.cfg.CustomServerURL()) {
+		return nil, fmt.Errorf("repository URL %q is not on the GitHub server this connection is installed on: %w", repo.URL(), connection.ErrRepositoryAccess)
+	}
 
 	// Create the GitHub client with the JWT token
 	ghClient, err := c.ghFactory.New(ctx, c.secrets.Token, WithCustomServerURL(c.cfg.CustomServerURL()))
@@ -355,6 +362,29 @@ func (c *Connection) GenerateRepositoryToken(ctx context.Context, repo *provisio
 		Token:     common.RawSecureValue(installationToken.Token),
 		ExpiresAt: installationToken.ExpiresAt,
 	}, nil
+}
+
+// isOnServer reports whether rawURL is on the GitHub server the app is installed
+// on: github.com when serverURL is empty, otherwise serverURL's host.
+func isOnServer(rawURL, serverURL string) bool {
+	if serverURL == "" {
+		return github.IsDotComURL(rawURL)
+	}
+	repoURL, err := url.Parse(rawURL)
+	if err != nil || repoURL.User != nil || repoURL.Opaque != "" {
+		return false
+	}
+	server, err := url.Parse(serverURL)
+	if err != nil || server.Host == "" {
+		return false
+	}
+	if repoURL.Scheme != server.Scheme || repoURL.Port() != server.Port() {
+		return false
+	}
+	repoHost := strings.ToLower(repoURL.Hostname())
+	serverHost := strings.ToLower(server.Hostname())
+	// GHE.com data residency serves its REST API from api.<host>.
+	return repoHost == serverHost || serverHost == "api."+repoHost
 }
 
 // ListRepositories returns the list of repositories accessible through this GitHub App connection.

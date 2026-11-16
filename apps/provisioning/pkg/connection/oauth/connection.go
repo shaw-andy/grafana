@@ -24,6 +24,10 @@ import (
 type Provider interface {
 	Endpoint() oauth2.Endpoint
 	ListRepositories(ctx context.Context) ([]provisioning.ExternalRepository, error)
+	// AuthorizesRepositoryURL reports whether rawURL is on the host the user
+	// authorized. The access token is not repository scoped, so it must not be
+	// handed to a repository on any other host.
+	AuthorizesRepositoryURL(rawURL string) bool
 }
 
 type oauthConnection struct {
@@ -89,6 +93,9 @@ func (c *oauthConnection) GenerateRepositoryToken(_ context.Context, repo *provi
 	}
 	if repo.Spec.Type != c.repoType {
 		return nil, fmt.Errorf("repository type %q is not served by this connection (serves %q)", repo.Spec.Type, c.repoType)
+	}
+	if !c.provider.AuthorizesRepositoryURL(repo.URL()) {
+		return nil, fmt.Errorf("repository URL %q is not on the host this connection was authorized for: %w", repo.URL(), connection.ErrRepositoryAccess)
 	}
 
 	token, err := parseToken(c.token)

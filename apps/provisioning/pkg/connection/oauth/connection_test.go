@@ -115,12 +115,22 @@ func TestConnection_GenerateRepositoryToken(t *testing.T) {
 	expiry := time.Now().Add(time.Hour).Truncate(time.Second)
 
 	tests := []struct {
-		name        string
-		repo        *provisioning.Repository
-		token       common.RawSecureValue
-		expectedErr string
-		validate    func(t *testing.T, value *connection.ExpirableSecureValue)
+		name          string
+		repo          *provisioning.Repository
+		token         common.RawSecureValue
+		foreignHost   bool
+		expectedErr   string
+		expectedErrIs error
+		validate      func(t *testing.T, value *connection.ExpirableSecureValue)
 	}{
+		{
+			name:          "failure - repository host not authorized by provider",
+			repo:          &provisioning.Repository{Spec: provisioning.RepositorySpec{Type: provisioning.GitLabRepositoryType}},
+			token:         marshalTestToken(t, &oauth2.Token{AccessToken: "access"}),
+			foreignHost:   true,
+			expectedErr:   "is not on the host this connection was authorized for",
+			expectedErrIs: connection.ErrRepositoryAccess,
+		},
 		{
 			name:  "success - expiring token",
 			repo:  &provisioning.Repository{Spec: provisioning.RepositorySpec{Type: provisioning.GitLabRepositoryType}},
@@ -163,11 +173,15 @@ func TestConnection_GenerateRepositoryToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			conn := newConnection(newMockProvider(t, ""), provisioning.GitLabRepositoryType, testOAuthConfig, "", tt.token)
+			conn := newConnection(newMockProviderForHost(t, "", !tt.foreignHost), provisioning.GitLabRepositoryType, testOAuthConfig, "", tt.token)
 
 			value, err := conn.GenerateRepositoryToken(t.Context(), tt.repo)
 			if tt.expectedErr != "" {
 				require.ErrorContains(t, err, tt.expectedErr)
+				if tt.expectedErrIs != nil {
+					require.ErrorIs(t, err, tt.expectedErrIs)
+				}
+				require.Nil(t, value)
 				return
 			}
 			require.NoError(t, err)
@@ -429,8 +443,13 @@ func TestConnection_ValidateToken(t *testing.T) {
 var testOAuthConfig = provisioning.ConnectionOAuthConfig{ClientID: "client-id"}
 
 func newMockProvider(t *testing.T, tokenURL string) *MockProvider {
+	return newMockProviderForHost(t, tokenURL, true)
+}
+
+func newMockProviderForHost(t *testing.T, tokenURL string, authorized bool) *MockProvider {
 	provider := NewMockProvider(t)
 	provider.EXPECT().Endpoint().Return(oauth2.Endpoint{TokenURL: tokenURL}).Maybe()
+	provider.EXPECT().AuthorizesRepositoryURL(mock.Anything).Return(authorized).Maybe()
 	return provider
 }
 

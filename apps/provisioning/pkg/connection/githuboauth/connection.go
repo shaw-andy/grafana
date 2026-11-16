@@ -34,4 +34,10 @@ func (p *provider) ListRepositories(ctx context.Context) ([]provisioning.Externa
 	return repos, nil
 }
 
+// AuthorizesRepositoryURL allows only github.com: the OAuth endpoints are
+// github.com's, so the user authorized nothing else.
+func (p *provider) AuthorizesRepositoryURL(rawURL string) bool {
+	return github.IsDotComURL(rawURL)
+}
+
 var _ oauth.Provider = (*provider)(nil)

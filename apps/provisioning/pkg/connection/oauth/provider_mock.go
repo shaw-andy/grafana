@@ -23,6 +23,52 @@ func (_m *MockProvider) EXPECT() *MockProvider_Expecter {
 	return &MockProvider_Expecter{mock: &_m.Mock}
 }
 
+// AuthorizesRepositoryURL provides a mock function with given fields: rawURL
+func (_m *MockProvider) AuthorizesRepositoryURL(rawURL string) bool {
+	ret := _m.Called(rawURL)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AuthorizesRepositoryURL")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = rf(rawURL)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockProvider_AuthorizesRepositoryURL_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AuthorizesRepositoryURL'
+type MockProvider_AuthorizesRepositoryURL_Call struct {
+	*mock.Call
+}
+
+// AuthorizesRepositoryURL is a helper method to define mock.On call
+//   - rawURL string
+func (_e *MockProvider_Expecter) AuthorizesRepositoryURL(rawURL interface{}) *MockProvider_AuthorizesRepositoryURL_Call {
+	return &MockProvider_AuthorizesRepositoryURL_Call{Call: _e.mock.On("AuthorizesRepositoryURL", rawURL)}
+}
+
+func (_c *MockProvider_AuthorizesRepositoryURL_Call) Run(run func(rawURL string)) *MockProvider_AuthorizesRepositoryURL_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockProvider_AuthorizesRepositoryURL_Call) Return(_a0 bool) *MockProvider_AuthorizesRepositoryURL_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockProvider_AuthorizesRepositoryURL_Call) RunAndReturn(run func(string) bool) *MockProvider_AuthorizesRepositoryURL_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Endpoint provides a mock function with no fields
 func (_m *MockProvider) Endpoint() oauth2.Endpoint {
 	ret := _m.Called()
