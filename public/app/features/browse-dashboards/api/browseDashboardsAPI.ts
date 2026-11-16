@@ -117,7 +117,7 @@ export const browseDashboardsAPI = createApi({
     getFolder: builder.query<FolderDTO, { folderUID: string; accesscontrol: boolean; isLegacyCall: boolean }>({
       providesTags: (_result, _error, { folderUID }) => [{ type: 'getFolder', id: folderUID }],
       query: ({ folderUID, accesscontrol, isLegacyCall }) => ({
-        url: `/folders/${folderUID}`,
+        url: `/folders/${encodeURIComponent(folderUID)}`,
         params: {
           accesscontrol,
           // Add additional query param so we can tell when
@@ -164,7 +164,7 @@ export const browseDashboardsAPI = createApi({
       invalidatesTags: ['getFolder'],
       query: ({ uid, title, version }) => ({
         method: 'PUT',
-        url: `/folders/${uid}`,
+        url: `/folders/${encodeURIComponent(uid)}`,
         body: {
           title,
           version,
@@ -191,7 +191,7 @@ export const browseDashboardsAPI = createApi({
     moveFolder: builder.mutation<void, MoveFolderArgs>({
       invalidatesTags: ['getFolder'],
       query: ({ folderUID, destinationUID }) => ({
-        url: `/folders/${folderUID}/move`,
+        url: `/folders/${encodeURIComponent(folderUID)}/move`,
         method: 'POST',
         body: { parentUID: destinationUID },
       }),
@@ -213,7 +213,7 @@ export const browseDashboardsAPI = createApi({
     deleteFolder: builder.mutation<void, FolderDTO>({
       invalidatesTags: invalidateFolderListOnSuccess,
       query: ({ uid }) => ({
-        url: `/folders/${uid}`,
+        url: `/folders/${encodeURIComponent(uid)}`,
         method: 'DELETE',
         params: deleteFolderParams,
       }),
@@ -240,7 +240,14 @@ export const browseDashboardsAPI = createApi({
       queryFn: async ({ folderUIDs, dashboardUIDs }) => {
         try {
           const promises = folderUIDs.map((folderUID) => {
-            return getBackendSrv().get<DescendantCountDTO>(`/api/folders/${folderUID}/counts`);
+            return getBackendSrv().get<DescendantCountDTO>(
+              `/api/folders/${encodeURIComponent(folderUID)}/counts`,
+              undefined,
+              undefined,
+              {
+                validatePath: true,
+              }
+            );
           });
           const results = await Promise.all(promises);
 
@@ -333,7 +340,7 @@ export const browseDashboardsAPI = createApi({
           }
 
           await baseQuery({
-            url: `/folders/${folderUID}/move`,
+            url: `/folders/${encodeURIComponent(folderUID)}/move`,
             method: 'POST',
             body: { parentUID: destinationUID },
           });
@@ -370,7 +377,7 @@ export const browseDashboardsAPI = createApi({
 
             attempted++;
             const response = await baseQuery({
-              url: `/folders/${folderUID}`,
+              url: `/folders/${encodeURIComponent(folderUID)}`,
               method: 'DELETE',
               params: deleteFolderParams,
             });

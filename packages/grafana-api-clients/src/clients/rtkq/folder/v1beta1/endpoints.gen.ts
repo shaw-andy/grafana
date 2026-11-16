@@ -42,7 +42,7 @@ const injectedRtkApi = api
       }),
       getFolder: build.query<GetFolderApiResponse, GetFolderApiArg>({
         query: (queryArg) => ({
-          url: `/folders/${queryArg.name}`,
+          url: `/folders/${encodeURIComponent(String(queryArg.name))}`,
           params: {
             pretty: queryArg.pretty,
           },
@@ -51,7 +51,7 @@ const injectedRtkApi = api
       }),
       replaceFolder: build.mutation<ReplaceFolderApiResponse, ReplaceFolderApiArg>({
         query: (queryArg) => ({
-          url: `/folders/${queryArg.name}`,
+          url: `/folders/${encodeURIComponent(String(queryArg.name))}`,
           method: 'PUT',
           body: queryArg.folder,
           params: {
@@ -65,7 +65,7 @@ const injectedRtkApi = api
       }),
       deleteFolder: build.mutation<DeleteFolderApiResponse, DeleteFolderApiArg>({
         query: (queryArg) => ({
-          url: `/folders/${queryArg.name}`,
+          url: `/folders/${encodeURIComponent(String(queryArg.name))}`,
           method: 'DELETE',
           params: {
             pretty: queryArg.pretty,
@@ -80,7 +80,7 @@ const injectedRtkApi = api
       }),
       updateFolder: build.mutation<UpdateFolderApiResponse, UpdateFolderApiArg>({
         query: (queryArg) => ({
-          url: `/folders/${queryArg.name}`,
+          url: `/folders/${encodeURIComponent(String(queryArg.name))}`,
           method: 'PATCH',
           body: queryArg.patch,
           params: {
@@ -94,19 +94,19 @@ const injectedRtkApi = api
         invalidatesTags: ['Folder'],
       }),
       getFolderAccess: build.query<GetFolderAccessApiResponse, GetFolderAccessApiArg>({
-        query: (queryArg) => ({ url: `/folders/${queryArg.name}/access` }),
+        query: (queryArg) => ({ url: `/folders/${encodeURIComponent(String(queryArg.name))}/access` }),
         providesTags: ['Folder'],
       }),
       getFolderChildren: build.query<GetFolderChildrenApiResponse, GetFolderChildrenApiArg>({
-        query: (queryArg) => ({ url: `/folders/${queryArg.name}/children` }),
+        query: (queryArg) => ({ url: `/folders/${encodeURIComponent(String(queryArg.name))}/children` }),
         providesTags: ['Folder'],
       }),
       getFolderCounts: build.query<GetFolderCountsApiResponse, GetFolderCountsApiArg>({
-        query: (queryArg) => ({ url: `/folders/${queryArg.name}/counts` }),
+        query: (queryArg) => ({ url: `/folders/${encodeURIComponent(String(queryArg.name))}/counts` }),
         providesTags: ['Folder'],
       }),
       getFolderParents: build.query<GetFolderParentsApiResponse, GetFolderParentsApiArg>({
-        query: (queryArg) => ({ url: `/folders/${queryArg.name}/parents` }),
+        query: (queryArg) => ({ url: `/folders/${encodeURIComponent(String(queryArg.name))}/parents` }),
         providesTags: ['Folder'],
       }),
     }),
