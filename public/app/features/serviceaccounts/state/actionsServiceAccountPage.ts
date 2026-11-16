@@ -11,14 +11,13 @@ import {
   serviceAccountLoaded,
   serviceAccountTokensLoaded,
 } from './reducers';
-
-const BASE_URL = `/api/serviceaccounts`;
+import { serviceAccountApiUrl } from './serviceAccountApiUrl';
 
 export function loadServiceAccount(saUid: string): ThunkResult<void> {
   return async (dispatch) => {
     dispatch(serviceAccountFetchBegin());
     try {
-      const response = await getBackendSrv().get(`${BASE_URL}/${saUid}`, accessControlQueryParam());
+      const response = await getBackendSrv().get(serviceAccountApiUrl(saUid), accessControlQueryParam());
       dispatch(serviceAccountLoaded(response));
     } catch (error) {
       console.error(error);
@@ -30,7 +29,7 @@ export function loadServiceAccount(saUid: string): ThunkResult<void> {
 
 export function updateServiceAccount(serviceAccount: ServiceAccountDTO): ThunkResult<void> {
   return async (dispatch) => {
-    await getBackendSrv().patch(`${BASE_URL}/${serviceAccount.uid}?accesscontrol=true`, {
+    await getBackendSrv().patch(`${serviceAccountApiUrl(serviceAccount.uid)}?accesscontrol=true`, {
       ...serviceAccount,
     });
     dispatch(loadServiceAccount(serviceAccount.uid));
@@ -39,7 +38,7 @@ export function updateServiceAccount(serviceAccount: ServiceAccountDTO): ThunkRe
 
 export function deleteServiceAccount(serviceAccountUid: string): ThunkResult<void> {
   return async () => {
-    await getBackendSrv().delete(`${BASE_URL}/${serviceAccountUid}`);
+    await getBackendSrv().delete(serviceAccountApiUrl(serviceAccountUid));
     locationService.push('/org/serviceaccounts');
   };
 }
@@ -50,7 +49,7 @@ export function createServiceAccountToken(
   onTokenCreated: (key: string) => void
 ): ThunkResult<void> {
   return async (dispatch) => {
-    const result = await getBackendSrv().post(`${BASE_URL}/${saUid}/tokens`, token);
+    const result = await getBackendSrv().post(serviceAccountApiUrl(saUid, 'tokens'), token);
     onTokenCreated(result.key);
     dispatch(loadServiceAccountTokens(saUid));
   };
@@ -58,7 +57,7 @@ export function createServiceAccountToken(
 
 export function deleteServiceAccountToken(saUid: string, id: number): ThunkResult<void> {
   return async (dispatch) => {
-    await getBackendSrv().delete(`${BASE_URL}/${saUid}/tokens/${id}`);
+    await getBackendSrv().delete(serviceAccountApiUrl(saUid, `tokens/${id}`));
     dispatch(loadServiceAccountTokens(saUid));
   };
 }
@@ -66,7 +65,7 @@ export function deleteServiceAccountToken(saUid: string, id: number): ThunkResul
 export function loadServiceAccountTokens(saUid: string): ThunkResult<void> {
   return async (dispatch) => {
     try {
-      const response = await getBackendSrv().get(`${BASE_URL}/${saUid}/tokens`);
+      const response = await getBackendSrv().get(serviceAccountApiUrl(saUid, 'tokens'));
       dispatch(serviceAccountTokensLoaded(response));
     } catch (error) {
       console.error(error);
