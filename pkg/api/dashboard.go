@@ -23,6 +23,7 @@ import (
 	"github.com/grafana/grafana/pkg/api/apierrors"
 	"github.com/grafana/grafana/pkg/api/dtos"
 	"github.com/grafana/grafana/pkg/api/response"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
 	"github.com/grafana/grafana/pkg/components/simplejson"
 	"github.com/grafana/grafana/pkg/infra/metrics"
@@ -127,10 +128,10 @@ func (hs *HTTPServer) GetDashboard(c *contextmodel.ReqContext) response.Response
 	// Finding creator and last updater of the dashboard
 	updater, creator := anonString, anonString
 	if dash.UpdatedBy > 0 {
-		updater = hs.getIdentityName(ctx, dash.OrgID, dash.UpdatedBy)
+		updater = hs.getIdentityName(ctx, c.SignedInUser, dash.OrgID, dash.UpdatedBy)
 	}
 	if dash.CreatedBy > 0 {
-		creator = hs.getIdentityName(ctx, dash.OrgID, dash.CreatedBy)
+		creator = hs.getIdentityName(ctx, c.SignedInUser, dash.OrgID, dash.CreatedBy)
 	}
 
 	annotationPermissions := &dashboardsV1.AnnotationPermission{}
@@ -260,8 +261,9 @@ func (hs *HTTPServer) getAnnotationPermissionsByScope(c *contextmodel.ReqContext
 	}
 }
 
-// getIdentityName returns name of either user or service account
-func (hs *HTTPServer) getIdentityName(ctx context.Context, orgID, id int64) string {
+// getIdentityName returns name of either user or service account, or anonString when
+// the account is listed in hidden_users and must not be revealed to the requester.
+func (hs *HTTPServer) getIdentityName(ctx context.Context, requester identity.Requester, orgID, id int64) string {
 	ctx, span := tracer.Start(ctx, "api.getIdentityName")
 	defer span.End()
 
@@ -271,6 +273,10 @@ func (hs *HTTPServer) getIdentityName(ctx context.Context, orgID, id int64) stri
 		OrgID:  orgID,
 	})
 	if err != nil {
+		return anonString
+	}
+
+	if dtos.IsHiddenUser(ident.GetLogin(), requester, hs.Cfg) {
 		return anonString
 	}
 
@@ -836,7 +842,7 @@ func (hs *HTTPServer) GetDashboardVersions(c *contextmodel.ReqContext) response.
 			if found {
 				creator = login
 			} else {
-				creator = hs.getIdentityName(c.Req.Context(), c.GetOrgID(), version.CreatedBy)
+				creator = hs.getIdentityName(c.Req.Context(), c.SignedInUser, c.GetOrgID(), version.CreatedBy)
 				if creator != anonString {
 					loginMem[version.CreatedBy] = creator
 				}
@@ -911,7 +917,7 @@ func (hs *HTTPServer) GetDashboardVersion(c *contextmodel.ReqContext) response.R
 
 	creator := anonString
 	if res.CreatedBy > 0 {
-		creator = hs.getIdentityName(c.Req.Context(), dash.OrgID, res.CreatedBy)
+		creator = hs.getIdentityName(c.Req.Context(), c.SignedInUser, dash.OrgID, res.CreatedBy)
 	}
 
 	dashVersionMeta := &dashver.DashboardVersionMeta{
