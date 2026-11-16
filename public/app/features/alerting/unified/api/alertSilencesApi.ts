@@ -46,7 +46,8 @@ export const alertSilencesApi = alertingApi.injectEndpoints({
       }
     >({
       query: ({ datasourceUid, id, ruleMetadata, accessControl }) => ({
-        url: `/api/alertmanager/${datasourceUid}/api/v2/silence/${id}`,
+        url: `/api/alertmanager/${encodeURIComponent(datasourceUid)}/api/v2/silence/${encodeURIComponent(id)}`,
+        validatePath: true,
         showErrorAlert: false,
         params: {
           ruleMetadata,
@@ -91,8 +92,9 @@ export const alertSilencesApi = alertingApi.injectEndpoints({
       }
     >({
       query: ({ datasourceUid, silenceId }) => ({
-        url: `/api/alertmanager/${datasourceUid}/api/v2/silence/${silenceId}`,
+        url: `/api/alertmanager/${encodeURIComponent(datasourceUid)}/api/v2/silence/${encodeURIComponent(silenceId)}`,
         method: 'DELETE',
+        validatePath: true,
       }),
       invalidatesTags: ['AlertmanagerSilences'],
     }),
