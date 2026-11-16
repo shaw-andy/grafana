@@ -1,6 +1,7 @@
 import { type DataSourcePluginMeta, PluginType } from '@grafana/data';
 import { t } from '@grafana/i18n';
 import { featureEnabled } from '@grafana/runtime';
+import { getSafeExternalPluginLinks } from 'app/features/plugins/admin/externalLinks';
 import { type DataSourcePluginCategory } from 'app/types/datasources';
 import grafanaIconSvg from 'img/grafana_icon.svg';
 import adobeAnalyticsSvg from 'img/plugins/adobe-analytics.svg';
@@ -82,6 +83,8 @@ export function buildCategories(plugins: DataSourcePluginMeta[]): DataSourcePlug
   }
 
   for (const plugin of plugins) {
+    plugin.info.links = getSafeExternalPluginLinks(plugin.info.links);
+
     const enterprisePlugin = enterprisePlugins.find((item) => item.id === plugin.id);
     // Force category for enterprise plugins
     if (plugin.enterprise || enterprisePlugin) {
