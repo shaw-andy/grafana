@@ -1029,7 +1029,7 @@ func RandomWalk(query backend.DataQuery, model kinds.TestDataQuery, index int) *
 
 	walker := startValue
 
-	for i := int64(0); i < 10000 && timeWalkerMs < to; i++ {
+	for i := int64(0); i < maxPointsPerSeries && timeWalkerMs < to; i++ {
 		nextValue := walker + (rand.Float64() * noise)
 
 		if hasMin && nextValue < min {
@@ -1330,6 +1330,9 @@ func randomWalkTable(query backend.DataQuery, model kinds.TestDataQuery) *data.F
 
 func predictableCSVWave(query backend.DataQuery, model kinds.TestDataQuery) ([]*data.Frame, error) {
 	queries := model.CsvWave
+	if len(queries) > maxCSVWavesPerQuery {
+		return nil, errTooManyCSVWaves
+	}
 
 	frames := make([]*data.Frame, 0, len(queries))
 
@@ -1394,12 +1397,11 @@ func predictableSeries(timeRange backend.TimeRange, timeStep, length int64, getV
 
 	timeCursor := from - (from % timeStep) // Truncate Start
 	wavePeriod := timeStep * length
-	maxPoints := 10000 // Don't return too many points
 
 	timeVec := make([]time.Time, 0)
 	floatVec := make([]*float64, 0)
 
-	for i := 0; i < maxPoints && timeCursor < to; i++ {
+	for i := 0; i < maxPointsPerSeries && timeCursor < to; i++ {
 		val, err := getValue(timeCursor % wavePeriod)
 		if err != nil {
 			return nil, err
