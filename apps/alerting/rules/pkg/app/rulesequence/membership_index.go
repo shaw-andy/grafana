@@ -38,11 +38,18 @@ import (
 type MembershipIndex struct {
 	// mu protects index and sequences.
 	mu sync.RWMutex
-	// index maps ruleUID -> sequenceUID (the Name field on the RuleSequence object).
-	index map[string]string
+	// index maps (namespace, ruleUID) -> sequenceUID (the Name field on the
+	// RuleSequence object). Rule and sequence UIDs are only unique within a
+	// namespace, so every key carries the namespace.
+	index map[namespacedName]string
 	// sequences stores the full set of rule refs per sequence so Update and
 	// Delete can remove stale entries without re-scanning.
-	sequences map[string][]string
+	sequences map[namespacedName][]string
+}
+
+type namespacedName struct {
+	namespace string
+	name      string
 }
 
 // NewMembershipIndex creates an empty index. The caller must register it as a
@@ -50,22 +57,22 @@ type MembershipIndex struct {
 // it.
 func NewMembershipIndex() *MembershipIndex {
 	return &MembershipIndex{
-		index:     make(map[string]string),
-		sequences: make(map[string][]string),
+		index:     make(map[namespacedName]string),
+		sequences: make(map[namespacedName][]string),
 	}
 }
 
-// Resolve returns membership information for the requested rule UIDs. Each UID
-// is looked up in O(1) time against the in-memory index.
+// Resolve returns membership information for the requested rule UIDs within
+// namespace. Each UID is looked up in O(1) time against the in-memory index.
 //
 // The returned map always contains an entry for every requested UID. If a UID
 // is not owned by any sequence, its entry has Found=false.
-func (m *MembershipIndex) Resolve(_ context.Context, uids []string) (map[string]config.RuleSequenceMembership, error) {
+func (m *MembershipIndex) Resolve(_ context.Context, namespace string, uids []string) (map[string]config.RuleSequenceMembership, error) {
 	result := make(map[string]config.RuleSequenceMembership, len(uids))
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, uid := range uids {
-		if seqUID, ok := m.index[uid]; ok {
+		if seqUID, ok := m.index[namespacedName{namespace, uid}]; ok {
 			result[uid] = config.RuleSequenceMembership{SequenceUID: seqUID, Found: true}
 		} else {
 			result[uid] = config.RuleSequenceMembership{}
@@ -83,13 +90,13 @@ func (m *MembershipIndex) Add(_ context.Context, obj resource.Object) error {
 	}
 
 	refs := collectRuleUIDs(seq)
-	seqUID := seq.Name
+	seqKey := namespacedName{seq.Namespace, seq.Name}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.sequences[seqUID] = refs
+	m.sequences[seqKey] = refs
 	for _, uid := range refs {
-		m.index[uid] = seqUID
+		m.index[namespacedName{seq.Namespace, uid}] = seq.Name
 	}
 	return nil
 }
@@ -106,8 +113,8 @@ func (m *MembershipIndex) Update(_ context.Context, old, new resource.Object) er
 		return fmt.Errorf("membership index received non-RuleSequence new object: %T", new)
 	}
 
-	oldUID := oldSeq.Name
-	newUID := newSeq.Name
+	oldKey := namespacedName{oldSeq.Namespace, oldSeq.Name}
+	newKey := namespacedName{newSeq.Namespace, newSeq.Name}
 	newRefs := collectRuleUIDs(newSeq)
 
 	m.mu.Lock()
@@ -116,19 +123,20 @@ func (m *MembershipIndex) Update(_ context.Context, old, new resource.Object) er
 	// Remove old entries. Only delete from index if the mapping still points to
 	// this sequence (another sequence could theoretically have claimed the UID
 	// in between, though admission should prevent this).
-	if oldRefs, exists := m.sequences[oldUID]; exists {
+	if oldRefs, exists := m.sequences[oldKey]; exists {
 		for _, uid := range oldRefs {
-			if m.index[uid] == oldUID {
-				delete(m.index, uid)
+			ruleKey := namespacedName{oldKey.namespace, uid}
+			if m.index[ruleKey] == oldKey.name {
+				delete(m.index, ruleKey)
 			}
 		}
-		delete(m.sequences, oldUID)
+		delete(m.sequences, oldKey)
 	}
 
 	// Index new entries.
-	m.sequences[newUID] = newRefs
+	m.sequences[newKey] = newRefs
 	for _, uid := range newRefs {
-		m.index[uid] = newUID
+		m.index[namespacedName{newKey.namespace, uid}] = newKey.name
 	}
 	return nil
 }
@@ -140,18 +148,19 @@ func (m *MembershipIndex) Delete(_ context.Context, obj resource.Object) error {
 		return fmt.Errorf("membership index received non-RuleSequence object: %T", obj)
 	}
 
-	seqUID := seq.Name
+	seqKey := namespacedName{seq.Namespace, seq.Name}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if refs, exists := m.sequences[seqUID]; exists {
+	if refs, exists := m.sequences[seqKey]; exists {
 		for _, uid := range refs {
-			if m.index[uid] == seqUID {
-				delete(m.index, uid)
+			ruleKey := namespacedName{seq.Namespace, uid}
+			if m.index[ruleKey] == seq.Name {
+				delete(m.index, ruleKey)
 			}
 		}
-		delete(m.sequences, seqUID)
+		delete(m.sequences, seqKey)
 	}
 	return nil
 }

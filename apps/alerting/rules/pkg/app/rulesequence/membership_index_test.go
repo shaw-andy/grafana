@@ -11,9 +11,12 @@ import (
 	model "github.com/grafana/grafana/apps/alerting/rules/pkg/apis/alerting/v0alpha1"
 )
 
+const testNamespace = "default"
+
 func makeRuleSequence(name string, recordingUIDs, alertingUIDs []string) *model.RuleSequence {
 	seq := model.NewRuleSequence()
 	seq.Name = name
+	seq.Namespace = testNamespace
 	seq.Spec.RecordingRules = make([]model.RuleSequenceRuleRef, len(recordingUIDs))
 	for i, uid := range recordingUIDs {
 		seq.Spec.RecordingRules[i] = model.RuleSequenceRuleRef{Name: model.RuleSequenceRuleUID(uid)}
@@ -27,7 +30,7 @@ func makeRuleSequence(name string, recordingUIDs, alertingUIDs []string) *model.
 
 func TestMembershipIndex_Resolve_empty_index_returns_not_found(t *testing.T) {
 	idx := NewMembershipIndex()
-	result, err := idx.Resolve(context.Background(), []string{"rule-1", "rule-2"})
+	result, err := idx.Resolve(context.Background(), testNamespace, []string{"rule-1", "rule-2"})
 	require.NoError(t, err)
 	assert.Len(t, result, 2)
 	assert.False(t, result["rule-1"].Found)
@@ -36,7 +39,7 @@ func TestMembershipIndex_Resolve_empty_index_returns_not_found(t *testing.T) {
 
 func TestMembershipIndex_Resolve_empty_uids_returns_empty_map(t *testing.T) {
 	idx := NewMembershipIndex()
-	result, err := idx.Resolve(context.Background(), nil)
+	result, err := idx.Resolve(context.Background(), testNamespace, nil)
 	require.NoError(t, err)
 	assert.Empty(t, result)
 }
@@ -47,7 +50,7 @@ func TestMembershipIndex_Add_indexes_all_refs(t *testing.T) {
 
 	require.NoError(t, idx.Add(context.Background(), seq))
 
-	result, err := idx.Resolve(context.Background(), []string{"rec-1", "rec-2", "alert-1", "unknown"})
+	result, err := idx.Resolve(context.Background(), testNamespace, []string{"rec-1", "rec-2", "alert-1", "unknown"})
 	require.NoError(t, err)
 
 	assert.Equal(t, "seq-1", result["rec-1"].SequenceUID)
@@ -64,7 +67,7 @@ func TestMembershipIndex_Add_multiple_sequences(t *testing.T) {
 	require.NoError(t, idx.Add(context.Background(), makeRuleSequence("seq-1", []string{"rec-1"}, nil)))
 	require.NoError(t, idx.Add(context.Background(), makeRuleSequence("seq-2", []string{"rec-2"}, []string{"alert-2"})))
 
-	result, err := idx.Resolve(context.Background(), []string{"rec-1", "rec-2", "alert-2"})
+	result, err := idx.Resolve(context.Background(), testNamespace, []string{"rec-1", "rec-2", "alert-2"})
 	require.NoError(t, err)
 
 	assert.Equal(t, "seq-1", result["rec-1"].SequenceUID)
@@ -81,7 +84,7 @@ func TestMembershipIndex_Update_replaces_old_refs(t *testing.T) {
 	newSeq := makeRuleSequence("seq-1", []string{"rec-1", "rec-3"}, nil)
 	require.NoError(t, idx.Update(context.Background(), oldSeq, newSeq))
 
-	result, err := idx.Resolve(context.Background(), []string{"rec-1", "rec-2", "rec-3", "alert-1"})
+	result, err := idx.Resolve(context.Background(), testNamespace, []string{"rec-1", "rec-2", "rec-3", "alert-1"})
 	require.NoError(t, err)
 
 	assert.True(t, result["rec-1"].Found, "rec-1 should still be indexed")
@@ -101,7 +104,7 @@ func TestMembershipIndex_Delete_removes_all_refs(t *testing.T) {
 
 	require.NoError(t, idx.Delete(context.Background(), seq))
 
-	result, err := idx.Resolve(context.Background(), []string{"rec-1", "rec-2", "alert-1"})
+	result, err := idx.Resolve(context.Background(), testNamespace, []string{"rec-1", "rec-2", "alert-1"})
 	require.NoError(t, err)
 
 	assert.False(t, result["rec-1"].Found)
@@ -119,7 +122,7 @@ func TestMembershipIndex_Delete_does_not_remove_other_sequence_refs(t *testing.T
 	// Delete seq-1: only rec-1 should be removed
 	require.NoError(t, idx.Delete(context.Background(), makeRuleSequence("seq-1", []string{"rec-1"}, nil)))
 
-	result, err := idx.Resolve(context.Background(), []string{"rec-1", "rec-2"})
+	result, err := idx.Resolve(context.Background(), testNamespace, []string{"rec-1", "rec-2"})
 	require.NoError(t, err)
 
 	assert.False(t, result["rec-1"].Found)
@@ -152,7 +155,7 @@ func TestMembershipIndex_Update_skips_empty_uids(t *testing.T) {
 	seq := makeRuleSequence("seq-1", []string{"rec-1", ""}, []string{"", "alert-1"})
 	require.NoError(t, idx.Add(context.Background(), seq))
 
-	result, err := idx.Resolve(context.Background(), []string{"rec-1", "alert-1", ""})
+	result, err := idx.Resolve(context.Background(), testNamespace, []string{"rec-1", "alert-1", ""})
 	require.NoError(t, err)
 
 	assert.True(t, result["rec-1"].Found)
