@@ -169,7 +169,8 @@ func (a *AnonDeviceService) TagDevice(ctx context.Context, httpReq *http.Request
 	return nil
 }
 
-// ListDevices returns all devices that have been updated between the given times.
+// ListDevices returns the most recently updated devices, up to anonstore.MaxDevicesPerPage,
+// that have been updated between the given times.
 func (a *AnonDeviceService) ListDevices(ctx context.Context, from *time.Time, to *time.Time) ([]*anonstore.Device, error) {
 	if !a.cfg.Anonymous.Enabled {
 		a.log.Debug("Anonymous access is disabled, returning empty result")
