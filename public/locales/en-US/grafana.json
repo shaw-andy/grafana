@@ -15280,6 +15280,9 @@
       "unsupported-data-source-alert-desc": "There are data sources in this dashboard that are unsupported for shared dashboards. Panels that use these data sources may not function properly: {{unsupportedDataSources}}."
     }
   },
+  "public-dashboard-scene": {
+    "invalid-access-token": "The public dashboard link is invalid. Check the link and try again."
+  },
   "public-dashboard-users-access-list": {
     "dashboard-modal": {
       "external-link": "External link",

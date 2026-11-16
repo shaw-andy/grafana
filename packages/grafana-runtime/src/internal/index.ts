@@ -18,6 +18,7 @@ export { type PageInfoItem, setPluginPage } from '../components/PluginPage';
 export { type LegacyFeatureToggleMode } from '../utils/legacyFeatureToggles';
 export { ExpressionDatasourceRef } from '../utils/expressionRef';
 export { standardStreamOptionsProvider, toStreamingDataResponse } from '../utils/DataSourceWithBackend';
+export { getPublicDashboardApiUrl, isValidPublicDashboardAccessToken } from '../utils/publicDashboardAccessToken';
 
 export {
   setGetObservablePluginComponents,

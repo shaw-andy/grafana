@@ -4,7 +4,9 @@ import { useParams } from 'react-router-dom-v5-compat';
 
 import { type GrafanaTheme2, PageLayoutType } from '@grafana/data';
 import { selectors as e2eSelectors } from '@grafana/e2e-selectors';
+import { t } from '@grafana/i18n';
 import { config } from '@grafana/runtime';
+import { isValidPublicDashboardAccessToken } from '@grafana/runtime/internal';
 import { type SceneComponentProps, UrlSyncContextProvider } from '@grafana/scenes';
 import { Alert, Box, Icon, Stack, useStyles2 } from '@grafana/ui';
 import { Page } from 'app/core/components/Page/Page';
@@ -36,13 +38,16 @@ export function PublicDashboardScenePage({ route }: Props) {
   const stateManager = getDashboardScenePageStateManager();
   const styles = useStyles2(getStyles);
   const { dashboard, isLoading, loadError } = stateManager.useState();
+  const isValidAccessToken = isValidPublicDashboardAccessToken(accessToken);
 
   useEffect(() => {
+    if (!isValidAccessToken) {
+      return;
+    }
+
     // Full page loads set this via boot data, but client-side navigation must set it here or panel queries will not use /api/public/dashboards/{token}/...
     const previousToken = config.publicDashboardAccessToken;
-    if (accessToken) {
-      config.publicDashboardAccessToken = accessToken;
-    }
+    config.publicDashboardAccessToken = accessToken;
 
     stateManager.loadDashboard({ uid: accessToken, route: DashboardRoutes.Public });
 
@@ -50,7 +55,20 @@ export function PublicDashboardScenePage({ route }: Props) {
       stateManager.clearState();
       config.publicDashboardAccessToken = previousToken;
     };
-  }, [stateManager, accessToken, route.routeName]);
+  }, [stateManager, accessToken, isValidAccessToken, route.routeName]);
+
+  if (!isValidAccessToken) {
+    return (
+      <PublicDashboardScenePageError
+        error={{
+          message: t(
+            'public-dashboard-scene.invalid-access-token',
+            'The public dashboard link is invalid. Check the link and try again.'
+          ),
+        }}
+      />
+    );
+  }
 
   if (loadError) {
     return <PublicDashboardScenePageError error={loadError} />;

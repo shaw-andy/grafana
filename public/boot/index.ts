@@ -113,7 +113,11 @@ async function fetchBootData(): Promise<FetchBootDataResult> {
   // call a special bootdata url with the public access token
   // this is needed to set the access token and correct org for public dashboards on the ST backend
   if (publicDashboardAccessToken) {
-    path += `/${publicDashboardAccessToken}`;
+    // Kept in sync with isValidPublicDashboardAccessToken in @grafana/runtime, which this bundle cannot import.
+    if (!/^[A-Za-z0-9_-]+$/.test(publicDashboardAccessToken)) {
+      throw new Error('Invalid public dashboard access token');
+    }
+    path += `/${encodeURIComponent(publicDashboardAccessToken)}`;
   }
   // pass the search params through to the bootdata request
   // this allows for overriding the theme/language etc
