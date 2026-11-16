@@ -3,7 +3,7 @@ package cloudwatch
 import (
 	"context"
 	"fmt"
-	"regexp"
+	"strings"
 
 	"golang.org/x/sync/errgroup"
 
@@ -138,7 +138,7 @@ func getQueryRefIdFromErrorString(err string, queriesByRegion map[string][]*mode
 
 	for _, queries := range queriesByRegion {
 		for _, query := range queries {
-			if regexp.MustCompile(`'`+query.RefId+`':`).MatchString(err) || regexp.MustCompile(`'`+query.Id+`':`).MatchString(err) {
+			if strings.Contains(err, "'"+query.RefId+"':") || strings.Contains(err, "'"+query.Id+"':") {
 				erroredRefId = query.RefId
 			}
 		}
