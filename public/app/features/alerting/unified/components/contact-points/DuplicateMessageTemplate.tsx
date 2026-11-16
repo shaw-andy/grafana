@@ -22,8 +22,7 @@ const notFoundComponent = <EntityNotFound entity="Notification template" />;
 
 const DuplicateMessageTemplateComponent = () => {
   const { selectedAlertmanager } = useAlertmanager();
-  const { name } = useParams<{ name: string }>();
-  const templateUid = name ? decodeURIComponent(name) : undefined;
+  const { name: templateUid } = useParams<{ name: string }>();
 
   const {
     currentData: template,

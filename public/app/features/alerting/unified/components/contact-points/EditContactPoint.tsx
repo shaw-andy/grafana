@@ -13,9 +13,8 @@ import { EditReceiverView } from '../receivers/EditReceiverView';
 
 const EditContactPoint = () => {
   const { selectedAlertmanager } = useAlertmanager();
-  const { name = '' } = useParams();
+  const { name: contactPointName = '' } = useParams();
 
-  const contactPointName = decodeURIComponent(name);
   const {
     isLoading,
     error,

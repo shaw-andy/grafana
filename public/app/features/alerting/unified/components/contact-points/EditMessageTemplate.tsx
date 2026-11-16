@@ -19,8 +19,7 @@ import { useGetNotificationTemplate } from './useNotificationTemplates';
 const notFoundComponent = <EntityNotFound entity="Notification template" />;
 
 const EditMessageTemplateComponent = () => {
-  const { name } = useParams<{ name: string }>();
-  const templateUid = name ? decodeURIComponent(name) : undefined;
+  const { name: templateUid } = useParams<{ name: string }>();
 
   const { selectedAlertmanager } = useAlertmanager();
   const { currentData, isLoading, error, isUninitialized } = useGetNotificationTemplate({
