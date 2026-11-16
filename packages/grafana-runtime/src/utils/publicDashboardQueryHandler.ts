@@ -1,10 +1,11 @@
-import { catchError, type Observable, of, switchMap } from 'rxjs';
+import { catchError, type Observable, of, switchMap, throwError } from 'rxjs';
 
 import { type DataQuery, type DataQueryRequest, type DataQueryResponse } from '@grafana/data';
 
 import { config } from '../config';
 import { getBackendSrv } from '../services/backendSrv';
 
+import { getPublicDashboardApiUrl } from './publicDashboardAccessToken';
 import { type BackendDataSourceResponse, toDataQueryResponse } from './queryResponse';
 
 export function publicDashboardQueryHandler(request: DataQueryRequest<DataQuery>): Observable<DataQueryResponse> {
@@ -25,6 +26,13 @@ export function publicDashboardQueryHandler(request: DataQueryRequest<DataQuery>
     return of({ data: [] });
   }
 
+  let url: string;
+  try {
+    url = getPublicDashboardApiUrl(config.publicDashboardAccessToken, `/panels/${panelId}/query`);
+  } catch (err) {
+    return throwError(() => err);
+  }
+
   const body = {
     intervalMs,
     maxDataPoints,
@@ -38,7 +46,7 @@ export function publicDashboardQueryHandler(request: DataQueryRequest<DataQuery>
 
   return getBackendSrv()
     .fetch<BackendDataSourceResponse>({
-      url: `/api/public/dashboards/${config.publicDashboardAccessToken!}/panels/${panelId}/query`,
+      url,
       method: 'POST',
       data: body,
       requestId,

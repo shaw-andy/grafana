@@ -12,6 +12,7 @@ import {
   toDataFrame,
 } from '@grafana/data';
 import { config, getBackendSrv } from '@grafana/runtime';
+import { getPublicDashboardApiUrl } from '@grafana/runtime/internal';
 import { GRAFANA_DATASOURCE_NAME } from 'app/features/alerting/unified/utils/constants';
 
 import { GrafanaQueryType } from '../../../../plugins/datasource/grafana/types';
@@ -68,7 +69,7 @@ export class PublicAnnotationsDataSource extends DataSourceApi<DataQuery, DataSo
     };
 
     const annotations = await getBackendSrv().get(
-      `/api/public/dashboards/${config.publicDashboardAccessToken}/annotations`,
+      getPublicDashboardApiUrl(config.publicDashboardAccessToken, '/annotations'),
       params
     );
 
