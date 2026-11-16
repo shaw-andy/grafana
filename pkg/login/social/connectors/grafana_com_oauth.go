@@ -56,7 +56,7 @@ func NewGrafanaComProvider(ctx context.Context, info *social.OAuthInfo, cfgProvi
 
 	allowedOrganizations, err := util.SplitStringWithError(info.Extra[allowedOrganizationsKey])
 	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.GrafanaComProviderName, "error", err)
+		return nil, fmt.Errorf("invalid %s for %s: %w", allowedOrganizationsKey, social.GrafanaComProviderName, err)
 	}
 
 	provider := &SocialGrafanaCom{
@@ -102,7 +102,7 @@ func (s *SocialGrafanaCom) Reload(ctx context.Context, settings ssoModels.SSOSet
 
 	allowedOrganizations, err := util.SplitStringWithError(newInfo.Extra[allowedOrganizationsKey])
 	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.GrafanaComProviderName, "error", err)
+		return ssosettings.ErrInvalidSettings.Errorf("invalid %s for %s: %v", allowedOrganizationsKey, social.GrafanaComProviderName, err)
 	}
 	cfg, err := s.cfgProvider.Get(ctx)
 	if err != nil {

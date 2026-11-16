@@ -102,7 +102,7 @@ func NewAzureADProvider(ctx context.Context, info *social.OAuthInfo, cfgProvider
 
 	allowedOrganizations, err := util.SplitStringWithError(info.Extra[allowedOrganizationsKey])
 	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.AzureADProviderName, "error", err)
+		return nil, fmt.Errorf("invalid %s for %s: %w", allowedOrganizationsKey, social.AzureADProviderName, err)
 	}
 
 	provider := &SocialAzureAD{
@@ -435,6 +435,11 @@ func (s *SocialAzureAD) Reload(ctx context.Context, settings ssoModels.SSOSettin
 		return ssosettings.ErrInvalidSettings.Errorf("SSO settings map cannot be converted to OAuthInfo: %v", err)
 	}
 
+	allowedOrganizations, err := util.SplitStringWithError(newInfo.Extra[allowedOrganizationsKey])
+	if err != nil {
+		return ssosettings.ErrInvalidSettings.Errorf("invalid %s for %s: %v", allowedOrganizationsKey, social.AzureADProviderName, err)
+	}
+
 	s.reloadMutex.Lock()
 	defer s.reloadMutex.Unlock()
 
@@ -444,11 +449,6 @@ func (s *SocialAzureAD) Reload(ctx context.Context, settings ssoModels.SSOSettin
 
 	if newInfo.UseRefreshToken {
 		appendUniqueScope(s.Config, social.OfflineAccessScope)
-	}
-
-	allowedOrganizations, err := util.SplitStringWithError(newInfo.Extra[allowedOrganizationsKey])
-	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.AzureADProviderName, "error", err)
 	}
 
 	s.allowedOrganizations = allowedOrganizations

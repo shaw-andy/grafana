@@ -2,7 +2,6 @@ package connectors
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -171,12 +170,11 @@ func MustBool(value any, defaultValue bool) bool {
 
 // CreateOAuthInfoFromKeyValuesWithLogging creates an OAuthInfo struct from a map[string]any using mapstructure
 // it puts all extra key values into OAuthInfo's Extra map.
-// It logs as errors any parsing errors that are not critical
+// It logs the error if the settings cannot be parsed.
 func CreateOAuthInfoFromKeyValuesWithLogging(l log.Logger, provider string, settingsKV map[string]any) (*social.OAuthInfo, error) {
-	parsingWarns := []error{}
-	info, err := createOAuthInfoFromKeyValues(settingsKV, &parsingWarns)
-	if len(parsingWarns) > 0 {
-		l.Error("Invalid auth configuration setting", "error", errors.Join(parsingWarns...), "provider", provider)
+	info, err := CreateOAuthInfoFromKeyValues(settingsKV)
+	if err != nil {
+		l.Error("Invalid auth configuration setting", "error", err, "provider", provider)
 	}
 	return info, err
 }
@@ -184,10 +182,6 @@ func CreateOAuthInfoFromKeyValuesWithLogging(l log.Logger, provider string, sett
 // CreateOAuthInfoFromKeyValues creates an OAuthInfo struct from a map[string]any using mapstructure
 // it puts all extra key values into OAuthInfo's Extra map
 func CreateOAuthInfoFromKeyValues(settingsKV map[string]any) (*social.OAuthInfo, error) {
-	return createOAuthInfoFromKeyValues(settingsKV, nil)
-}
-
-func createOAuthInfoFromKeyValues(settingsKV map[string]any, parsingWarns *[]error) (*social.OAuthInfo, error) {
 	emptyStrToSliceDecodeHook := func(from reflect.Type, to reflect.Type, data any) (any, error) {
 		if from.Kind() == reflect.String && to.Kind() == reflect.Slice {
 			strData, ok := data.(string)
@@ -199,11 +193,9 @@ func createOAuthInfoFromKeyValues(settingsKV map[string]any, parsingWarns *[]err
 				return []string{}, nil
 			}
 
-			splitStr, err := util.SplitStringWithError(strData)
-			if err != nil && parsingWarns != nil {
-				*parsingWarns = append(*parsingWarns, err)
-			}
-			return splitStr, nil
+			// Settings such as allowed_domains and allowed_groups allow everyone when
+			// empty, so a list that cannot be parsed must not decode to an empty list.
+			return util.SplitStringWithError(strData)
 		}
 		return data, nil
 	}
