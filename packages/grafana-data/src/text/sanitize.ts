@@ -15,6 +15,72 @@ XSSWL.iframe = ['src', 'width', 'height'];
 // Event handlers (onclick etc.) are stripped by the xss library automatically.
 XSSWL.button = ['class', 'style', 'type', 'disabled'];
 
+// CSS that makes the browser fetch a resource. There is no leading boundary so that vendor-prefixed
+// forms such as -webkit-image-set() and -webkit-cross-fade() match as well. @import takes a bare string.
+const CSS_RESOURCE_LOAD = /@import|(?:url|src|image|image-set|cross-fade|attr)\s*\(/i;
+
+// SVG presentation attributes that take a CSS url(), which Firefox fetches for external references.
+const CSS_URL_ATTRIBUTES = new Set([
+  'style',
+  'fill',
+  'stroke',
+  'filter',
+  'mask',
+  'clip-path',
+  'marker-start',
+  'marker-mid',
+  'marker-end',
+  'cursor',
+]);
+
+function decodeCssEscapes(css: string): string {
+  return css.replace(/\\([0-9a-fA-F]{1,6})[ \t\n\r\f]?|\\([\s\S])/g, (_, hex: string | undefined, char: string) => {
+    if (hex === undefined) {
+      return char;
+    }
+    const codePoint = parseInt(hex, 16);
+    const isValid = codePoint > 0 && codePoint <= 0x10ffff && (codePoint < 0xd800 || codePoint > 0xdfff);
+    return isValid ? String.fromCodePoint(codePoint) : '\uFFFD';
+  });
+}
+
+/**
+ * Whether the browser would fetch something while applying this CSS. It sends the viewer's session
+ * with a same-origin fetch, so a style that names a Grafana route makes the viewer call that route.
+ */
+function cssLoadsResource(css: string): boolean {
+  // A fragment-only url() such as an SVG gradient or marker reference points into the same document.
+  // Only the literal form is skipped, before escapes are decoded, so an escaped quote or parenthesis
+  // cannot turn a relative address into something that looks like a fragment.
+  const withoutFragments = css.replace(/url\(\s*(['"]?)#[\w.:-]*\1\s*\)/gi, '');
+  const normalized = decodeCssEscapes(withoutFragments).replace(/\/\*[\s\S]*?\*\//g, '');
+  return CSS_RESOURCE_LOAD.test(normalized);
+}
+
+function dropResourceLoadingCSS(node: Element, data: { attrName: string; attrValue: string; keepAttr: boolean }) {
+  // The HTML background attribute on body, table and td loads an image just like a CSS background.
+  if (data.attrName === 'background' || (CSS_URL_ATTRIBUTES.has(data.attrName) && cssLoadsResource(data.attrValue))) {
+    data.keepAttr = false;
+  }
+}
+
+function emptyResourceLoadingStyleElement(node: Node, data: { tagName: string }) {
+  if (data.tagName === 'style' && cssLoadsResource(node.textContent ?? '')) {
+    node.textContent = '';
+  }
+}
+
+function withoutResourceLoadingCSS<T>(purify: () => T): T {
+  DOMPurify.addHook('uponSanitizeAttribute', dropResourceLoadingCSS);
+  DOMPurify.addHook('uponSanitizeElement', emptyResourceLoadingStyleElement);
+  try {
+    return purify();
+  } finally {
+    DOMPurify.removeHook('uponSanitizeAttribute', dropResourceLoadingCSS);
+    DOMPurify.removeHook('uponSanitizeElement', emptyResourceLoadingStyleElement);
+  }
+}
+
 const sanitizeTextPanelWhitelist = new xss.FilterXSS({
   // Add sandbox attribute to iframe tags if an attribute is allowed.
   onTagAttr(tag, name, value, isWhiteAttr) {
@@ -33,6 +99,12 @@ const sanitizeTextPanelWhitelist = new xss.FilterXSS({
   },
   whiteList: XSSWL,
   css: {
+    // The default only drops a url() with a script scheme. The xss library also leaves named character
+    // references such as &lpar; undecoded here while the browser decodes them, so a value with one
+    // cannot be checked and is dropped too.
+    safeAttrValue(name: string, value: string) {
+      return value.includes('&') || cssLoadsResource(value) ? '' : value;
+    },
     whiteList: {
       ...xss.getDefaultCSSWhiteList(),
       'flex-direction': true,
@@ -66,11 +138,13 @@ export function sanitize(unsanitizedString: string): string {
       }
     });
 
-    return DOMPurify.sanitize(unsanitizedString, {
-      USE_PROFILES: { html: true },
-      FORBID_TAGS: ['form', 'input'],
-      ADD_ATTR: ['target'],
-    });
+    return withoutResourceLoadingCSS(() =>
+      DOMPurify.sanitize(unsanitizedString, {
+        USE_PROFILES: { html: true },
+        FORBID_TAGS: ['form', 'input'],
+        ADD_ATTR: ['target'],
+      })
+    );
   } catch (error) {
     console.error('String could not be sanitized', unsanitizedString);
     return escapeHtml(unsanitizedString);
@@ -89,7 +163,7 @@ function sanitizeTrustedTypesRSS(unsanitizedString: string): TrustedHTML {
 }
 
 function sanitizeTrustedTypes(unsanitizedString: string): TrustedHTML {
-  return DOMPurify.sanitize(unsanitizedString, { RETURN_TRUSTED_TYPE: true });
+  return withoutResourceLoadingCSS(() => DOMPurify.sanitize(unsanitizedString, { RETURN_TRUSTED_TYPE: true }));
 }
 
 /**
@@ -110,7 +184,9 @@ export function sanitizeTextPanelContent(unsanitizedString: string): string {
 
 // Returns sanitized SVG, free from XSS attacks to be used when rendering SVG content.
 function sanitizeSVGContent(unsanitizedString: string): string {
-  return DOMPurify.sanitize(unsanitizedString, { USE_PROFILES: { svg: true, svgFilters: true } });
+  return withoutResourceLoadingCSS(() =>
+    DOMPurify.sanitize(unsanitizedString, { USE_PROFILES: { svg: true, svgFilters: true } })
+  );
 }
 
 // Return a sanitized URL, free from XSS attacks, such as javascript:alert(1)
