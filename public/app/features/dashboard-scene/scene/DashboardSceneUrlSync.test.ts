@@ -280,7 +280,7 @@ describe('DashboardSceneUrlSync', () => {
 
     it('it should be possible to go from the view panel view to the edit view when the dashboard is not in edit mdoe', async () => {
       const scene = buildTestScene();
-      scene.setState({ isEditing: false });
+      scene.setState({ isEditing: false, meta: { ...scene.state.meta, canEdit: true } });
       scene.urlSync?.updateFromUrl({ viewPanel: 'panel-1' });
       expect(scene.state.viewPanel).toBeDefined();
       scene.urlSync?.updateFromUrl({ editPanel: 'panel-1' });
