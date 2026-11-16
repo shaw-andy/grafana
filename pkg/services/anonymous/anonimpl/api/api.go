@@ -49,9 +49,11 @@ func NewAnonDeviceServiceAPI(
 
 func (api *AnonDeviceServiceAPI) RegisterAPIEndpoints() {
 	auth := accesscontrol.Middleware(api.accesscontrol)
+	// Devices are not tied to any user, so a users:read grant scoped to specific users must not expose them.
+	readAllUsers := accesscontrol.EvalPermission(accesscontrol.ActionUsersRead, accesscontrol.ScopeGlobalUsersAll)
 	api.RouterRegister.Group("/api/anonymous", func(anonRoutes routing.RouteRegister) {
-		anonRoutes.Get("/devices", auth(accesscontrol.EvalPermission(accesscontrol.ActionUsersRead)), routing.Wrap(api.ListDevices))
-		anonRoutes.Get("/search", auth(accesscontrol.EvalPermission(accesscontrol.ActionUsersRead)), routing.Wrap(api.SearchDevices))
+		anonRoutes.Get("/devices", auth(readAllUsers), routing.Wrap(api.ListDevices))
+		anonRoutes.Get("/search", auth(readAllUsers), routing.Wrap(api.SearchDevices))
 	})
 }
 
@@ -70,6 +72,10 @@ func (api *AnonDeviceServiceAPI) RegisterAPIEndpoints() {
 //	404: notFoundError
 //	500: internalServerError
 func (api *AnonDeviceServiceAPI) ListDevices(c *contextmodel.ReqContext) response.Response {
+	if !api.cfg.Anonymous.Enabled {
+		return response.JSON(http.StatusOK, []*deviceDTO{})
+	}
+
 	fromTime := time.Now().Add(-anonymousDeviceExpiration)
 	toTime := time.Now()
 
@@ -111,6 +117,14 @@ func (api *AnonDeviceServiceAPI) SearchDevices(c *contextmodel.ReqContext) respo
 		perPage = 100
 	}
 	page := max(c.QueryInt("page"), 1)
+
+	if !api.cfg.Anonymous.Enabled {
+		return response.JSON(http.StatusOK, &anonstore.SearchDeviceQueryResult{
+			Devices: []*anonstore.DeviceSearchHitDTO{},
+			Page:    page,
+			PerPage: perPage,
+		})
+	}
 
 	searchQuery := c.Query("query")
 
