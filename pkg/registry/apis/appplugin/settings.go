@@ -16,11 +16,15 @@ import (
 	"k8s.io/apiserver/pkg/registry/rest"
 	"k8s.io/apiserver/pkg/util/dryrun"
 
+	claims "github.com/grafana/authlib/types"
 	common "github.com/grafana/grafana/pkg/apimachinery/apis/common/v0alpha1"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
 	apppluginV0 "github.com/grafana/grafana/pkg/apis/appplugin/v0alpha1"
 	grafanarest "github.com/grafana/grafana/pkg/apiserver/rest"
+	ac "github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/apiserver/endpoints/request"
+	pluginaccesscontrol "github.com/grafana/grafana/pkg/services/pluginsintegration/pluginaccesscontrol"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginsettings"
 )
 
@@ -174,17 +178,48 @@ func (s *settingsStorage) get(ctx context.Context) (*apppluginV0.Settings, error
 	return obj, nil
 }
 
+// authorizeWrite requires the same permission as POST /api/plugins/:pluginId/settings
+// in the org the request namespace names. The returned namespace is the only one
+// the write may target.
+func (s *settingsStorage) authorizeWrite(ctx context.Context) (claims.NamespaceInfo, error) {
+	nsInfo, err := request.NamespaceInfoFrom(ctx, true)
+	if err != nil {
+		return claims.NamespaceInfo{}, err
+	}
+	user, err := identity.GetRequester(ctx)
+	if err != nil {
+		return claims.NamespaceInfo{}, apierrors.NewUnauthorized("valid user is required")
+	}
+	// The requester's permissions are those of its own org, so they say nothing
+	// about another org's settings.
+	evaluator := ac.EvalPermission(pluginaccesscontrol.ActionWrite, pluginaccesscontrol.ScopeProvider.GetResourceScope(s.pluginID))
+	if user.GetOrgID() != nsInfo.OrgID || !evaluator.Evaluate(user.GetPermissions()) {
+		return claims.NamespaceInfo{}, apierrors.NewForbidden(s.resourceInfo.GroupResource(), apppluginV0.INSTANCE_NAME,
+			fmt.Errorf("%s is required on %s", pluginaccesscontrol.ActionWrite, s.pluginID))
+	}
+	return nsInfo, nil
+}
+
 func (s *settingsStorage) Create(ctx context.Context, obj runtime.Object, createValidation rest.ValidateObjectFunc, options *metav1.CreateOptions) (runtime.Object, error) {
+	nsInfo, err := s.authorizeWrite(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if createValidation != nil {
 		if err := createValidation(ctx, obj); err != nil {
 			return nil, err
 		}
 	}
 	isDryRun := options != nil && dryrun.IsDryRun(options.DryRun)
-	return s.save(ctx, obj, isDryRun)
+	return s.save(ctx, nsInfo, obj, isDryRun)
 }
 
 func (s *settingsStorage) Update(ctx context.Context, name string, objInfo rest.UpdatedObjectInfo, createValidation rest.ValidateObjectFunc, updateValidation rest.ValidateObjectUpdateFunc, _ bool, options *metav1.UpdateOptions) (runtime.Object, bool, error) {
+	nsInfo, err := s.authorizeWrite(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+
 	old, err := s.Get(ctx, name, nil)
 	if err != nil {
 		return nil, false, err
@@ -202,7 +237,7 @@ func (s *settingsStorage) Update(ctx context.Context, name string, objInfo rest.
 	}
 
 	isDryRun := options != nil && dryrun.IsDryRun(options.DryRun)
-	obj, err := s.save(ctx, updated, isDryRun)
+	obj, err := s.save(ctx, nsInfo, updated, isDryRun)
 	return obj, false, err
 }
 
@@ -214,15 +249,11 @@ func (s *settingsStorage) DeleteCollection(_ context.Context, _ rest.ValidateObj
 	return nil, fmt.Errorf("not supported")
 }
 
-func (s *settingsStorage) save(ctx context.Context, obj runtime.Object, isDryRun bool) (*apppluginV0.Settings, error) {
+// save writes to the org of nsInfo, which authorizeWrite returned for this request.
+func (s *settingsStorage) save(ctx context.Context, nsInfo claims.NamespaceInfo, obj runtime.Object, isDryRun bool) (*apppluginV0.Settings, error) {
 	p, ok := obj.(*apppluginV0.Settings)
 	if !ok {
 		return nil, fmt.Errorf("expected Settings object")
-	}
-
-	nsInfo, err := request.NamespaceInfoFrom(ctx, true)
-	if err != nil {
-		return nil, err
 	}
 
 	if isDryRun {

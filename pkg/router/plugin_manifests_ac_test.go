@@ -40,7 +40,7 @@ func TestPluginManifestAccessControl(t *testing.T) {
 
 func TestPluginManifestAccessChecker(t *testing.T) {
 	check := appplugin.NewPluginAccessChecker(pluginManifestAccessControl{})
-	decision, reason, err := check(t.Context(), &identity.StaticRequester{UserUID: "test-user"}, "test-app")
+	decision, reason, err := check(t.Context(), &identity.StaticRequester{UserUID: "test-user"}, "test-app", pluginaccesscontrol.ActionAppAccess)
 	require.NoError(t, err)
 	require.Equal(t, authorizer.DecisionAllow, decision)
 	require.Empty(t, reason)

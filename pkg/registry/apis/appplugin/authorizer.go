@@ -10,20 +10,21 @@ import (
 	"github.com/grafana/grafana-app-sdk/app"
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
+	apppluginV0 "github.com/grafana/grafana/pkg/apis/appplugin/v0alpha1"
 	ac "github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/apiserver/kindstore"
 	pluginaccesscontrol "github.com/grafana/grafana/pkg/services/pluginsintegration/pluginaccesscontrol"
 )
 
 // Structured so we can more easily replace with the MT access client
-type PluginAccessChecker = func(ctx context.Context, user identity.Requester, pluginID string) (authorized authorizer.Decision, reason string, err error)
+type PluginAccessChecker = func(ctx context.Context, user identity.Requester, pluginID string, action string) (authorized authorizer.Decision, reason string, err error)
 
 func NewPluginAccessChecker(accessControl ac.AccessControl) PluginAccessChecker {
-	return func(ctx context.Context, user identity.Requester, pluginID string) (authorized authorizer.Decision, reason string, err error) {
+	return func(ctx context.Context, user identity.Requester, pluginID string, action string) (authorized authorizer.Decision, reason string, err error) {
 		scope := pluginaccesscontrol.ScopeProvider.GetResourceScope(pluginID)
 		// Authorize the caller using the same permission as the legacy endpoint:
-		//   ac.EvalPermission(pluginaccesscontrol.ActionAppAccess, plugins:id:<pluginID>)
-		ok, err := accessControl.Evaluate(ctx, user, ac.EvalPermission(pluginaccesscontrol.ActionAppAccess, scope))
+		//   ac.EvalPermission(<action>, plugins:id:<pluginID>)
+		ok, err := accessControl.Evaluate(ctx, user, ac.EvalPermission(action, scope))
 		if err != nil {
 			return authorizer.DecisionDeny, "authorization check failed", err
 		}
@@ -100,13 +101,34 @@ func (b *AppPluginAPIBuilder) GetAuthorizer() authorizer.Authorizer {
 			if err != nil {
 				return authorizer.DecisionDeny, "valid user is required", err
 			}
-			decision, reason, err := b.accessChecker(ctx, user, b.pluginJSON.ID)
+			decision, reason, err := b.accessChecker(ctx, user, b.pluginJSON.ID, pluginaccesscontrol.ActionAppAccess)
 			if decision != authorizer.DecisionAllow {
 				return decision, reason, err
+			}
+			if isSettingsWrite(attr) {
+				// Same permission as POST /api/plugins/:pluginId/settings.
+				return b.accessChecker(ctx, user, b.pluginJSON.ID, pluginaccesscontrol.ActionWrite)
 			}
 			return b.authorizeKind(ctx, attr)
 		},
 	)
+}
+
+// settingsReadVerbs are the verbs app access alone allows on the settings
+// object, matching GET /api/plugins/:pluginId/settings.
+var settingsReadVerbs = map[string]bool{
+	utils.VerbGet:   true,
+	utils.VerbList:  true,
+	utils.VerbWatch: true,
+}
+
+// isSettingsWrite reports whether the request changes the plugin's settings
+// object. Its subresources (health, resources, proxy) call the plugin and are
+// authorized by app access.
+func isSettingsWrite(attr authorizer.Attributes) bool {
+	return attr.GetResource() == apppluginV0.APP_RESOURCE_NAME &&
+		attr.GetSubresource() == "" &&
+		!settingsReadVerbs[attr.GetVerb()]
 }
 
 // authorizeKind applies to a manifest kind the rules apiextensions applies to a

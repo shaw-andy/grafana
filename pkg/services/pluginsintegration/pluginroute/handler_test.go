@@ -214,7 +214,7 @@ func withRequester(handler http.Handler) http.Handler {
 }
 
 func allowAll(opts Options) Options {
-	opts.AccessChecker = func(context.Context, identity.Requester, string) (authorizer.Decision, string, error) {
+	opts.AccessChecker = func(context.Context, identity.Requester, string, string) (authorizer.Decision, string, error) {
 		return authorizer.DecisionAllow, "", nil
 	}
 	return opts
