@@ -354,7 +354,7 @@ abstract class DashboardScenePageStateManagerBase<T>
 
       const v: GetRepositoryFilesWithPathApiResponse = structuredClone(result.data);
       // Load the results from dryRun
-      const dryRun = v.resource.dryRun;
+      const dryRun = v.resource?.dryRun;
       if (!dryRun) {
         return Promise.reject('failed to read provisioned dashboard');
       }
@@ -511,7 +511,8 @@ abstract class DashboardScenePageStateManagerBase<T>
         },
       });
 
-      if (!isFetchError(err)) {
+      // String rejections are deliberate messages already shown in loadError, not exceptions.
+      if (!isFetchError(err) && typeof err !== 'string') {
         console.error('Error loading dashboard:', err);
       }
 
