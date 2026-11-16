@@ -214,7 +214,7 @@ func newBuilder(plugin definition.PluginDefinition, opts Options) (*appplugin.Ap
 		}
 	}
 	if opts.AccessChecker == nil {
-		opts.AccessChecker = func(context.Context, identity.Requester, string) (authorizer.Decision, string, error) {
+		opts.AccessChecker = func(context.Context, identity.Requester, string, string) (authorizer.Decision, string, error) {
 			return authorizer.DecisionDeny, "no plugin access checker is configured", nil
 		}
 	}

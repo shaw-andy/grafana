@@ -12,8 +12,11 @@ import (
 	"k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/registry/rest"
 
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	apppluginV0 "github.com/grafana/grafana/pkg/apis/appplugin/v0alpha1"
+	pluginaccesscontrol "github.com/grafana/grafana/pkg/services/pluginsintegration/pluginaccesscontrol"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginsettings"
+	"github.com/grafana/grafana/pkg/services/user"
 )
 
 func newTestStorage(plugins map[string]*pluginsettings.DTO) *settingsStorage {
@@ -23,6 +26,19 @@ func newTestStorage(plugins map[string]*pluginsettings.DTO) *settingsStorage {
 		pluginSettings: &pluginsettings.FakePluginSettings{Plugins: plugins},
 		resourceInfo:   &ri,
 	}
+}
+
+// writerContext is a request in the default org from a caller who may write
+// test-app's settings.
+func writerContext() context.Context {
+	ctx := identity.WithRequester(context.Background(), &user.SignedInUser{
+		UserID: 1,
+		OrgID:  1,
+		Permissions: map[int64]map[string][]string{1: {
+			pluginaccesscontrol.ActionWrite: {pluginaccesscontrol.ScopeProvider.GetResourceScope("test-app")},
+		}},
+	})
+	return request.WithNamespace(ctx, "default")
 }
 
 func TestSettingsGet_InvalidName(t *testing.T) {
@@ -110,7 +126,7 @@ func TestSettingsList(t *testing.T) {
 func TestSettingsCreate(t *testing.T) {
 	storage := newTestStorage(map[string]*pluginsettings.DTO{})
 
-	ctx := request.WithNamespace(context.Background(), "default")
+	ctx := writerContext()
 	input := &apppluginV0.Settings{
 		ObjectMeta: metav1.ObjectMeta{Name: "instance", Namespace: "default"},
 		Spec: apppluginV0.SettingsSpec{
@@ -131,7 +147,7 @@ func TestSettingsCreate_DryRunDoesNotPersist(t *testing.T) {
 	plugins := map[string]*pluginsettings.DTO{}
 	storage := newTestStorage(plugins)
 
-	ctx := request.WithNamespace(context.Background(), "default")
+	ctx := writerContext()
 	input := &apppluginV0.Settings{
 		ObjectMeta: metav1.ObjectMeta{Name: "instance", Namespace: "default"},
 		Spec: apppluginV0.SettingsSpec{
@@ -152,7 +168,7 @@ func TestSettingsCreate_DryRunDoesNotPersist(t *testing.T) {
 func TestSettingsCreate_WithValidation(t *testing.T) {
 	storage := newTestStorage(map[string]*pluginsettings.DTO{})
 
-	ctx := request.WithNamespace(context.Background(), "default")
+	ctx := writerContext()
 	input := &apppluginV0.Settings{
 		ObjectMeta: metav1.ObjectMeta{Name: "instance", Namespace: "default"},
 	}
@@ -177,7 +193,7 @@ func TestSettingsUpdate(t *testing.T) {
 		},
 	})
 
-	ctx := request.WithNamespace(context.Background(), "default")
+	ctx := writerContext()
 
 	updater := rest.DefaultUpdatedObjectInfo(
 		&apppluginV0.Settings{
@@ -209,7 +225,7 @@ func TestSettingsUpdate_DryRunDoesNotPersist(t *testing.T) {
 	}
 	storage := newTestStorage(plugins)
 
-	ctx := request.WithNamespace(context.Background(), "default")
+	ctx := writerContext()
 
 	updater := rest.DefaultUpdatedObjectInfo(
 		&apppluginV0.Settings{
