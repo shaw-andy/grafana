@@ -163,6 +163,7 @@ func TestSocialGitHub_UserInfo(t *testing.T) {
 		orgMapping               []string
 		want                     *social.BasicUserInfo
 		wantErr                  bool
+		wantErrIs                error
 		oAuthExtraInfo           map[string]string
 	}{
 		{
@@ -342,6 +343,51 @@ func TestSocialGitHub_UserInfo(t *testing.T) {
 				Groups:   []string{"https://github.com/orgs/github/teams/justice-league", "@github/justice-league"},
 			},
 		},
+		{
+			name:             "should deny login when team ids and allowed organizations are empty",
+			userRawJSON:      testGHUserJSON,
+			userTeamsRawJSON: testGHUserTeamsJSON,
+			oAuthExtraInfo: map[string]string{
+				"team_ids":              "",
+				"allowed_organizations": "",
+			},
+			wantErrIs: ErrMissingGithubAllowlist,
+		},
+		{
+			name:                   "should deny login when team ids and allowed organizations are empty and skip org role sync is true",
+			settingSkipOrgRoleSync: true,
+			userRawJSON:            testGHUserJSON,
+			userTeamsRawJSON:       testGHUserTeamsJSON,
+			oAuthExtraInfo:         map[string]string{},
+			wantErrIs:              ErrMissingGithubAllowlist,
+		},
+		{
+			name:             "should deny login when team ids cannot be parsed and allowed organizations are empty",
+			userRawJSON:      testGHUserJSON,
+			userTeamsRawJSON: testGHUserTeamsJSON,
+			oAuthExtraInfo: map[string]string{
+				"team_ids": "justice-league",
+			},
+			wantErrIs: ErrMissingGithubAllowlist,
+		},
+		{
+			name:             "should deny login when user is not a member of an allowed team",
+			userRawJSON:      testGHUserJSON,
+			userTeamsRawJSON: testGHUserTeamsJSON,
+			oAuthExtraInfo: map[string]string{
+				"team_ids": "1234",
+			},
+			wantErrIs: ErrMissingTeamMembership,
+		},
+		{
+			name:             "should deny login when user is not a member of an allowed organization",
+			userRawJSON:      testGHUserJSON,
+			userTeamsRawJSON: testGHUserTeamsJSON,
+			oAuthExtraInfo: map[string]string{
+				"allowed_organizations": "octocats",
+			},
+			wantErrIs: ErrMissingOrganizationMembership,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -379,6 +425,11 @@ func TestSocialGitHub_UserInfo(t *testing.T) {
 				cfg.AutoAssignOrgRole = tt.settingAutoAssignOrgRole
 			}
 
+			extra := tt.oAuthExtraInfo
+			if extra == nil {
+				extra = map[string]string{"allowed_organizations": "github"}
+			}
+
 			s := mustNewGitHubProvider(t,
 				&social.OAuthInfo{
 					ApiUrl:              server.URL + "/user",
@@ -386,7 +437,7 @@ func TestSocialGitHub_UserInfo(t *testing.T) {
 					RoleAttributeStrict: tt.roleAttributeStrict,
 					OrgMapping:          tt.orgMapping,
 					SkipOrgRoleSync:     tt.settingSkipOrgRoleSync,
-					Extra:               tt.oAuthExtraInfo,
+					Extra:               extra,
 				}, cfg,
 				mustProvideOrgRoleMapper(t, cfg,
 					&orgtest.FakeOrgService{ExpectedOrgs: []*org.OrgDTO{{ID: 4, Name: "Org4"}, {ID: 5, Name: "Org5"}}}),
@@ -398,6 +449,11 @@ func TestSocialGitHub_UserInfo(t *testing.T) {
 			}
 
 			got, err := s.UserInfo(context.Background(), server.Client(), token)
+			if tt.wantErrIs != nil {
+				require.ErrorIs(t, err, tt.wantErrIs)
+				require.Nil(t, got)
+				return
+			}
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -499,6 +555,38 @@ func TestSocialGitHub_Validate(t *testing.T) {
 				},
 			},
 			requester: &user.SignedInUser{IsGrafanaAdmin: true},
+		},
+		{
+			name: "SSOSettings is valid when enabled with team ids",
+			settings: ssoModels.SSOSettings{
+				Settings: map[string]any{
+					"client_id": "client-id",
+					"enabled":   true,
+					"team_ids":  "1234",
+				},
+			},
+		},
+		{
+			name: "SSOSettings is valid when enabled with allowed organizations",
+			settings: ssoModels.SSOSettings{
+				Settings: map[string]any{
+					"client_id":             "client-id",
+					"enabled":               true,
+					"allowed_organizations": "github",
+				},
+			},
+		},
+		{
+			name: "fails if enabled without team ids or allowed organizations",
+			settings: ssoModels.SSOSettings{
+				Settings: map[string]any{
+					"client_id":             "client-id",
+					"enabled":               true,
+					"team_ids":              "",
+					"allowed_organizations": "",
+				},
+			},
+			wantErr: ssosettings.ErrBaseInvalidOAuthConfig,
 		},
 		{
 			name: "fails if settings map contains an invalid field",

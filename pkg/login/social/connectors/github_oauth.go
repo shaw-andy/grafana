@@ -59,6 +59,10 @@ var (
 		"auth.missing_organization",
 		errutil.WithPublicMessage(
 			"User is not a member of one of the required organizations. Please contact identity provider administrator."))
+	ErrMissingGithubAllowlist = errutil.Unauthorized(
+		"auth.github.missing_allowlist",
+		errutil.WithPublicMessage(
+			"GitHub login is not restricted to any team or organization. Please contact your Grafana administrator."))
 )
 
 func NewGitHubProvider(ctx context.Context, info *social.OAuthInfo, cfgProvider configprovider.ConfigProvider, orgRoleMapper *OrgRoleMapper, ssoSettings ssosettings.Service, features featuremgmt.FeatureToggles) (*SocialGithub, error) {
@@ -115,7 +119,20 @@ func (s *SocialGithub) Validate(ctx context.Context, newSettings ssoModels.SSOSe
 		validation.MustBeEmptyValidator(info.AuthUrl, "Auth URL"),
 		validation.MustBeEmptyValidator(info.TokenUrl, "Token URL"),
 		validation.MustBeEmptyValidator(info.ApiUrl, "API URL"),
-		teamIdsNumbersValidator)
+		teamIdsNumbersValidator,
+		allowlistRequiredValidator)
+}
+
+func allowlistRequiredValidator(info *social.OAuthInfo, requester identity.Requester) error {
+	if !info.Enabled {
+		return nil
+	}
+
+	if len(util.SplitString(info.Extra[teamIdsKey])) == 0 && len(util.SplitString(info.Extra[allowedOrganizationsKey])) == 0 {
+		return ssosettings.ErrInvalidOAuthConfig("Team Ids or Allowed organizations must be set to restrict who can log in with GitHub.")
+	}
+
+	return nil
 }
 
 func teamIdsNumbersValidator(info *social.OAuthInfo, requester identity.Requester) error {
@@ -375,6 +392,12 @@ func (s *SocialGithub) UserInfo(ctx context.Context, client *http.Client, token 
 	}
 
 	organizationsUrl := s.info.ApiUrl + "/orgs?per_page=100"
+
+	// Without a team or organization allowlist any GitHub.com account would be
+	// accepted, so an empty configuration denies login instead of allowing all.
+	if len(s.teamIds) == 0 && len(s.allowedOrganizations) == 0 {
+		return nil, ErrMissingGithubAllowlist.Errorf("GitHub login requires %s or %s to be configured", teamIdsKey, allowedOrganizationsKey)
+	}
 
 	if !s.isTeamMember(ctx, client) {
 		return nil, ErrMissingTeamMembership.Errorf("User is not a member of any of the allowed teams: %v", s.teamIds)
