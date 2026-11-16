@@ -138,6 +138,13 @@ func (s *Service) GetByEmail(ctx context.Context, cmd *user.GetUserByEmailQuery)
 }
 
 func (s *Service) Update(ctx context.Context, cmd *user.UpdateUserCommand) error {
+	// The k8s user resource does not store or verify passwords, and password
+	// login reads the legacy user table (see GetByLoginWithPassword), so password
+	// changes must be verified and persisted by the legacy service.
+	if cmd.Password != nil || cmd.OldPassword != nil {
+		return s.legacyService.Update(ctx, cmd)
+	}
+
 	if s.isKubernetesUserServiceEnabled(ctx) && !s.shouldFallbackToLegacy(ctx) {
 		return s.k8sService.Update(s.k8sCtxWithIdentity(ctx), cmd)
 	}

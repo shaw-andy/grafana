@@ -44,6 +44,8 @@ type UserK8sService struct {
 
 var _ user.Service = (*UserK8sService)(nil)
 
+var errPasswordUpdateNotSupported = errors.New("password updates are not supported by the kubernetes user service")
+
 func NewUserK8sService(logger log.Logger, cfg *setting.Cfg, configProvider apiserver.DirectRestConfigProvider, tracer tracing.Tracer) *UserK8sService {
 	return &UserK8sService{
 		logger:          logger,
@@ -446,6 +448,12 @@ func (s *UserK8sService) Update(ctx context.Context, cmd *user.UpdateUserCommand
 		attribute.Int64("userID", cmd.UserID),
 	))
 	defer span.End()
+
+	if cmd.Password != nil || cmd.OldPassword != nil {
+		span.RecordError(errPasswordUpdateNotSupported)
+		span.SetStatus(codes.Error, errPasswordUpdateNotSupported.Error())
+		return errPasswordUpdateNotSupported
+	}
 
 	ctxLogger := s.logger.FromContext(ctx)
 
