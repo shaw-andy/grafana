@@ -25,7 +25,7 @@ const createServiceAccount = async (sa: ServiceAccountDTO) => {
 };
 
 const updateServiceAccount = async (uid: string, sa: ServiceAccountDTO) =>
-  getBackendSrv().patch(`/api/serviceaccounts/${uid}`, sa);
+  getBackendSrv().patch(`/api/serviceaccounts/${encodeURIComponent(uid)}`, sa, { validatePath: true });
 
 const defaultServiceAccount = {
   id: 0,

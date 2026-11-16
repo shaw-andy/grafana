@@ -1,11 +1,13 @@
 import { debounce } from 'lodash';
 
 import { dateTimeFormatTimeAgo } from '@grafana/data';
+import { t } from '@grafana/i18n';
 import { featureEnabled, getBackendSrv, isFetchError, locationService } from '@grafana/runtime';
 import { type FetchDataArgs } from '@grafana/ui';
 import config from 'app/core/config';
 import { contextSrv } from 'app/core/services/context_srv';
 import { accessControlQueryParam } from 'app/core/utils/accessControl';
+import { isSafeIdPathSegment } from 'app/core/utils/pathSegment';
 import { AccessControlAction } from 'app/types/accessControl';
 import { type LdapUser } from 'app/types/ldap';
 import { type ThunkResult } from 'app/types/store';
@@ -36,10 +38,23 @@ import {
   anonPageChanged,
   anonQueryChanged,
 } from './reducers';
+
+const pathOptions = { validatePath: true };
+
 // UserAdminPage
 
 export function loadAdminUserPage(userUid: string): ThunkResult<void> {
   return async (dispatch) => {
+    if (!isSafeIdPathSegment(userUid)) {
+      dispatch(
+        userAdminPageFailedAction({
+          title: t('admin.user-admin-page.invalid-user-id-title', 'User not found'),
+          body: t('admin.user-admin-page.invalid-user-id-body', 'The user id in the address is not valid.'),
+        })
+      );
+      return;
+    }
+
     try {
       dispatch(userAdminPageLoadedAction(false));
       await dispatch(loadUserProfile(userUid));
@@ -66,14 +81,19 @@ export function loadAdminUserPage(userUid: string): ThunkResult<void> {
 
 function loadUserProfile(userUid: string): ThunkResult<void> {
   return async (dispatch) => {
-    const user = await getBackendSrv().get(`/api/users/${userUid}`, accessControlQueryParam());
+    const user = await getBackendSrv().get(
+      `/api/users/${encodeURIComponent(userUid)}`,
+      accessControlQueryParam(),
+      undefined,
+      pathOptions
+    );
     dispatch(userProfileLoadedAction(user));
   };
 }
 
 export function updateUser(user: UserDTO): ThunkResult<void> {
   return async (dispatch) => {
-    await getBackendSrv().put(`/api/users/${user.uid}`, user);
+    await getBackendSrv().put(`/api/users/${encodeURIComponent(user.uid)}`, user, pathOptions);
     dispatch(loadAdminUserPage(user.uid));
   };
 }
@@ -81,28 +101,28 @@ export function updateUser(user: UserDTO): ThunkResult<void> {
 export function setUserPassword(userUid: string, password: string): ThunkResult<void> {
   return async (dispatch) => {
     const payload = { password };
-    await getBackendSrv().put(`/api/admin/users/${userUid}/password`, payload);
+    await getBackendSrv().put(`/api/admin/users/${encodeURIComponent(userUid)}/password`, payload, pathOptions);
     dispatch(loadAdminUserPage(userUid));
   };
 }
 
 export function disableUser(userUid: string): ThunkResult<void> {
   return async (dispatch) => {
-    await getBackendSrv().post(`/api/admin/users/${userUid}/disable`);
+    await getBackendSrv().post(`/api/admin/users/${encodeURIComponent(userUid)}/disable`, undefined, pathOptions);
     locationService.push('/admin/users');
   };
 }
 
 export function enableUser(userUid: string): ThunkResult<void> {
   return async (dispatch) => {
-    await getBackendSrv().post(`/api/admin/users/${userUid}/enable`);
+    await getBackendSrv().post(`/api/admin/users/${encodeURIComponent(userUid)}/enable`, undefined, pathOptions);
     dispatch(loadAdminUserPage(userUid));
   };
 }
 
 export function deleteUser(userUid: string): ThunkResult<void> {
   return async (dispatch) => {
-    await getBackendSrv().delete(`/api/admin/users/${userUid}`);
+    await getBackendSrv().delete(`/api/admin/users/${encodeURIComponent(userUid)}`, undefined, pathOptions);
     locationService.push('/admin/users');
   };
 }
@@ -110,14 +130,19 @@ export function deleteUser(userUid: string): ThunkResult<void> {
 export function updateUserPermissions(userUid: string, isGrafanaAdmin: boolean): ThunkResult<void> {
   return async (dispatch) => {
     const payload = { isGrafanaAdmin };
-    await getBackendSrv().put(`/api/admin/users/${userUid}/permissions`, payload);
+    await getBackendSrv().put(`/api/admin/users/${encodeURIComponent(userUid)}/permissions`, payload, pathOptions);
     dispatch(loadAdminUserPage(userUid));
   };
 }
 
 function loadUserOrgs(userUid: string): ThunkResult<void> {
   return async (dispatch) => {
-    const orgs = await getBackendSrv().get(`/api/users/${userUid}/orgs`);
+    const orgs = await getBackendSrv().get(
+      `/api/users/${encodeURIComponent(userUid)}/orgs`,
+      undefined,
+      undefined,
+      pathOptions
+    );
     dispatch(userOrgsLoadedAction(orgs));
   };
 }
@@ -136,14 +161,14 @@ export function addOrgUser(user: UserDTO, orgId: number, role: string): ThunkRes
 export function updateOrgUserRole(userUid: string, orgId: number, role: string): ThunkResult<void> {
   return async (dispatch) => {
     const payload = { role };
-    await getBackendSrv().patch(`/api/orgs/${orgId}/users/${userUid}`, payload);
+    await getBackendSrv().patch(`/api/orgs/${orgId}/users/${encodeURIComponent(userUid)}`, payload, pathOptions);
     dispatch(loadAdminUserPage(userUid));
   };
 }
 
 export function deleteOrgUser(userUid: string, orgId: number): ThunkResult<void> {
   return async (dispatch) => {
-    await getBackendSrv().delete(`/api/orgs/${orgId}/users/${userUid}`);
+    await getBackendSrv().delete(`/api/orgs/${orgId}/users/${encodeURIComponent(userUid)}`, undefined, pathOptions);
     dispatch(loadAdminUserPage(userUid));
   };
 }
@@ -154,7 +179,12 @@ function loadUserSessions(userUid: string): ThunkResult<void> {
       return;
     }
 
-    const tokens = await getBackendSrv().get(`/api/admin/users/${userUid}/auth-tokens`);
+    const tokens = await getBackendSrv().get(
+      `/api/admin/users/${encodeURIComponent(userUid)}/auth-tokens`,
+      undefined,
+      undefined,
+      pathOptions
+    );
     tokens.reverse();
 
     const sessions = tokens.map((session: UserSession) => {
@@ -180,14 +210,18 @@ function loadUserSessions(userUid: string): ThunkResult<void> {
 export function revokeSession(tokenId: number, userUid: string): ThunkResult<void> {
   return async (dispatch) => {
     const payload = { authTokenId: tokenId };
-    await getBackendSrv().post(`/api/admin/users/${userUid}/revoke-auth-token`, payload);
+    await getBackendSrv().post(
+      `/api/admin/users/${encodeURIComponent(userUid)}/revoke-auth-token`,
+      payload,
+      pathOptions
+    );
     dispatch(loadUserSessions(userUid));
   };
 }
 
 export function revokeAllSessions(userUid: string): ThunkResult<void> {
   return async (dispatch) => {
-    await getBackendSrv().post(`/api/admin/users/${userUid}/logout`);
+    await getBackendSrv().post(`/api/admin/users/${encodeURIComponent(userUid)}/logout`, undefined, pathOptions);
     dispatch(loadUserSessions(userUid));
   };
 }
