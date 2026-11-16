@@ -1,5 +1,8 @@
 package setting
 
+// DefaultAnonymousDeviceLimit applies when auth.anonymous.device_limit is unset or not positive.
+const DefaultAnonymousDeviceLimit int64 = 100
+
 type AnonymousSettings struct {
 	Enabled     bool
 	OrgName     string
@@ -21,6 +24,9 @@ func (cfg *Cfg) readAnonymousSettings() {
 		cfg.Logger.Warn("auth.anonymous.org_role is deprecated, only viewer role is supported")
 	}
 	anonSettings.HideVersion = anonSection.Key("hide_version").MustBool(false)
-	anonSettings.DeviceLimit = anonSection.Key("device_limit").MustInt64(0)
+	anonSettings.DeviceLimit = anonSection.Key("device_limit").MustInt64(DefaultAnonymousDeviceLimit)
+	if anonSettings.DeviceLimit <= 0 {
+		anonSettings.DeviceLimit = DefaultAnonymousDeviceLimit
+	}
 	cfg.Anonymous = anonSettings
 }
