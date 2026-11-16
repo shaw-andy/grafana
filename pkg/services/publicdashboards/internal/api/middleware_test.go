@@ -146,9 +146,18 @@ func TestSetPublicDashboardOrgIdOnContext(t *testing.T) {
 
 func TestSetPublicDashboardFlag(t *testing.T) {
 	t.Run("Adds context.PublicDashboardAccessToken to request", func(t *testing.T) {
-		ctx := &contextmodel.ReqContext{Context: &web.Context{Req: web.SetURLParams(&http.Request{}, map[string]string{":accessToken": "asdfasdfasdfsadfasdfsfd"})}}
+		ctx := &contextmodel.ReqContext{Context: &web.Context{Req: web.SetURLParams(&http.Request{}, map[string]string{":accessToken": validAccessToken})}}
 		SetPublicDashboardAccessToken(ctx)
-		assert.NotEmpty(t, ctx.PublicDashboardAccessToken)
+		assert.Equal(t, validAccessToken, ctx.PublicDashboardAccessToken)
+	})
+
+	t.Run("Does not add an access token that is not a uuid", func(t *testing.T) {
+		for _, token := range []string{"asdfasdfasdfsadfasdfsfd", "../../logout", "../profile/switch-org/2"} {
+			ctx := &contextmodel.ReqContext{Context: &web.Context{Req: web.SetURLParams(&http.Request{}, map[string]string{":accessToken": token})}}
+			SetPublicDashboardAccessToken(ctx)
+			assert.Empty(t, ctx.PublicDashboardAccessToken, token)
+			assert.False(t, ctx.IsPublicDashboardView(), token)
+		}
 	})
 }
 

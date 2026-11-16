@@ -673,7 +673,7 @@ export class BackendSrv implements BackendService {
   }
 
   getPublicDashboardByUid(uid: string) {
-    return this.get<DashboardDTO>(`/api/public/dashboards/${uid}`);
+    return this.get<DashboardDTO>(`/api/public/dashboards/${encodeURIComponent(uid)}`);
   }
 
   /**
