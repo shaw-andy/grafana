@@ -43,4 +43,19 @@ describe('Markdown wrapper', () => {
     const str = renderTextPanelMarkdown('<script>alert()</script>');
     expect(str).toBe('&lt;script&gt;alert()&lt;/script&gt;');
   });
+
+  it.each([
+    ['renderMarkdown', renderMarkdown],
+    ['renderTextPanelMarkdown', renderTextPanelMarkdown],
+  ] as const)('%s drops a same-origin CSS url from raw HTML', (_name, render) => {
+    const html = render(
+      '<div style="background-image:url(/logout)"></div>\n\n<div style="background:url(/profile/switch-org/2)"></div>'
+    );
+    const root = document.createElement('div');
+    root.innerHTML = html;
+    const styles = Array.from(root.querySelectorAll('[style]')).map((el) => el.getAttribute('style') ?? '');
+    expect(styles.join('\n')).not.toMatch(/url\s*\(/i);
+    expect(html).not.toContain('/logout');
+    expect(html).not.toContain('/profile/switch-org/');
+  });
 });

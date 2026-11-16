@@ -60,6 +60,18 @@ describe('MarkdownCell', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('does not insert a same-origin CSS url from a markdown cell', () => {
+    const markup: CellContentKind = {
+      kind: 'Markdown',
+      spec: { text: '<div style="background-image:url(/logout)"></div>' },
+    };
+
+    const { container } = render(<MarkdownCell content={markup} isEditing={false} onChange={jest.fn()} />);
+
+    expect(container.innerHTML).not.toMatch(/url\s*\(/i);
+    expect(container.innerHTML).not.toContain('/logout');
+  });
+
   it('renders sanitized markdown while the notebook is being read', async () => {
     render(<MarkdownCell content={content} isEditing={false} onChange={jest.fn()} />);
 

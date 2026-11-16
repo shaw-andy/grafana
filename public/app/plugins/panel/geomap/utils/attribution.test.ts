@@ -55,6 +55,16 @@ beforeEach(() => {
 });
 
 describe('guardLayerAttribution', () => {
+  it('drops a same-origin CSS url from attribution before OpenLayers renders it', () => {
+    const layer = tileLayer('<div style="background-image:url(/logout)"></div>');
+
+    guardLayerAttribution(layer);
+
+    const html = attributionsOf(layer).join('\n');
+    expect(html).not.toMatch(/url\s*\(/i);
+    expect(html).not.toContain('/logout');
+  });
+
   it('filters attribution the source was created with', () => {
     const layer = tileLayer(XSS_ATTRIBUTION);
 

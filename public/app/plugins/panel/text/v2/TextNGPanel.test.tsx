@@ -111,6 +111,22 @@ describe('TextNGPanel', () => {
     }
   );
 
+  it.each([TextMode.HTML, TextMode.Markdown])('does not insert a same-origin CSS url in %s mode', (mode) => {
+    const contentTest =
+      '<div style="background-image:url(/logout)"></div><div style="background:url(/profile/switch-org/2)"></div>';
+    replaceVariablesMock.mockImplementation((value: string) => value);
+    const props = Object.assign({}, defaultProps, {
+      options: { content: contentTest, mode },
+    });
+
+    setup(props);
+
+    const html = screen.getByTestId('TextNGPanel-converted-content').innerHTML;
+    expect(html).not.toMatch(/url\s*\(/i);
+    expect(html).not.toContain('/logout');
+    expect(html).not.toContain('/profile/switch-org/');
+  });
+
   it('sanitizes content in html mode', () => {
     const contentTest = '<form><p>Form tags are sanitized.</p></form>\n<script>Script tags are sanitized.</script>';
     replaceVariablesMock.mockReturnValueOnce(contentTest);
