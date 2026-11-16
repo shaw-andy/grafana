@@ -1,8 +1,6 @@
 package historian
 
 import (
-	"context"
-
 	authtypes "github.com/grafana/authlib/types"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
 	restclient "k8s.io/client-go/rest"
@@ -15,6 +13,7 @@ import (
 	historianApp "github.com/grafana/alerting/apps/historian/pkg/app"
 	historianAppConfig "github.com/grafana/alerting/apps/historian/pkg/app/config"
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/ngalert"
 	"github.com/grafana/grafana/pkg/services/ngalert/lokiconfig"
 	"github.com/grafana/grafana/pkg/setting"
@@ -26,14 +25,11 @@ var (
 
 type AppInstaller struct {
 	appsdkapiserver.AppInstaller
+	accessControl accesscontrol.AccessControl
 }
 
 func (a *AppInstaller) GetAuthorizer() authorizer.Authorizer {
-	return authorizer.AuthorizerFunc(
-		func(ctx context.Context, a authorizer.Attributes) (authorizer.Decision, string, error) {
-			return authorizer.DecisionAllow, "", nil
-		},
-	)
+	return newAuthorizer(a.accessControl)
 }
 
 func RegisterAppInstaller(
@@ -83,7 +79,14 @@ func RegisterAppInstaller(
 		appSpecificConfig.GetAlertStateHistoryHandler = handlers.GetAlertStateHistoryHandler
 	}
 
-	return NewAppInstaller(appSpecificConfig)
+	installer, err := NewAppInstaller(appSpecificConfig)
+	if err != nil {
+		return nil, err
+	}
+	if ng != nil {
+		installer.accessControl = ng.Api.AccessControl
+	}
+	return installer, nil
 }
 
 func NewAppInstaller(appSpecificConfig historianAppConfig.RuntimeConfig) (*AppInstaller, error) {
