@@ -50,32 +50,33 @@ jobs:
     needs: setup
     runs-on: ubuntu-arm64-small
     permissions:
-      contents: write
+      contents: read
       id-token: write
     env:
       RELEASE_BRANCH: ${{ needs.setup.outputs.release_branch }}
       RELEASE_VERSION: ${{ needs.setup.outputs.release_version }}
     steps:
-      # grafana/grafana is too large for GitHub's pre-receive workflow-file scan to finish
-      # within its timeout, so every push is rejected with "workflows scope may be required"
-      # unless the token has workflows:write. grafana-writer is the only app installed with
-      # that scope; commits go through the Git Data API via planetscale/ghcommit-action so
-      # they're auto-signed under grafana-writer[bot]'s identity.
-      - name: Get GitHub App token (writer)
-        id: get-writer-app-token
-        uses: grafana/shared-workflows/actions/create-github-app-token@46f48da11e78ebdba7a8747ae456b11062fac83e # create-github-app-token/v0.3.1
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          github_app: grafana-writer
-          permission_set: release-writer-main
-      - uses: actions/checkout@v5
-        with:
-          token: ${{ steps.get-writer-app-token.outputs.token }}
           persist-credentials: false
       - name: Update package.json versions
         uses: ./pkg/build/actions/bump-version
         with:
           version: ${{ env.RELEASE_VERSION }}
       - run: git --no-pager diff --stat
+      # grafana/grafana is too large for GitHub's pre-receive workflow-file scan to finish
+      # within its timeout, so every push is rejected with "workflows scope may be required"
+      # unless the token has workflows:write. grafana-writer is the only app installed with
+      # that scope; commits go through the Git Data API via planetscale/ghcommit-action so
+      # they're auto-signed under grafana-writer[bot]'s identity.
+      # Minted only after the checkout and bump-version steps so no third-party action
+      # runs in this job while the writer token exists.
+      - name: Get GitHub App token (writer)
+        id: get-writer-app-token
+        uses: grafana/shared-workflows/actions/create-github-app-token@46f48da11e78ebdba7a8747ae456b11062fac83e # create-github-app-token/v0.3.1
+        with:
+          github_app: grafana-writer
+          permission_set: release-writer-main
       # Cut the branch at main's current HEAD, then commit the version pin onto it. The
       # branch is brand new, so the change goes straight in (no PR to review against).
       - if: ${{ !inputs.dry_run }}
@@ -118,15 +119,8 @@ jobs:
       RELEASE_BRANCH: ${{ needs.setup.outputs.release_branch }}
       RUN_ID: ${{ github.run_id }}
     steps:
-      - name: Get GitHub App token (writer)
-        id: get-writer-app-token
-        uses: grafana/shared-workflows/actions/create-github-app-token@46f48da11e78ebdba7a8747ae456b11062fac83e # create-github-app-token/v0.3.1
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          github_app: grafana-writer
-          permission_set: release-writer-main
-      - uses: actions/checkout@v5
-        with:
-          token: ${{ steps.get-writer-app-token.outputs.token }}
           persist-credentials: false
       - name: Update package.json versions
         uses: ./pkg/build/actions/bump-version
@@ -135,6 +129,14 @@ jobs:
       - run: |
           git --no-pager diff --stat
           echo "WORK_BRANCH=bump-version/${RUN_ID}/${NEXT_VERSION}" | tee -a "$GITHUB_ENV"
+      # Minted only after the checkout and bump-version steps so no third-party action
+      # runs in this job while the writer token exists.
+      - name: Get GitHub App token (writer)
+        id: get-writer-app-token
+        uses: grafana/shared-workflows/actions/create-github-app-token@46f48da11e78ebdba7a8747ae456b11062fac83e # create-github-app-token/v0.3.1
+        with:
+          github_app: grafana-writer
+          permission_set: release-writer-main
       - if: ${{ !inputs.dry_run }}
         name: Pre-create branch on remote
         env:

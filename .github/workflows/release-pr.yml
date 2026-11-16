@@ -112,35 +112,20 @@ jobs:
         with:
           github_app: grafana-pr-automation
           permission_set: ${{ startsWith(github.ref_name, 'release-') && 'release' || 'main' }}
-      # The grafana repo is large enough that GitHub's pre-receive scan for workflow-file
-      # modifications ("Restricts updates to workflow files" system rule) consistently
-      # exceeds its server-side timeout on any push -- regardless of whether the push
-      # actually touches workflow files. When the scan times out, GitHub fails closed and
-      # rejects the push with "workflows scope may be required". Granting workflows:write
-      # tells GitHub to skip the scan entirely (the caller is already authorized to modify
-      # workflow files), which is the only documented way to push to this repo from a bot.
-      # grafana-writer is the only app installed with that scope; grafana-pr-automation
-      # cannot push at all because of this.
-      - name: Get GitHub App token (writer)
-        id: get-writer-app-token
-        uses: grafana/shared-workflows/actions/create-github-app-token@46f48da11e78ebdba7a8747ae456b11062fac83e # create-github-app-token/v0.3.1
-        with:
-          github_app: grafana-writer
-          permission_set: ${{ startsWith(github.ref_name, 'release-') && 'release-writer' || 'release-writer-main' }}
       - run: |
           {
             echo "RELEASE_BRANCH=release-${VERSION}"
             echo "WORK_BRANCH=release/${RUN_NUMBER}/${VERSION}"
           } >> "$GITHUB_ENV"
       - name: Checkout Grafana target branch #checkout the target branch to base the release branch on
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          token: ${{ steps.get-writer-app-token.outputs.token }} # used only for fetching; commits go via kminehart API
+          token: ${{ github.token }} # used only for fetching; commits go via kminehart API
           ref: ${{ env.RELEASE_BRANCH }}
           fetch-tags: true
           fetch-depth: 0
       - name: Checkout Grafana (main)
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           token: ${{ github.token }}
           ref: main
@@ -158,19 +143,6 @@ jobs:
         with:
           go-version-file: .grafana-main/go.mod
           cache: false
-
-      # planetscale/ghcommit-action commits to an existing remote branch; it doesn't
-      # create the branch itself. Pre-create the ref at the release branch's HEAD via
-      # the Git Data API so subsequent commits have a target.
-      - name: Pre-create branch on remote
-        env:
-          GH_TOKEN: ${{ steps.get-writer-app-token.outputs.token }}
-        run: |
-          BASE_SHA=$(git rev-parse "origin/${RELEASE_BRANCH}")
-          gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
-            --method POST \
-            -f "ref=refs/heads/${WORK_BRANCH}" \
-            -f "sha=${BASE_SHA}"
 
       - name: Generate changelog
         id: changelog
@@ -247,6 +219,37 @@ jobs:
         if: ${{ !contains(inputs.version, '+security') }}
         shell: bash
         run: make gen-cue
+
+      # The grafana repo is large enough that GitHub's pre-receive scan for workflow-file
+      # modifications ("Restricts updates to workflow files" system rule) consistently
+      # exceeds its server-side timeout on any push -- regardless of whether the push
+      # actually touches workflow files. When the scan times out, GitHub fails closed and
+      # rejects the push with "workflows scope may be required". Granting workflows:write
+      # tells GitHub to skip the scan entirely (the caller is already authorized to modify
+      # workflow files), which is the only documented way to push to this repo from a bot.
+      # grafana-writer is the only app installed with that scope; grafana-pr-automation
+      # cannot push at all because of this.
+      # Minted only after every step that runs third-party actions or package code so none
+      # of it runs in this job while the writer token exists.
+      - name: Get GitHub App token (writer)
+        id: get-writer-app-token
+        uses: grafana/shared-workflows/actions/create-github-app-token@46f48da11e78ebdba7a8747ae456b11062fac83e # create-github-app-token/v0.3.1
+        with:
+          github_app: grafana-writer
+          permission_set: ${{ startsWith(github.ref_name, 'release-') && 'release-writer' || 'release-writer-main' }}
+
+      # planetscale/ghcommit-action commits to an existing remote branch; it doesn't
+      # create the branch itself. Pre-create the ref at the release branch's HEAD via
+      # the Git Data API so subsequent commits have a target.
+      - name: Pre-create branch on remote
+        env:
+          GH_TOKEN: ${{ steps.get-writer-app-token.outputs.token }}
+        run: |
+          BASE_SHA=$(git rev-parse "origin/${RELEASE_BRANCH}")
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
+            --method POST \
+            -f "ref=refs/heads/${WORK_BRANCH}" \
+            -f "sha=${BASE_SHA}"
 
       # Single commit for all release-PR file changes (changelog + version bumps +
       # yarn.lock refresh + regenerated CUE schemas). ghcommit-action uses the Git Data
