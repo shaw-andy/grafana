@@ -1,4 +1,56 @@
-import { sanitizeTextPanelContent, sanitizeUrl, sanitize, validatePath, PathValidationError } from './sanitize';
+import {
+  sanitizeTextPanelContent,
+  sanitizeUrl,
+  sanitize,
+  textUtil,
+  validatePath,
+  PathValidationError,
+} from './sanitize';
+
+/**
+ * The browser decodes CSS escapes before it fetches a style url, so a check for the
+ * literal function name misses `\75 rl(/logout)`, which Chrome still requests.
+ */
+function decodeCssEscapes(value: string): string {
+  return value.replace(/\\([0-9a-fA-F]{1,6})[ \t\n\r\f]?|\\(.)/g, (_, hex: string | undefined, ch: string) =>
+    hex !== undefined ? String.fromCodePoint(parseInt(hex, 16)) : ch
+  );
+}
+
+function insertedMarkup(html: string): string {
+  const root = document.createElement('div');
+  root.innerHTML = html;
+  return Array.from(root.querySelectorAll('*'))
+    .flatMap((el) => [el.getAttribute('style'), el.getAttribute('background')])
+    .filter((value): value is string => value != null)
+    .map((value) => decodeCssEscapes(value))
+    .join('\n');
+}
+
+function expectNoSessionCssRequest(html: string) {
+  const markup = insertedMarkup(html);
+  expect(markup).not.toMatch(/url\s*\(/i);
+  expect(markup).not.toMatch(/image-set\s*\(/i);
+  expect(markup).not.toMatch(/(?:^|[^a-z-])image\s*\(/i);
+  expect(markup).not.toContain('/logout');
+  expect(markup).not.toContain('/profile/switch-org/');
+}
+
+const sessionCssPayloads = [
+  '<div style="background-image:url(/logout)"></div>',
+  `<div style="background-image:url('/logout')"></div>`,
+  '<div style="background-image:url(&quot;/profile/switch-org/2&quot;)"></div>',
+  '<div style="background:url(/logout)"></div>',
+  '<li style="list-style-image:url(/logout)"></li>',
+  '<li style="list-style:url(/logout) inside"></li>',
+  '<div style="border-image:url(/logout) 30 stretch"></div>',
+  '<div style="border-image-source:url(/logout)"></div>',
+  '<div style="background-image:image-set(url(/logout) 1x)"></div>',
+  '<div style="background-image:image(url(/logout))"></div>',
+  '<div style="background-image:URL( /logout )"></div>',
+  '<div style="background-image:\\75 rl(/logout)"></div>',
+  '<div style="background-image:url(/logout); color:red">kept</div>',
+];
 
 describe('sanitizeTextPanelContent', () => {
   it('should allow whitelisted styles in text panel', () => {
@@ -47,6 +99,33 @@ describe('sanitizeTextPanelContent', () => {
     expect(str).toContain('<button');
     expect(str).toContain('Click me');
   });
+
+  it.each(sessionCssPayloads)('drops a same-origin CSS request from %s', (html) => {
+    const sanitized = sanitizeTextPanelContent(html);
+    expectNoSessionCssRequest(sanitized);
+    if (html.includes('color:red')) {
+      expect(sanitized).toContain('color:red');
+      expect(sanitized).toContain('kept');
+    }
+  });
+
+  it('keeps color and keyword backgrounds that do not fetch', () => {
+    const sanitized = sanitizeTextPanelContent(
+      '<div style="background-color: red; background: none; color: black; list-style: disc; border: 1px solid red"></div>'
+    );
+    expect(sanitized).toContain('background-color:red');
+    expect(sanitized).toContain('background:none');
+    expect(sanitized).toContain('color:black');
+    expect(sanitized).toContain('list-style:disc');
+    expect(sanitized).toContain('border:1px solid red');
+  });
+
+  it('still drops a script-scheme CSS url', () => {
+    const sanitized = sanitizeTextPanelContent('<div style="background-image:url(javascript:alert(1))">kept</div>');
+    expect(sanitized).not.toMatch(/javascript/i);
+    expect(sanitized).not.toMatch(/url\s*\(/i);
+    expect(sanitized).toContain('kept');
+  });
 });
 
 describe('sanitizeUrl', () => {
@@ -66,6 +145,18 @@ describe('sanitizeIframe', () => {
 });
 
 describe('sanitize', () => {
+  it.each(sessionCssPayloads)('drops a same-origin CSS request from %s', (html) => {
+    expectNoSessionCssRequest(sanitize(html));
+  });
+
+  it('drops an HTML background attribute the browser fetches with the session', () => {
+    const sanitized = sanitize(
+      '<table background="/logout"><tr><td background="/profile/switch-org/2">x</td></tr></table><body background="/logout"></body>'
+    );
+    expectNoSessionCssRequest(sanitized);
+    expect(insertedMarkup(sanitized)).not.toContain('/logout');
+  });
+
   it('should sanitize xss payload', () => {
     const html = '<script>alert(1)</script>';
     const str = sanitize(html);
@@ -90,6 +181,16 @@ describe('sanitize', () => {
       const str = sanitize(html);
       expect(str).toBe('<a href="https://example.com">Link</a>');
     });
+  });
+});
+
+describe('sanitizeSVGContent', () => {
+  it('drops a same-origin CSS request from an SVG style attribute', () => {
+    const sanitized = textUtil.sanitizeSVGContent(
+      '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10" style="background-image:url(/logout)" /></svg>'
+    );
+    expectNoSessionCssRequest(sanitized);
+    expect(sanitized).toContain('<rect');
   });
 });
 

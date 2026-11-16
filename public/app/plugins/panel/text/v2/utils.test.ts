@@ -36,6 +36,18 @@ describe('transformContent', () => {
     expect(html).toContain('safe');
   });
 
+  it.each([TextMode.HTML, TextMode.Markdown])('drops a same-origin CSS url in %s mode', (mode) => {
+    const html = transformContent(
+      mode,
+      '<div style="background-image:url(/logout)"></div><div style="list-style-image:url(/profile/switch-org/2)"></div>',
+      false
+    );
+
+    expect(html).not.toMatch(/url\s*\(/i);
+    expect(html).not.toContain('/logout');
+    expect(html).not.toContain('/profile/switch-org/');
+  });
+
   it('leaves HTML untouched when sanitization is disabled', () => {
     expect(transformContent(TextMode.HTML, '<form><p>kept</p></form>', true)).toContain('<form>');
   });

@@ -459,6 +459,20 @@ describe('interpolateTemplate', () => {
 });
 
 describe('renderContent', () => {
+  it.each([TextMode.HTML, TextMode.Markdown])('drops a same-origin CSS url after interpolation in %s mode', (mode) => {
+    const html = renderContent(
+      {
+        content: '<div style="background-image:url(/logout)"></div>',
+        mode,
+        series: [hosts],
+      },
+      createReplaceVariables(),
+      false
+    );
+
+    expect(html).not.toMatch(/url\s*\(/i);
+    expect(html).not.toContain('/logout');
+  });
   function render(content: string, renderMode: RenderMode, mode = TextMode.Markdown) {
     return renderContent({ content, series: [hosts], renderMode, mode }, createReplaceVariables(), false);
   }
