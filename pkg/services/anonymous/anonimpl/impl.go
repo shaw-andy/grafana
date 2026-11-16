@@ -2,7 +2,6 @@ package anonimpl
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"time"
 
@@ -92,10 +91,7 @@ func (a *AnonDeviceService) tagDeviceUI(ctx context.Context, device *anonstore.D
 
 	key := device.CacheKey()
 
-	if val, ok := a.localCache.Get(key); ok {
-		if boolVal, ok := val.(bool); ok && !boolVal {
-			return anonstore.ErrDeviceLimitReached
-		}
+	if _, ok := a.localCache.Get(key); ok {
 		return nil
 	}
 
@@ -106,11 +102,7 @@ func (a *AnonDeviceService) tagDeviceUI(ctx context.Context, device *anonstore.D
 	}
 
 	if err := a.anonStore.CreateOrUpdateDevice(ctx, device); err != nil {
-		if errors.Is(err, anonstore.ErrDeviceLimitReached) {
-			a.localCache.SetDefault(key, false)
-			return err
-		}
-		// invalidate cache if there is an error
+		// Rejected device ids are not cached, otherwise every refused id would grow the cache.
 		a.localCache.Delete(key)
 		return err
 	}
@@ -137,6 +129,10 @@ func (a *AnonDeviceService) untagDevice(ctx context.Context, _ *authn.Identity, 
 func (a *AnonDeviceService) TagDevice(ctx context.Context, httpReq *http.Request, kind anonymous.DeviceKind) error {
 	deviceID := httpReq.Header.Get(deviceIDHeader)
 	if deviceID == "" {
+		return nil
+	}
+	if len(deviceID) > anonstore.MaxDeviceIDLength {
+		a.log.Debug("Ignoring oversized device id", "length", len(deviceID))
 		return nil
 	}
 

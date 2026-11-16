@@ -4,25 +4,36 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/services/search/model"
 	"github.com/grafana/grafana/pkg/services/sqlstore"
 	"github.com/grafana/grafana/pkg/services/sqlstore/migrator"
+	"github.com/grafana/grafana/pkg/setting"
 )
 
 const cacheKeyPrefix = "anon-device"
 const anonymousDeviceExpiration = 30 * 24 * time.Hour
 const tableName = "anon_device"
 
+// MaxDeviceIDLength and maxUserAgentLength match the anon_device column widths.
+const MaxDeviceIDLength = 127
+const maxUserAgentLength = 255
+
 var ErrDeviceLimitReached = fmt.Errorf("device limit reached")
+var ErrDeviceIDTooLong = fmt.Errorf("device id exceeds %d bytes", MaxDeviceIDLength)
 
 type AnonDBStore struct {
 	sqlStore    db.DB
 	log         log.Logger
 	deviceLimit int64
+	// insertMu serializes the count and insert of new devices so concurrent
+	// requests from this instance cannot each pass the limit check.
+	insertMu sync.Mutex
 }
 
 type Device struct {
@@ -78,6 +89,9 @@ type AnonStore interface {
 }
 
 func ProvideAnonDBStore(sqlStore db.DB, deviceLimit int64) *AnonDBStore {
+	if deviceLimit <= 0 {
+		deviceLimit = setting.DefaultAnonymousDeviceLimit
+	}
 	return &AnonDBStore{sqlStore: sqlStore, log: log.New("anonstore"), deviceLimit: deviceLimit}
 }
 
@@ -97,8 +111,9 @@ func (s *AnonDBStore) ListDevices(ctx context.Context, from *time.Time, to *time
 	return devices, err
 }
 
-// updateDevice updates a device if it exists and has been updated between the given times.
-func (s *AnonDBStore) updateDevice(ctx context.Context, device *Device) error {
+// updateDevice updates a device if it exists and has been updated in the expiration window.
+// It reports whether a row was updated.
+func (s *AnonDBStore) updateDevice(ctx context.Context, device *Device) (bool, error) {
 	const query = `UPDATE anon_device SET
 client_ip = ?,
 user_agent = ?,
@@ -108,6 +123,7 @@ WHERE device_id = ? AND updated_at BETWEEN ? AND ?`
 	args := []interface{}{device.ClientIP, device.UserAgent, device.UpdatedAt.UTC(), device.DeviceID,
 		device.UpdatedAt.UTC().Add(-anonymousDeviceExpiration), device.UpdatedAt.UTC().Add(time.Minute),
 	}
+	var updated bool
 	err := s.sqlStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
 		args = append([]interface{}{query}, args...)
 		result, err := dbSession.Exec(args...)
@@ -120,29 +136,40 @@ WHERE device_id = ? AND updated_at BETWEEN ? AND ?`
 			return err
 		}
 
-		if rowsAffected == 0 {
-			return ErrDeviceLimitReached
-		}
-
+		updated = rowsAffected > 0
 		return nil
 	})
 
-	return err
+	return updated, err
 }
 
+// CreateOrUpdateDevice updates a device seen in the expiration window, or inserts it
+// if fewer than deviceLimit devices were seen in that window.
 func (s *AnonDBStore) CreateOrUpdateDevice(ctx context.Context, device *Device) error {
 	var query string
 
-	// if device limit is reached, only update devices
-	if s.deviceLimit > 0 {
-		count, err := s.CountDevices(ctx, time.Now().UTC().Add(-anonymousDeviceExpiration), time.Now().UTC().Add(time.Minute))
-		if err != nil {
-			return err
-		}
+	if len(device.DeviceID) > MaxDeviceIDLength {
+		return ErrDeviceIDTooLong
+	}
+	device.UserAgent = truncateRunes(device.UserAgent, maxUserAgentLength)
 
-		if count >= s.deviceLimit {
-			return s.updateDevice(ctx, device)
-		}
+	updated, err := s.updateDevice(ctx, device)
+	if err != nil {
+		return err
+	}
+	if updated {
+		return nil
+	}
+
+	s.insertMu.Lock()
+	defer s.insertMu.Unlock()
+
+	count, err := s.CountDevices(ctx, time.Now().UTC().Add(-anonymousDeviceExpiration), time.Now().UTC().Add(time.Minute))
+	if err != nil {
+		return err
+	}
+	if count >= s.deviceLimit {
+		return ErrDeviceLimitReached
 	}
 
 	// If CreatedAt time is not set (i.e. it's zero), and we end up creating the device, use current time as creation time.
@@ -180,13 +207,18 @@ func (s *AnonDBStore) CreateOrUpdateDevice(ctx context.Context, device *Device) 
 		return fmt.Errorf("unsupported database driver: %s", s.sqlStore.GetDBType())
 	}
 
-	err := s.sqlStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
+	return s.sqlStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
 		args = append([]any{query}, args...)
 		_, err := dbSession.Exec(args...)
 		return err
 	})
+}
 
-	return err
+func truncateRunes(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n])
 }
 
 func (s *AnonDBStore) CountDevices(ctx context.Context, from time.Time, to time.Time) (int64, error) {
@@ -262,13 +294,11 @@ func (s *AnonDBStore) SearchDevices(ctx context.Context, query *SearchDeviceQuer
 			sess.Where(sql, param)
 		}
 
-		// get total
-		devices, err := s.ListDevices(ctx, &query.From, &query.To)
+		total, err := s.CountDevices(ctx, query.From, query.To)
 		if err != nil {
 			return err
 		}
-		// cast to int64
-		result.TotalCount = int64(len(devices))
+		result.TotalCount = total
 		if err := sess.Find(&result.Devices); err != nil {
 			return err
 		}
