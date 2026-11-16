@@ -352,6 +352,103 @@ func testIntegrationAppPluginSettings(t *testing.T, features ...string) {
 	}
 }
 
+func TestIntegrationViewerCannotRewriteAppPluginSettings(t *testing.T) {
+	testutil.SkipIntegrationTestInShortMode(t)
+
+	for _, features := range [][]string{nil, {featuremgmt.FlagGrafanaUseRouterMiddleware}} {
+		t.Run(fmt.Sprint(features), func(t *testing.T) {
+			helper := setupHelper(t, rest.Mode0, features...)
+			ctx := context.Background()
+			admin := helper.GetResourceClient(apis.ResourceClientArgs{
+				User: helper.Org1.Admin,
+				GVR:  gvrSettings,
+			})
+
+			write := func(t *testing.T) {
+				t.Helper()
+				_, err := admin.Resource.Update(ctx, &unstructured.Unstructured{
+					Object: map[string]any{
+						"apiVersion": testAppID + "/v0alpha1",
+						"kind":       "Settings",
+						"metadata":   map[string]any{"name": instanceName},
+						"spec": map[string]any{
+							"enabled":  true,
+							"pinned":   true,
+							"jsonData": map[string]any{"url": "https://upstream.example"},
+						},
+						"secure": map[string]any{
+							"token": map[string]any{"create": "placeholder-value"},
+						},
+					},
+				}, metav1.UpdateOptions{})
+				require.NoError(t, err)
+			}
+
+			requireForbidden := func(t *testing.T, err error) {
+				t.Helper()
+				require.Error(t, err)
+				statusErr := helper.AsStatusError(err)
+				require.Equal(t, int32(http.StatusForbidden), statusErr.ErrStatus.Code)
+			}
+
+			assertOriginal := func(t *testing.T) {
+				t.Helper()
+				obj, err := admin.Resource.Get(ctx, instanceName, metav1.GetOptions{})
+				require.NoError(t, err)
+				spec, ok := obj.Object["spec"].(map[string]any)
+				require.True(t, ok)
+				require.Equal(t, true, spec["enabled"])
+				require.Equal(t, map[string]any{"url": "https://upstream.example"}, spec["jsonData"])
+				secure, ok := obj.Object["secure"].(map[string]any)
+				require.True(t, ok)
+				token, ok := secure["token"].(map[string]any)
+				require.True(t, ok)
+				name, _ := token["name"].(string)
+				require.NotEmpty(t, name)
+			}
+
+			attack := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": testAppID + "/v0alpha1",
+				"kind":       "Settings",
+				"metadata":   map[string]any{"name": instanceName},
+				"spec": map[string]any{
+					"enabled":  false,
+					"pinned":   false,
+					"jsonData": map[string]any{"url": "https://collector.example"},
+				},
+			}}
+
+			for _, user := range []apis.User{helper.Org1.Viewer, helper.Org1.Editor} {
+				t.Run(string(user.Identity.GetOrgRole()), func(t *testing.T) {
+					write(t)
+					client := helper.GetResourceClient(apis.ResourceClientArgs{User: user, GVR: gvrSettings})
+
+					_, err := client.Resource.Update(ctx, attack, metav1.UpdateOptions{})
+					assertOriginal(t)
+					requireForbidden(t, err)
+
+					patch, err := json.Marshal([]map[string]any{
+						{"op": "replace", "path": "/spec/enabled", "value": false},
+						{"op": "replace", "path": "/spec/jsonData", "value": map[string]any{"url": "https://collector.example"}},
+					})
+					require.NoError(t, err)
+					_, err = client.Resource.Patch(ctx, instanceName, types.JSONPatchType, patch, metav1.PatchOptions{})
+					assertOriginal(t)
+					requireForbidden(t, err)
+
+					_, err = client.Resource.Create(ctx, attack, metav1.CreateOptions{})
+					assertOriginal(t)
+					requireForbidden(t, err)
+
+					err = client.Resource.Delete(ctx, instanceName, metav1.DeleteOptions{})
+					assertOriginal(t)
+					requireForbidden(t, err)
+				})
+			}
+		})
+	}
+}
+
 func setupHelper(t *testing.T, mode rest.DualWriterMode, extraFeatures ...string) *apis.K8sTestHelper {
 	return setupHelperFull(t, mode, false, extraFeatures...)
 }
