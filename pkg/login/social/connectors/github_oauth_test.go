@@ -455,18 +455,6 @@ func TestSocialGitHub_InitializeExtraFields(t *testing.T) {
 				allowedOrganizations: []string{},
 			},
 		},
-		{
-			name: "should not error when teamIds are not integers",
-			settings: &social.OAuthInfo{
-				Extra: map[string]string{
-					"team_ids": "abc1234,5678",
-				},
-			},
-			want: settingFields{
-				teamIds:              []int{},
-				allowedOrganizations: []string{},
-			},
-		},
 	}
 
 	for _, tc := range testCases {
@@ -477,6 +465,16 @@ func TestSocialGitHub_InitializeExtraFields(t *testing.T) {
 			require.Equal(t, tc.want.allowedOrganizations, s.allowedOrganizations)
 		})
 	}
+
+	t.Run("should error when teamIds are not integers", func(t *testing.T) {
+		info := &social.OAuthInfo{
+			Extra: map[string]string{
+				"team_ids": "abc1234,5678",
+			},
+		}
+		_, err := NewGitHubProvider(context.Background(), info, testConfigProvider(t, &setting.Cfg{}), nil, ssosettingstests.NewFakeService(), featuremgmt.WithFeatures())
+		require.Error(t, err)
+	})
 }
 
 func TestSocialGitHub_Validate(t *testing.T) {

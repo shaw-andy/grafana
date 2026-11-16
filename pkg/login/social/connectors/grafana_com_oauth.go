@@ -16,7 +16,6 @@ import (
 	"github.com/grafana/grafana/pkg/services/ssosettings"
 	ssoModels "github.com/grafana/grafana/pkg/services/ssosettings/models"
 	"github.com/grafana/grafana/pkg/services/ssosettings/validation"
-	"github.com/grafana/grafana/pkg/util"
 )
 
 var ExtraGrafanaComSettingKeys = map[string]ExtraKeyInfo{
@@ -54,9 +53,9 @@ func NewGrafanaComProvider(ctx context.Context, info *social.OAuthInfo, cfgProvi
 		return nil, err
 	}
 
-	allowedOrganizations, err := util.SplitStringWithError(info.Extra[allowedOrganizationsKey])
+	allowedOrganizations, err := splitListSetting(info, allowedOrganizationsKey)
 	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.GrafanaComProviderName, "error", err)
+		return nil, err
 	}
 
 	provider := &SocialGrafanaCom{
@@ -91,7 +90,8 @@ func (s *SocialGrafanaCom) Validate(ctx context.Context, newSettings ssoModels.S
 	return validation.Validate(info, requester,
 		validation.MustBeEmptyValidator(info.AuthUrl, "Auth URL"),
 		validation.MustBeEmptyValidator(info.TokenUrl, "Token URL"),
-		validation.MustBeEmptyValidator(info.TeamsUrl, "Teams URL"))
+		validation.MustBeEmptyValidator(info.TeamsUrl, "Teams URL"),
+		allowedOrganizationsValidator)
 }
 
 func (s *SocialGrafanaCom) Reload(ctx context.Context, settings ssoModels.SSOSettings) error {
@@ -100,9 +100,9 @@ func (s *SocialGrafanaCom) Reload(ctx context.Context, settings ssoModels.SSOSet
 		return ssosettings.ErrInvalidSettings.Errorf("SSO settings map cannot be converted to OAuthInfo: %v", err)
 	}
 
-	allowedOrganizations, err := util.SplitStringWithError(newInfo.Extra[allowedOrganizationsKey])
+	allowedOrganizations, err := splitListSetting(newInfo, allowedOrganizationsKey)
 	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.GrafanaComProviderName, "error", err)
+		return err
 	}
 	cfg, err := s.cfgProvider.Get(ctx)
 	if err != nil {

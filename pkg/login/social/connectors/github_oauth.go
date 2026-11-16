@@ -21,7 +21,6 @@ import (
 	"github.com/grafana/grafana/pkg/services/ssosettings"
 	ssoModels "github.com/grafana/grafana/pkg/services/ssosettings/models"
 	"github.com/grafana/grafana/pkg/services/ssosettings/validation"
-	"github.com/grafana/grafana/pkg/util"
 )
 
 var ExtraGithubSettingKeys = map[string]ExtraKeyInfo{
@@ -67,25 +66,20 @@ func NewGitHubProvider(ctx context.Context, info *social.OAuthInfo, cfgProvider 
 		return nil, err
 	}
 
-	teamIdsSplitted, err := util.SplitStringWithError(info.Extra[teamIdsKey])
+	teamIds, err := parseGitHubTeamIds(info)
 	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", teamIdsKey, "provider", social.GitHubProviderName, "error", err)
+		return nil, err
 	}
-	teamIds := mustInts(teamIdsSplitted)
 
-	allowedOrganizations, err := util.SplitStringWithError(info.Extra[allowedOrganizationsKey])
+	allowedOrganizations, err := splitListSetting(info, allowedOrganizationsKey)
 	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.GitHubProviderName, "error", err)
+		return nil, err
 	}
 
 	provider := &SocialGithub{
 		SocialBase:           s,
 		teamIds:              teamIds,
 		allowedOrganizations: allowedOrganizations,
-	}
-
-	if len(teamIdsSplitted) != len(teamIds) {
-		provider.log.Warn("Failed to parse team ids. Team ids must be a list of numbers.", "teamIds", teamIdsSplitted)
 	}
 
 	if ssoSettings != nil {
@@ -115,18 +109,13 @@ func (s *SocialGithub) Validate(ctx context.Context, newSettings ssoModels.SSOSe
 		validation.MustBeEmptyValidator(info.AuthUrl, "Auth URL"),
 		validation.MustBeEmptyValidator(info.TokenUrl, "Token URL"),
 		validation.MustBeEmptyValidator(info.ApiUrl, "API URL"),
-		teamIdsNumbersValidator)
+		teamIdsNumbersValidator,
+		allowedOrganizationsValidator)
 }
 
 func teamIdsNumbersValidator(info *social.OAuthInfo, requester identity.Requester) error {
-	teamIdsSplitted := util.SplitString(info.Extra[teamIdsKey])
-	teamIds := mustInts(teamIdsSplitted)
-
-	if len(teamIdsSplitted) != len(teamIds) {
-		return ssosettings.ErrInvalidOAuthConfig("Failed to parse Team Ids. Team Ids must be a list of numbers.")
-	}
-
-	return nil
+	_, err := parseGitHubTeamIds(info)
+	return err
 }
 
 func (s *SocialGithub) Reload(ctx context.Context, settings ssoModels.SSOSettings) error {
@@ -135,19 +124,14 @@ func (s *SocialGithub) Reload(ctx context.Context, settings ssoModels.SSOSetting
 		return ssosettings.ErrInvalidSettings.Errorf("SSO settings map cannot be converted to OAuthInfo: %v", err)
 	}
 
-	teamIdsSplitted, err := util.SplitStringWithError(newInfo.Extra[teamIdsKey])
+	teamIds, err := parseGitHubTeamIds(newInfo)
 	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", teamIdsKey, "provider", social.GitHubProviderName, "error", err)
-	}
-	teamIds := mustInts(teamIdsSplitted)
-
-	allowedOrganizations, err := util.SplitStringWithError(newInfo.Extra[allowedOrganizationsKey])
-	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.GitHubProviderName, "error", err)
+		return err
 	}
 
-	if len(teamIdsSplitted) != len(teamIds) {
-		s.log.Warn("Failed to parse team ids. Team ids must be a list of numbers.", "teamIds", teamIdsSplitted)
+	allowedOrganizations, err := splitListSetting(newInfo, allowedOrganizationsKey)
+	if err != nil {
+		return err
 	}
 
 	s.reloadMutex.Lock()
@@ -419,14 +403,19 @@ func convertToGroupList(t []GithubTeam) []string {
 	return groups
 }
 
-func mustInts(s []string) []int {
-	result := make([]int, 0, len(s))
-	for _, v := range s {
+func parseGitHubTeamIds(info *social.OAuthInfo) ([]int, error) {
+	teamIdsSplitted, err := splitListSetting(info, teamIdsKey)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]int, 0, len(teamIdsSplitted))
+	for _, v := range teamIdsSplitted {
 		num, err := strconv.Atoi(v)
 		if err != nil {
-			return []int{}
+			return nil, ssosettings.ErrInvalidOAuthConfig("Failed to parse Team Ids. Team Ids must be a list of numbers.")
 		}
 		result = append(result, num)
 	}
-	return result
+	return result, nil
 }

@@ -61,14 +61,14 @@ func NewGenericOAuthProvider(ctx context.Context, info *social.OAuthInfo, cfgPro
 		return nil, err
 	}
 
-	teamIds, err := util.SplitStringWithError(info.Extra[teamIdsKey])
+	teamIds, err := splitListSetting(info, teamIdsKey)
 	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", teamIdsKey, "provider", social.GenericOAuthProviderName, "error", err)
+		return nil, err
 	}
 
-	allowedOrganizations, err := util.SplitStringWithError(info.Extra[allowedOrganizationsKey])
+	allowedOrganizations, err := splitListSetting(info, allowedOrganizationsKey)
 	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.GenericOAuthProviderName, "error", err)
+		return nil, err
 	}
 
 	provider := &SocialGenericOAuth{
@@ -112,13 +112,17 @@ func (s *SocialGenericOAuth) Validate(ctx context.Context, newSettings ssoModels
 		validation.UrlValidator(info.AuthUrl, "Auth URL"),
 		validation.UrlValidator(info.TokenUrl, "Token URL"),
 		validateTeamsUrlWhenNotEmpty,
-		validation.ValidateIDTokenValidator)
+		validation.ValidateIDTokenValidator,
+		allowedOrganizationsValidator)
 
 	if err != nil {
 		return err
 	}
 
-	teamIds := util.SplitString(info.Extra[teamIdsKey])
+	teamIds, err := splitListSetting(info, teamIdsKey)
+	if err != nil {
+		return err
+	}
 	if len(teamIds) > 0 && (info.TeamIdsAttributePath == "" || info.TeamsUrl == "") {
 		return ssosettings.ErrInvalidOAuthConfig("If Team Ids are configured then Team Ids attribute path and Teams URL must be configured.")
 	}
@@ -143,20 +147,20 @@ func (s *SocialGenericOAuth) Reload(ctx context.Context, settings ssoModels.SSOS
 		return ssosettings.ErrInvalidSettings.Errorf("SSO settings map cannot be converted to OAuthInfo: %v", err)
 	}
 
+	teamIds, err := splitListSetting(newInfo, teamIdsKey)
+	if err != nil {
+		return err
+	}
+	allowedOrganizations, err := splitListSetting(newInfo, allowedOrganizationsKey)
+	if err != nil {
+		return err
+	}
+
 	s.reloadMutex.Lock()
 	defer s.reloadMutex.Unlock()
 
 	if err := s.updateInfo(ctx, social.GenericOAuthProviderName, newInfo); err != nil {
 		return err
-	}
-
-	teamIds, err := util.SplitStringWithError(newInfo.Extra[teamIdsKey])
-	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", teamIdsKey, "provider", social.GenericOAuthProviderName, "error", err)
-	}
-	allowedOrganizations, err := util.SplitStringWithError(newInfo.Extra[allowedOrganizationsKey])
-	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.GenericOAuthProviderName, "error", err)
 	}
 
 	s.teamsUrl = newInfo.TeamsUrl
