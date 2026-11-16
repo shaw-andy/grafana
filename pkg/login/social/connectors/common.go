@@ -2,7 +2,6 @@ package connectors
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,8 +13,10 @@ import (
 	"github.com/mitchellh/mapstructure"
 	"golang.org/x/oauth2"
 
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/login/social"
+	"github.com/grafana/grafana/pkg/services/ssosettings"
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/util"
 )
@@ -171,12 +172,11 @@ func MustBool(value any, defaultValue bool) bool {
 
 // CreateOAuthInfoFromKeyValuesWithLogging creates an OAuthInfo struct from a map[string]any using mapstructure
 // it puts all extra key values into OAuthInfo's Extra map.
-// It logs as errors any parsing errors that are not critical
+// It logs parsing errors as errors before returning them.
 func CreateOAuthInfoFromKeyValuesWithLogging(l log.Logger, provider string, settingsKV map[string]any) (*social.OAuthInfo, error) {
-	parsingWarns := []error{}
-	info, err := createOAuthInfoFromKeyValues(settingsKV, &parsingWarns)
-	if len(parsingWarns) > 0 {
-		l.Error("Invalid auth configuration setting", "error", errors.Join(parsingWarns...), "provider", provider)
+	info, err := CreateOAuthInfoFromKeyValues(settingsKV)
+	if err != nil {
+		l.Error("Invalid auth configuration setting", "error", err, "provider", provider)
 	}
 	return info, err
 }
@@ -184,10 +184,6 @@ func CreateOAuthInfoFromKeyValuesWithLogging(l log.Logger, provider string, sett
 // CreateOAuthInfoFromKeyValues creates an OAuthInfo struct from a map[string]any using mapstructure
 // it puts all extra key values into OAuthInfo's Extra map
 func CreateOAuthInfoFromKeyValues(settingsKV map[string]any) (*social.OAuthInfo, error) {
-	return createOAuthInfoFromKeyValues(settingsKV, nil)
-}
-
-func createOAuthInfoFromKeyValues(settingsKV map[string]any, parsingWarns *[]error) (*social.OAuthInfo, error) {
 	emptyStrToSliceDecodeHook := func(from reflect.Type, to reflect.Type, data any) (any, error) {
 		if from.Kind() == reflect.String && to.Kind() == reflect.Slice {
 			strData, ok := data.(string)
@@ -199,11 +195,9 @@ func createOAuthInfoFromKeyValues(settingsKV map[string]any, parsingWarns *[]err
 				return []string{}, nil
 			}
 
-			splitStr, err := util.SplitStringWithError(strData)
-			if err != nil && parsingWarns != nil {
-				*parsingWarns = append(*parsingWarns, err)
-			}
-			return splitStr, nil
+			// A malformed list must not decode to an empty list: allowed groups and
+			// allowed domains treat an empty list as no restriction.
+			return util.SplitStringWithError(strData)
 		}
 		return data, nil
 	}
@@ -229,6 +223,22 @@ func createOAuthInfoFromKeyValues(settingsKV map[string]any, parsingWarns *[]err
 	}
 
 	return &oauthInfo, err
+}
+
+// splitListSetting parses a list-valued extra setting such as team_ids or allowed_organizations.
+// It returns an error instead of an empty list for malformed values, because membership checks
+// treat an empty list as no restriction.
+func splitListSetting(info *social.OAuthInfo, key string) ([]string, error) {
+	values, err := util.SplitStringWithError(info.Extra[key])
+	if err != nil {
+		return nil, ssosettings.ErrInvalidOAuthConfig(fmt.Sprintf("Failed to parse %s: %v", key, err))
+	}
+	return values, nil
+}
+
+func allowedOrganizationsValidator(info *social.OAuthInfo, requester identity.Requester) error {
+	_, err := splitListSetting(info, allowedOrganizationsKey)
+	return err
 }
 
 func appendUniqueScope(config *oauth2.Config, scope string) {

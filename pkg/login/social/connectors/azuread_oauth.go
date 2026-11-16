@@ -28,7 +28,6 @@ import (
 	"github.com/grafana/grafana/pkg/services/ssosettings"
 	ssoModels "github.com/grafana/grafana/pkg/services/ssosettings/models"
 	"github.com/grafana/grafana/pkg/services/ssosettings/validation"
-	"github.com/grafana/grafana/pkg/util"
 	"golang.org/x/oauth2"
 )
 
@@ -100,9 +99,9 @@ func NewAzureADProvider(ctx context.Context, info *social.OAuthInfo, cfgProvider
 		return nil, err
 	}
 
-	allowedOrganizations, err := util.SplitStringWithError(info.Extra[allowedOrganizationsKey])
+	allowedOrganizations, err := splitListSetting(info, allowedOrganizationsKey)
 	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.AzureADProviderName, "error", err)
+		return nil, err
 	}
 
 	provider := &SocialAzureAD{
@@ -435,6 +434,11 @@ func (s *SocialAzureAD) Reload(ctx context.Context, settings ssoModels.SSOSettin
 		return ssosettings.ErrInvalidSettings.Errorf("SSO settings map cannot be converted to OAuthInfo: %v", err)
 	}
 
+	allowedOrganizations, err := splitListSetting(newInfo, allowedOrganizationsKey)
+	if err != nil {
+		return err
+	}
+
 	s.reloadMutex.Lock()
 	defer s.reloadMutex.Unlock()
 
@@ -444,11 +448,6 @@ func (s *SocialAzureAD) Reload(ctx context.Context, settings ssoModels.SSOSettin
 
 	if newInfo.UseRefreshToken {
 		appendUniqueScope(s.Config, social.OfflineAccessScope)
-	}
-
-	allowedOrganizations, err := util.SplitStringWithError(newInfo.Extra[allowedOrganizationsKey])
-	if err != nil {
-		s.log.Error("Invalid auth configuration setting", "config", allowedOrganizationsKey, "provider", social.AzureADProviderName, "error", err)
 	}
 
 	s.allowedOrganizations = allowedOrganizations
@@ -477,6 +476,7 @@ func (s *SocialAzureAD) Validate(ctx context.Context, newSettings ssoModels.SSOS
 		validateClientAuthentication,
 		validateFederatedCredentialAudience,
 		validateAllowedGroups,
+		allowedOrganizationsValidator,
 		validation.MustBeEmptyValidator(info.ApiUrl, "API URL"),
 		validation.RequiredUrlValidator(info.AuthUrl, "Auth URL"),
 		validation.RequiredUrlValidator(info.TokenUrl, "Token URL"),
