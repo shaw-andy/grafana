@@ -124,20 +124,6 @@ func Routes() *pluginschema.Routes {
 		},
 	})
 
-	routes.Register("/resources/boom", spec3.PathProps{
-		Summary: "force a panic",
-		Get: &spec3.Operation{
-			OperationProps: spec3.OperationProps{
-				Responses: unstructuredResponse,
-			},
-		},
-		Post: &spec3.Operation{
-			OperationProps: spec3.OperationProps{
-				Responses: unstructuredResponse,
-			},
-		},
-	})
-
 	routes.Register("/resources/test", spec3.PathProps{
 		Summary: "Echo any request",
 		Post: &spec3.Operation{
