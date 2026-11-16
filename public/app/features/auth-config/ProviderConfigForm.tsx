@@ -25,6 +25,7 @@ import { FieldRenderer } from './FieldRenderer';
 import { getSectionFields } from './fields';
 import { type SSOProvider, type SSOProviderDTO } from './types';
 import { dataToDTO, dtoToData } from './utils/data';
+import { getSSOSettingsUrl } from './utils/url';
 
 const appEvents = getAppEvents();
 
@@ -73,7 +74,7 @@ export const ProviderConfigForm = ({ config, provider, isLoading }: ProviderConf
     const requestData = dtoToData(data, provider);
     try {
       await getBackendSrv().put(
-        `/api/v1/sso-settings/${provider}`,
+        getSSOSettingsUrl(provider),
         {
           id: config?.id,
           provider: config?.provider,
@@ -81,6 +82,7 @@ export const ProviderConfigForm = ({ config, provider, isLoading }: ProviderConf
         },
         {
           showErrorAlert: false,
+          validatePath: true,
         }
       );
 
@@ -116,7 +118,10 @@ export const ProviderConfigForm = ({ config, provider, isLoading }: ProviderConf
 
   const onResetConfig = async () => {
     try {
-      await getBackendSrv().delete(`/api/v1/sso-settings/${provider}`, undefined, { showSuccessAlert: false });
+      await getBackendSrv().delete(getSSOSettingsUrl(provider), undefined, {
+        showSuccessAlert: false,
+        validatePath: true,
+      });
       reportInteraction('grafana_authentication_ssosettings_removed', {
         provider,
       });

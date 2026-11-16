@@ -12,6 +12,7 @@ import { ProviderConfigForm } from './ProviderConfigForm';
 import { UIMap } from './constants';
 import { loadProviders } from './state/actions';
 import { type SSOProvider } from './types';
+import { isKnownProvider } from './utils/url';
 
 const getPageNav = (config?: SSOProvider): NavModelItem => {
   if (!config) {
@@ -43,13 +44,16 @@ export const ProviderConfigPage = () => {
   const dispatch = useDispatch();
   const { isLoading, providers } = useSelector((store) => store.authConfig);
   const { provider = '' } = useParams();
-  const config = providers.find((config) => config.provider === provider);
+  const knownProvider = isKnownProvider(provider);
+  const config = knownProvider ? providers.find((config) => config.provider === provider) : undefined;
 
   useEffect(() => {
-    dispatch(loadProviders(provider));
-  }, [dispatch, provider]);
+    if (knownProvider) {
+      dispatch(loadProviders(provider));
+    }
+  }, [dispatch, provider, knownProvider]);
 
-  if (!config || !config.provider || !UIMap[config.provider]) {
+  if (!config || !config.provider || !isKnownProvider(config.provider)) {
     return <PageNotFound />;
   }
 
@@ -74,7 +78,7 @@ export const ProviderConfigPage = () => {
         </Stack>
       )}
     >
-      <ProviderConfigForm config={config} isLoading={isLoading} provider={provider} />
+      <ProviderConfigForm config={config} isLoading={isLoading} provider={config.provider} />
     </Page>
   );
 };
