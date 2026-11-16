@@ -2099,8 +2099,13 @@ func readSecuritySettings(iniFile *ini.File, cfg *Cfg) error {
 	// read data source proxy whitelist
 	cfg.DataProxyWhiteList = make(map[string]bool)
 	securityStr := valueAsString(security, "data_source_proxy_whitelist", "")
+	// An empty whitelist allows every host, so a malformed value must not fall back to it.
+	dataProxyWhiteList, err := util.SplitStringWithError(securityStr)
+	if err != nil {
+		return fmt.Errorf("invalid data_source_proxy_whitelist: %w", err)
+	}
 
-	for _, hostAndIP := range util.SplitString(securityStr) {
+	for _, hostAndIP := range dataProxyWhiteList {
 		cfg.DataProxyWhiteList[hostAndIP] = true
 	}
 
