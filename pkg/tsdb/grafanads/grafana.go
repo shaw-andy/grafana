@@ -73,10 +73,15 @@ func DataSourceModel(orgId int64) *datasources.DataSource {
 
 func (s *Service) QueryData(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
 	response := backend.NewQueryDataResponse()
+	budget := testdatasource.NewRequestBudget()
 
 	for _, q := range req.Queries {
 		switch q.QueryType {
 		case queryTypeRandomWalk:
+			if err := budget.ReserveRandomWalk(q); err != nil {
+				response.Responses[q.RefID] = backend.ErrDataResponseWithSource(backend.StatusBadRequest, backend.ErrorSourceDownstream, err.Error())
+				continue
+			}
 			response.Responses[q.RefID] = s.doRandomWalk(q)
 		case queryTypeList:
 			response.Responses[q.RefID] = s.doListQuery(ctx, q)

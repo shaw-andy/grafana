@@ -66,11 +66,42 @@ type Service struct {
 }
 
 func (s *Service) QueryData(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
-	return s.queryMux.QueryData(ctx, req)
+	admitted, rejected := admitQueries(req.Queries)
+	if len(rejected) == 0 {
+		return s.queryMux.QueryData(ctx, req)
+	}
+
+	resp := backend.NewQueryDataResponse()
+	if len(admitted) > 0 {
+		admittedReq := *req
+		admittedReq.Queries = admitted
+		var err error
+		resp, err = s.queryMux.QueryData(ctx, &admittedReq)
+		if err != nil {
+			return nil, err
+		}
+	}
+	for refID, dr := range rejected {
+		resp.Responses[refID] = dr
+	}
+	return resp, nil
 }
 
 func (s *Service) QueryChunkedData(ctx context.Context, req *backend.QueryChunkedDataRequest, w backend.ChunkedDataWriter) error {
-	return s.queryMux.QueryChunkedData(ctx, req, w)
+	admitted, rejected := admitQueries(req.Queries)
+	if len(rejected) == 0 {
+		return s.queryMux.QueryChunkedData(ctx, req, w)
+	}
+
+	if err := writeRejected(ctx, w, rejected); err != nil {
+		return err
+	}
+	if len(admitted) == 0 {
+		return nil
+	}
+	admittedReq := *req
+	admittedReq.Queries = admitted
+	return s.queryMux.QueryChunkedData(ctx, &admittedReq, w)
 }
 
 func (s *Service) CallResource(ctx context.Context, req *backend.CallResourceRequest, sender backend.CallResourceResponseSender) error {
