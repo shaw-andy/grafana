@@ -19,6 +19,7 @@ import {
   type CanvasElementProps,
   defaultLightTextColor,
 } from '../element';
+import { cssColor, cssPixels, cssTextAlign } from '../styleValues';
 import { Align, type TextConfig, type TextData } from '../types';
 
 interface ButtonData extends Omit<TextData, 'valign'> {
@@ -80,9 +81,9 @@ const getStyles = (theme: GrafanaTheme2, data: ButtonData | undefined) => ({
     '> span': {
       display: 'inline-grid',
       gridAutoFlow: 'column',
-      textAlign: data?.align,
-      fontSize: `${data?.size}px`,
-      color: data?.color,
+      textAlign: cssTextAlign(data?.align),
+      fontSize: cssPixels(data?.size),
+      color: cssColor(data?.color),
     },
   }),
   buttonSpinner: css({

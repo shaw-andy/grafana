@@ -15,6 +15,7 @@ import {
   defaultBgColor,
   defaultTextColor,
 } from '../element';
+import { cssColor, cssPixels, cssTextAlign, cssVerticalAlign } from '../styleValues';
 import { Align, type TextConfig, type TextData, VAlign } from '../types';
 
 const RectangleDisplay = memo<CanvasElementProps<TextConfig, TextData>>(({ data }) => {
@@ -38,10 +39,10 @@ const getStyles = (theme: GrafanaTheme2, data: TextData | undefined) => ({
   }),
   span: css({
     display: 'table-cell',
-    verticalAlign: data?.valign,
-    textAlign: data?.align,
-    fontSize: `${data?.size}px`,
-    color: data?.color,
+    verticalAlign: cssVerticalAlign(data?.valign),
+    textAlign: cssTextAlign(data?.align),
+    fontSize: cssPixels(data?.size),
+    color: cssColor(data?.color),
   }),
 });
 
