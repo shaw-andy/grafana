@@ -253,6 +253,10 @@ const makers: SymbolMaker[] = [
 ];
 
 async function prepareSVG(url: string, size?: number, backgroundOpacity?: number): Promise<string> {
+  if (!url) {
+    return '';
+  }
+
   return fetch(url, { method: 'GET' })
     .then((res) => {
       return res.text();
@@ -367,10 +371,11 @@ export async function getWebGLStyle(symbol?: string, opacity?: number): Promise<
   }
 
   // Handle custom SVG symbols and other shapes as icons
-  if (symbol && symbol.endsWith('.svg')) {
+  const symbolUrl = symbol?.endsWith('.svg') ? getPublicOrAbsoluteUrl(symbol) : '';
+  if (symbolUrl) {
     const backgroundOpacity = opacity === 0 ? 0 : 0.1 / (opacity ?? 1);
     return {
-      'icon-src': await prepareSVG(getPublicOrAbsoluteUrl(symbol), undefined, backgroundOpacity),
+      'icon-src': await prepareSVG(symbolUrl, undefined, backgroundOpacity),
       'icon-width': sizeExpression,
       'icon-height': sizeExpression,
       'icon-opacity': opacityExpression,

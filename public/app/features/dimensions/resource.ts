@@ -1,4 +1,5 @@
 import { type DataFrame } from '@grafana/data';
+import { config as runtimeConfig } from '@grafana/runtime';
 import { type ResourceDimensionConfig, ResourceDimensionMode } from '@grafana/schema';
 
 import { type DimensionSupplier } from './types';
@@ -18,7 +19,58 @@ export function getPublicOrAbsoluteUrl(path: unknown): string {
   // Falls back to the default build directory when no entry point has set the global.
   const buildPath = window.__grafana_build_path__ || 'public/build/';
 
-  return isUrl ? path : `${buildPath}${path}`;
+  if (!isUrl && !isSafeRelativeAssetPath(path)) {
+    return '';
+  }
+
+  const url = isUrl ? path : `${buildPath}${path}`;
+  return isAllowedResourceUrl(url, buildPath) ? url : '';
+}
+
+function isSafeRelativeAssetPath(path: string): boolean {
+  let decoded = path;
+  try {
+    decoded = decodeURIComponent(path);
+  } catch {
+    return false;
+  }
+
+  for (const value of [path, decoded]) {
+    if (value.startsWith('/') || value.includes('\\') || /(^|\/)\.\.(\/|$)/.test(value)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Resource URLs are loaded by the viewer's browser with their Grafana cookies whenever they point at the
+// Grafana host, so on that host only static asset locations may be requested. Hostname (not origin) is
+// compared because cookies ignore the port and browsers upgrade http image requests on https pages.
+function isAllowedResourceUrl(url: string, buildPath: string): boolean {
+  let resolved: URL;
+  let buildRoot: URL;
+  let staticRoot: URL;
+  try {
+    resolved = new URL(url, document.baseURI);
+    buildRoot = new URL(buildPath, document.baseURI);
+    staticRoot = new URL(`${runtimeConfig.appSubUrl ?? ''}/public/`, window.location.origin);
+  } catch {
+    return false;
+  }
+
+  if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') {
+    return false;
+  }
+
+  if (resolved.href.startsWith(buildRoot.href)) {
+    return true;
+  }
+
+  if (resolved.hostname !== window.location.hostname) {
+    return true;
+  }
+
+  return resolved.pathname.startsWith(staticRoot.pathname);
 }
 
 export function getResourceDimension(
