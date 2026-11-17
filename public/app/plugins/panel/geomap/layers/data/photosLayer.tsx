@@ -8,6 +8,7 @@ import { t } from '@grafana/i18n';
 import { findField } from 'app/features/dimensions/utils';
 import { FrameVectorSource } from 'app/features/geo/utils/frameVectorSource';
 import { getLocationMatchers } from 'app/features/geo/utils/location';
+import { getMapAssetUrl } from 'app/features/geo/utils/mapAssetUrl';
 
 // Configuration options for Circle overlays
 export interface PhotoConfig {
@@ -76,7 +77,7 @@ export const photosLayer: MapLayerRegistryItem<PhotoConfig> = {
       let idx = Infinity;
       if (images.length > 0) {
         idx = feature.get('rowIndex');
-        src = images[idx] ?? unknownImage;
+        src = getMapAssetUrl(images[idx]) ?? unknownImage;
       }
       const photoStyle = new Style({
         image: new Photo({

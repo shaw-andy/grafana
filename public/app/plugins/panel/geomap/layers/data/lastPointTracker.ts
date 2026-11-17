@@ -5,6 +5,7 @@ import * as style from 'ol/style';
 
 import { type MapLayerRegistryItem, type PanelData, PluginState } from '@grafana/data';
 import { getGeometryField, getLocationMatchers } from 'app/features/geo/utils/location';
+import { getMapAssetUrl } from 'app/features/geo/utils/mapAssetUrl';
 
 export interface LastPointConfig {
   icon?: string;
@@ -31,12 +32,11 @@ export const lastPointTracker: MapLayerRegistryItem<LastPointConfig> = {
   create: async (_map, options) => {
     const point = new Feature({});
     const config = { ...defaultOptions, ...options.config };
+    const iconUrl = getMapAssetUrl(config.icon);
 
     point.setStyle(
       new style.Style({
-        image: new style.Icon({
-          src: config.icon,
-        }),
+        image: iconUrl ? new style.Icon({ src: iconUrl }) : undefined,
       })
     );
 

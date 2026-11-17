@@ -10,6 +10,7 @@ import { map as rxjsmap, first } from 'rxjs/operators';
 import { type MapLayerRegistryItem } from '@grafana/data';
 import { getTemplateSrv } from '@grafana/runtime';
 import { ComparisonOperation } from '@grafana/schema';
+import { getMapAssetUrl } from 'app/features/geo/utils/mapAssetUrl';
 
 import { GeomapStyleRulesEditor } from '../../editor/GeomapStyleRulesEditor';
 import { StyleEditor } from '../../editor/StyleEditor';
@@ -83,7 +84,7 @@ export const geojsonLayer: MapLayerRegistryItem<GeoJSONMapperConfig> = {
       : `${window.__grafana_public_path__}${interpolatedUrl.replace(/^(public\/)/, '')}`;
 
     const source = new VectorSource({
-      url: layerUrl,
+      url: getMapAssetUrl(layerUrl),
       format: new GeoJSON(),
     });
 

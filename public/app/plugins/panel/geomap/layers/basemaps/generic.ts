@@ -1,8 +1,13 @@
+import ImageTile from 'ol/ImageTile';
+import type Tile from 'ol/Tile';
+import TileState from 'ol/TileState';
 import TileLayer from 'ol/layer/Tile';
+import { defaultTileLoadFunction } from 'ol/source/TileImage';
 import XYZ from 'ol/source/XYZ';
 
 import { type MapLayerRegistryItem, textUtil } from '@grafana/data';
 import { getTemplateSrv } from '@grafana/runtime';
+import { getMapAssetUrl } from 'app/features/geo/utils/mapAssetUrl';
 
 export interface XYZConfig {
   url: string;
@@ -40,6 +45,16 @@ export function resolveXYZConfig<T extends XYZConfig = XYZConfig>(
   return { ...config, url: config.url, attribution: config.attribution ?? '' };
 }
 
+// The template expands {a-c} style ranges and coordinates, so each final tile URL is checked.
+function loadAllowedTile(tile: Tile, src: string) {
+  const url = getMapAssetUrl(src);
+  if (!url || !(tile instanceof ImageTile)) {
+    tile.setState(TileState.ERROR);
+    return;
+  }
+  defaultTileLoadFunction(tile, url);
+}
+
 export const xyzTiles: MapLayerRegistryItem<UnresolvedXYZConfig<XYZConfig>> = {
   id: 'xyz',
   name: 'XYZ Tile layer',
@@ -56,6 +71,7 @@ export const xyzTiles: MapLayerRegistryItem<UnresolvedXYZConfig<XYZConfig>> = {
       return new TileLayer({
         source: new XYZ({
           url: interpolatedUrl,
+          tileLoadFunction: loadAllowedTile,
           // An empty string would add a blank entry to the attribution control
           attributions: interpolatedAttribution || undefined,
           wrapX: !noRepeat,

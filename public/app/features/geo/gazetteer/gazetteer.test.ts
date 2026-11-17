@@ -95,7 +95,7 @@ describe('Placename lookup from geojson format', () => {
   });
 
   it('can lookup by id', async () => {
-    const gaz = await getGazetteer('local');
+    const gaz = await getGazetteer('public/build/gazetteer/local.json');
     expect(gaz.error).toBeUndefined();
     expect(getCenterPointWGS84(gaz.find('A')?.geometry())).toMatchInlineSnapshot(`
       [
@@ -105,7 +105,7 @@ describe('Placename lookup from geojson format', () => {
     `);
   });
   it('can look up by a code', async () => {
-    const gaz = await getGazetteer('airports');
+    const gaz = await getGazetteer('public/build/gazetteer/airports.json');
     expect(gaz.error).toBeUndefined();
     expect(getCenterPointWGS84(gaz.find('B')?.geometry())).toMatchInlineSnapshot(`
       [
@@ -116,7 +116,7 @@ describe('Placename lookup from geojson format', () => {
   });
 
   it('can look up by an id property', async () => {
-    const gaz = await getGazetteer('airports');
+    const gaz = await getGazetteer('public/build/gazetteer/airports.json');
     expect(gaz.error).toBeUndefined();
     expect(getCenterPointWGS84(gaz.find('C')?.geometry())).toMatchInlineSnapshot(`
       [
