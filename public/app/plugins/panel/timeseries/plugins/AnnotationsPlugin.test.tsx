@@ -9,8 +9,11 @@ import {
   colorManipulator,
   createDataFrame,
   createTheme,
+  type DataFrame,
+  DataTopic,
   dateTimeFormat,
   FieldConfigOptionsRegistry,
+  FieldType,
   systemDateFormats,
 } from '@grafana/data';
 import { selectors } from '@grafana/e2e-selectors';
@@ -1128,6 +1131,54 @@ describe('AnnotationsPlugin', () => {
         invokeDrawHook(hooks, mockU);
         expect(ctx.setLineDash).toHaveBeenCalledWith([5, 5]);
       });
+    });
+  });
+
+  describe('annotation ids that are not a single path segment', () => {
+    const markerTime = 1759388895560;
+
+    function frameWithIds(ids: Array<string | number>): DataFrame {
+      return {
+        length: ids.length,
+        meta: { dataTopic: DataTopic.Annotations },
+        fields: [
+          { name: 'time', type: FieldType.time, config: {}, values: ids.map((_, i) => markerTime + i * 1000) },
+          { name: 'text', type: FieldType.string, config: {}, values: ids.map(() => 'marker') },
+          { name: 'id', type: FieldType.string, config: {}, values: ids },
+          { name: 'dashboardUID', type: FieldType.string, config: {}, values: ids.map(() => 'dash-1') },
+        ],
+      };
+    }
+
+    it('offers delete for an annotation id and withholds it when the id can change the request path', async () => {
+      const onAnnotationDelete = jest.fn();
+      mockUsePanelContext.mockReturnValue({
+        canExecuteActions: () => false,
+        canEditAnnotations: () => true,
+        canDeleteAnnotations: () => true,
+        onAnnotationDelete,
+      } as unknown as PanelContext);
+      setUp({
+        annotations: [frameWithIds(['../../api/admin/users/2', '%2e%2e/%2e%2e/api/admin/users/2', 42])],
+      });
+
+      const markers = screen.getAllByTestId(selectors.pages.Dashboard.Annotations.marker);
+      expect(markers).toHaveLength(3);
+
+      await userEvent.click(markers[0]);
+      expect(screen.queryByLabelText('Delete')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Edit')).not.toBeInTheDocument();
+      expect(onAnnotationDelete).not.toHaveBeenCalled();
+
+      await userEvent.click(markers[1]);
+      expect(screen.queryByLabelText('Delete')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Edit')).not.toBeInTheDocument();
+
+      await userEvent.click(markers[2]);
+      expect(screen.getByLabelText('Delete')).toBeInTheDocument();
+      await userEvent.click(screen.getByLabelText('Delete'));
+      expect(onAnnotationDelete).toHaveBeenCalledTimes(1);
+      expect(onAnnotationDelete).toHaveBeenCalledWith(42);
     });
   });
 });
