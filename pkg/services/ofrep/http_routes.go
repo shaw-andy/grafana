@@ -97,6 +97,12 @@ func (b *APIBuilder) oneFlagHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "flagKey parameter is required", http.StatusBadRequest)
 		return
 	}
+	if !isValidFlagKey(flagKey) {
+		_ = tracing.Errorf(span, invalidFlagKeyMsg)
+		span.SetAttributes(semconv.HTTPStatusCode(http.StatusBadRequest))
+		http.Error(w, invalidFlagKeyMsg, http.StatusBadRequest)
+		return
+	}
 
 	span.SetAttributes(attribute.String("flag_key", flagKey))
 

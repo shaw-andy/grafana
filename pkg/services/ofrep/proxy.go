@@ -12,6 +12,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/grafana/grafana/pkg/infra/features"
 	"github.com/grafana/grafana/pkg/infra/log"
@@ -90,7 +92,15 @@ func (b *APIBuilder) proxyFlagReq(ctx context.Context, flagKey string, isAuthedU
 		logger.Debug("selected upstream for flag eval", "key", flagKey, "namespace", namespace, "target", target.Host)
 	}
 
-	proxy, err := b.newProxy(path.Join(ofrepPath, flagKey), namespace, target, r.Header.Get("User-Agent"))
+	proxyPath, err := flagProxyPath(flagKey)
+	if err != nil {
+		_ = tracing.Error(span, err)
+		logger.Warn("Rejecting flag eval with invalid key", "key", flagKey)
+		http.Error(w, invalidFlagKeyMsg, http.StatusBadRequest)
+		return
+	}
+
+	proxy, err := b.newProxy(proxyPath, namespace, target, r.Header.Get("User-Agent"))
 	if err != nil {
 		err = tracing.Error(span, err)
 		logger.Error("Failed to create proxy", "key", flagKey, "error", err)
@@ -143,6 +153,34 @@ func (b *APIBuilder) proxyFlagReq(ctx context.Context, flagKey string, isAuthedU
 	proxy.ServeHTTP(w, r)
 }
 
+// isValidFlagKey reports whether flagKey can be used as exactly one segment of the
+// upstream path. Routers hand us the key already percent-decoded, so separators, dot
+// segments and '%' (which an upstream could decode again) must be refused here.
+func isValidFlagKey(flagKey string) bool {
+	if flagKey == "" || flagKey == "." || flagKey == ".." || !utf8.ValidString(flagKey) {
+		return false
+	}
+	for _, c := range flagKey {
+		if c == '/' || c == '\\' || c == '%' || unicode.IsControl(c) {
+			return false
+		}
+	}
+	return true
+}
+
+// flagProxyPath returns the upstream path for evaluating flagKey, guaranteed to be a
+// direct child of ofrepPath.
+func flagProxyPath(flagKey string) (string, error) {
+	if !isValidFlagKey(flagKey) {
+		return "", fmt.Errorf("invalid flag key %q", flagKey)
+	}
+	p := ofrepPath + "/" + flagKey
+	if path.Clean(p) != p || path.Dir(p) != ofrepPath {
+		return "", fmt.Errorf("invalid flag key %q", flagKey)
+	}
+	return p, nil
+}
+
 func isUnknownNamespace(namespace string) bool {
 	return namespace == "" || namespace == "*"
 }
@@ -174,6 +212,9 @@ func (b *APIBuilder) newProxy(proxyPath, namespace string, targetURL *url.URL, i
 		req.URL.Scheme = targetURL.Scheme
 		req.URL.Host = targetURL.Host
 		req.URL.Path = proxyPath
+		// The incoming RawPath describes the caller's URL, not proxyPath; clear it so the
+		// upstream path is always encoded from proxyPath.
+		req.URL.RawPath = ""
 		req.Header.Set("User-Agent", withStackTag(incomingUserAgent, namespace))
 	}
 
