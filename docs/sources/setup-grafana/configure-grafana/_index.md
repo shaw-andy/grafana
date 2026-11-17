@@ -3220,7 +3220,7 @@ The duration a SQL expression will run before being cancelled. The default is `1
 
 #### `math_expression_memory_limit`
 
-Set the maximum estimated memory in bytes that a single math expression binary operation can allocate. Default is `1073741824` (1 GiB). A setting of `0` means no limit.
+Set the maximum estimated memory in bytes that a single math expression binary operation can allocate. The same limit also caps the total estimated output of all expressions, such as resample, math, and threshold, in one request. Default is `1073741824` (1 GiB). A setting of `0` means no limit.
 
 ### `[geomap]`
 

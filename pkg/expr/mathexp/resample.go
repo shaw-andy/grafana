@@ -33,14 +33,19 @@ func (e ErrNewSeriesLengthTooLong) Error() string {
 	return fmt.Sprintf("Resample series length to large, max allowed %d, wanted %d", MaxNewSeriesLength, e.newSeriesLength)
 }
 
-// Resample turns the Series into a Number based on the given reduction function
-func (s Series) Resample(refID string, interval time.Duration, downsampler ReducerID, upsampler Upsampler, from, to time.Time) (Series, error) {
+// Resample turns the Series into a Number based on the given reduction function.
+// The output length depends only on the time range and interval, so it is
+// checked against budget before the output is allocated. A nil budget has no limit.
+func (s Series) Resample(refID string, interval time.Duration, downsampler ReducerID, upsampler Upsampler, from, to time.Time, budget *MemoryBudget) (Series, error) {
 	newSeriesLength := int(float64(to.Sub(from).Nanoseconds()) / float64(interval.Nanoseconds()))
 	if newSeriesLength <= 0 {
 		return s, fmt.Errorf("the series cannot be sampled further; the time range is shorter than the interval")
 	}
 	if newSeriesLength > MaxNewSeriesLength {
 		return s, ErrNewSeriesLengthTooLong{newSeriesLength: newSeriesLength}
+	}
+	if err := budget.Check(refID, EstimateSeriesBytes(newSeriesLength+1)); err != nil {
+		return s, err
 	}
 	resampled := NewSeries(refID, s.GetLabels(), newSeriesLength+1)
 	bookmark := 0

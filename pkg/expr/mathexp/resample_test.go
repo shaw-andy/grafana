@@ -299,7 +299,7 @@ func TestResampleSeries(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			series, err := tt.seriesToResample.Resample("", tt.interval, tt.downsampler, tt.upsampler, tt.timeRange.From, tt.timeRange.To)
+			series, err := tt.seriesToResample.Resample("", tt.interval, tt.downsampler, tt.upsampler, tt.timeRange.From, tt.timeRange.To, nil)
 			if tt.series.Frame == nil {
 				require.Error(t, err)
 				if tt.expectedError != "" {

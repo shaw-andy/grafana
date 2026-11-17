@@ -71,6 +71,14 @@ type DataPipeline []Node
 // map of the refId of the of each command
 func (dp *DataPipeline) execute(c context.Context, now time.Time, s *Service) (mathexp.Vars, error) {
 	vars := make(mathexp.Vars)
+	// Every result stays in vars until the pipeline finishes, so one budget
+	// bounds the expression output of the whole request rather than each node.
+	var memoryLimit int64
+	if s.cfg != nil {
+		memoryLimit = s.cfg.MathExpressionMemoryLimit
+	}
+	budget := mathexp.NewMemoryBudget(memoryLimit)
+	c = withMemoryBudget(c, budget)
 	//nolint:staticcheck // not yet migrated to OpenFeature
 	groupByDSFlag := s.features.IsEnabled(c, featuremgmt.FlagSseGroupByDatasource)
 	// Execute datasource nodes first, and grouped by datasource.
@@ -155,6 +163,14 @@ func (dp *DataPipeline) execute(c context.Context, now time.Time, s *Service) (m
 		res, err := execNode.Execute(c, now, vars, s)
 		if err != nil {
 			res.Error = err
+		}
+		if node.NodeType() == TypeCMDNode {
+			if err := budget.Charge(node.RefID(), res.Values); err != nil {
+				res.Values = nil
+				if res.Error == nil {
+					res.Error = err
+				}
+			}
 		}
 
 		vars[node.RefID()] = res

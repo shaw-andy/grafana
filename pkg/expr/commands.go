@@ -78,7 +78,7 @@ func (gm *MathCommand) Execute(ctx context.Context, _ time.Time, vars mathexp.Va
 	_, span := tracer.Start(ctx, "SSE.ExecuteMath")
 	span.SetAttributes(attribute.String("expression", gm.RawExpression))
 	defer span.End()
-	return gm.Expression.Execute(gm.refID, vars, tracer, mathexp.WithMemoryLimit(gm.memoryLimit))
+	return gm.Expression.Execute(gm.refID, vars, tracer, mathexp.WithMemoryLimit(gm.memoryLimit), mathexp.WithMemoryBudget(memoryBudgetFromContext(ctx)))
 }
 
 func (gm *MathCommand) Type() string {
@@ -305,14 +305,20 @@ func (gr *ResampleCommand) Execute(ctx context.Context, now time.Time, vars math
 	defer span.End()
 	newRes := mathexp.Results{}
 	timeRange := gr.TimeRange.AbsoluteTime(now)
+	budget := memoryBudgetFromContext(ctx)
 	for _, val := range vars[gr.VarToResample].Values {
 		if val == nil {
 			continue
 		}
 		switch v := val.(type) {
 		case mathexp.Series:
-			num, err := v.Resample(gr.refID, gr.Window, gr.Downsampler, gr.Upsampler, timeRange.From, timeRange.To)
+			num, err := v.Resample(gr.refID, gr.Window, gr.Downsampler, gr.Upsampler, timeRange.From, timeRange.To, budget)
 			if err != nil {
+				return newRes, err
+			}
+			// Charge each series as it is produced so the next one is checked
+			// against what this node already holds.
+			if err := budget.Charge(gr.refID, mathexp.Values{num}); err != nil {
 				return newRes, err
 			}
 			newRes.Values = append(newRes.Values, num)

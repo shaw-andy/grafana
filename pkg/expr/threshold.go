@@ -189,7 +189,8 @@ func (tc *ThresholdCommand) NeedsVars() []string {
 	return []string{tc.ReferenceVar}
 }
 
-func (tc *ThresholdCommand) Execute(_ context.Context, _ time.Time, vars mathexp.Vars, _ tracing.Tracer, _ *metrics.ExprMetrics) (mathexp.Results, error) {
+func (tc *ThresholdCommand) Execute(ctx context.Context, _ time.Time, vars mathexp.Vars, _ tracing.Tracer, _ *metrics.ExprMetrics) (mathexp.Results, error) {
+	budget := memoryBudgetFromContext(ctx)
 	eval := func(maybeValue *float64) *float64 {
 		if maybeValue == nil {
 			return nil
@@ -209,10 +210,16 @@ func (tc *ThresholdCommand) Execute(_ context.Context, _ time.Time, vars mathexp
 	for _, val := range refVarResult.Values {
 		switch v := val.(type) {
 		case mathexp.Series:
+			if err := budget.Check(tc.RefID, mathexp.EstimateSeriesBytes(v.Len())); err != nil {
+				return newRes, err
+			}
 			s := mathexp.NewSeries(tc.RefID, v.GetLabels(), v.Len())
 			for i := range v.Len() {
 				t, value := v.GetPoint(i)
 				s.SetPoint(i, t, eval(value))
+			}
+			if err := budget.Charge(tc.RefID, mathexp.Values{s}); err != nil {
+				return newRes, err
 			}
 			newRes.Values = append(newRes.Values, s)
 		case mathexp.Number:
