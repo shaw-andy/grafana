@@ -1318,9 +1318,13 @@ func (st DBstore) buildListAlertRulesQuery(sess *db.Session, query *ngmodels.Lis
 		}
 	}
 
-	if len(query.NamespaceUIDs) > 0 {
-		args, in := getINSubQueryArgs(query.NamespaceUIDs)
-		q = q.Where(fmt.Sprintf("namespace_uid IN (%s)", strings.Join(in, ",")), args...)
+	if query.NamespaceUIDs != nil {
+		if len(query.NamespaceUIDs) == 0 {
+			q = q.Where("1 = 0")
+		} else {
+			args, in := getINSubQueryArgs(query.NamespaceUIDs)
+			q = q.Where(fmt.Sprintf("namespace_uid IN (%s)", strings.Join(in, ",")), args...)
+		}
 	}
 
 	if len(query.ExcludeNamespaceUIDs) > 0 {

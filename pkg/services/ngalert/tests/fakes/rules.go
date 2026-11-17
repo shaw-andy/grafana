@@ -353,7 +353,7 @@ func (f *RuleStore) listAlertRules(q *models.ListAlertRulesQuery) (models.RulesG
 		if q.ExcludeTitle != "" && r.Title == q.ExcludeTitle {
 			continue
 		}
-		if len(q.NamespaceUIDs) > 0 && !slices.Contains(q.NamespaceUIDs, r.NamespaceUID) {
+		if q.NamespaceUIDs != nil && !slices.Contains(q.NamespaceUIDs, r.NamespaceUID) {
 			continue
 		}
 		if len(q.RuleGroups) > 0 && !slices.Contains(q.RuleGroups, r.RuleGroup) {

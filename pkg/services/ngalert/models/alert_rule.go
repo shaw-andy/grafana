@@ -1066,8 +1066,10 @@ func DecodeGroupCursor(token string) (GroupCursor, error) {
 
 // ListAlertRulesQuery is the query for listing alert rules
 type ListAlertRulesQuery struct {
-	OrgID         int64
-	RuleUIDs      []string
+	OrgID    int64
+	RuleUIDs []string
+	// NamespaceUIDs restricts rules to these namespace (folder) UIDs. A nil slice
+	// applies no folder restriction; a non-nil empty slice matches no rules.
 	NamespaceUIDs []string
 	// ExcludeNamespaceUIDs excludes rules in these namespace (folder) UIDs.
 	ExcludeNamespaceUIDs []string
