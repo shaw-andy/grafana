@@ -262,9 +262,9 @@ export const loadPluginDashboards = createAsyncThunk<PluginDashboard[], void, { 
   async (_, thunkApi) => {
     const state = thunkApi.getState();
     const dataSourceType = state.dataSources.dataSource.type;
-    const url = `api/plugins/${dataSourceType}/dashboards`;
+    const url = `api/plugins/${encodeURIComponent(dataSourceType)}/dashboards`;
 
-    return getBackendSrv().get<PluginDashboard[]>(url);
+    return getBackendSrv().get<PluginDashboard[]>(url, undefined, undefined, { validatePath: true });
   }
 );
 

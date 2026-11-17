@@ -1,3 +1,4 @@
+import { PathValidationError } from '@grafana/data';
 import { getBackendSrv, logInfo, logWarning } from '@grafana/runtime';
 import { type DashboardJson } from 'app/features/manage-dashboards/types';
 import { type PluginDashboard } from 'app/types/plugins';
@@ -122,11 +123,23 @@ export async function fetchCommunityDashboard(gnetId: number): Promise<GnetDashb
  */
 export async function fetchProvisionedDashboards(datasourceType: string): Promise<PluginDashboard[]> {
   try {
-    const dashboards = await getBackendSrv().get(`api/plugins/${datasourceType}/dashboards`, undefined, undefined, {
-      showErrorAlert: false,
-    });
+    const dashboards = await getBackendSrv().get(
+      `api/plugins/${encodeURIComponent(datasourceType)}/dashboards`,
+      undefined,
+      undefined,
+      {
+        showErrorAlert: false,
+        validatePath: true,
+      }
+    );
     return Array.isArray(dashboards) ? dashboards.filter((dashboard) => !dashboard.removed) : [];
   } catch (error) {
+    if (error instanceof PathValidationError) {
+      logWarning('Provisioned dashboards request rejected for invalid datasource type', {
+        dataSourceType: datasourceType,
+      });
+      return [];
+    }
     console.error('Error loading provisioned dashboards', error);
     return [];
   }
