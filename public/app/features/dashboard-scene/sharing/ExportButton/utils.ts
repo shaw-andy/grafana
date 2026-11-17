@@ -1,6 +1,7 @@
 import { lastValueFrom } from 'rxjs';
 
 import { config, getBackendSrv } from '@grafana/runtime';
+import { removeUrlToken } from 'app/core/utils/urlToken';
 import { getDashboardUrl } from 'app/features/dashboard-scene/utils/getDashboardUrl';
 
 import { contextSrv } from '../../../../core/services/context_srv';
@@ -42,7 +43,7 @@ export async function generateDashboardImage({
 
     const imageUrl = getDashboardUrl({
       uid: dashboard.state.uid,
-      currentQueryParams: window.location.search,
+      currentQueryParams: removeUrlToken(window.location.search),
       render: true,
       updateQuery: {
         height: -1, // image renderer will scroll through the dashboard and set the appropriate height

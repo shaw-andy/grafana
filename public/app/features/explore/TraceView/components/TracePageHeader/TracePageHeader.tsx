@@ -53,6 +53,7 @@ import {
   useTheme2,
 } from '@grafana/ui';
 import { useAppNotification } from 'app/core/copy/appNotification';
+import { removeUrlToken } from 'app/core/utils/urlToken';
 
 import { downloadTraceAsJson } from '../../../../inspector/utils/download';
 import { LogsLinkButton } from '../TraceTimelineViewer/SpanDetail/LogsLink';
@@ -238,7 +239,7 @@ export const TracePageHeader = memo((props: TracePageHeaderProps) => {
           testId={selectors.components.TraceViewer.shareMenu.copyLinkButton}
           onClick={async () => {
             try {
-              await copyTextToClipboard(window.location.href);
+              await copyTextToClipboard(removeUrlToken(window.location.href));
               notifyApp.success(t('explore.trace-page-header.link-copied', 'Link copied to clipboard'));
             } catch (e) {
               logError(e instanceof Error ? e : new Error(String(e)));

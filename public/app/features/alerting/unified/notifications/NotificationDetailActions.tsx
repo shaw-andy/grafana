@@ -4,6 +4,7 @@ import { AppEvents } from '@grafana/data';
 import { t } from '@grafana/i18n';
 import { Dropdown, Menu, Tooltip } from '@grafana/ui';
 import { appEvents } from 'app/core/app_events';
+import { removeUrlToken } from 'app/core/utils/urlToken';
 
 import MoreButton from '../components/MoreButton';
 import { DeclareIncidentMenuItem } from '../components/bridges/DeclareIncidentButton';
@@ -115,7 +116,7 @@ export function NotificationActionsMenu({ notification }: NotificationActionsMen
         label={t('alerting.notification-detail.menu-copy-link', 'Copy link')}
         icon="share-alt"
         onClick={() => {
-          const url = window.location.href;
+          const url = removeUrlToken(window.location.href);
           navigator.clipboard?.writeText(url).then(() => {
             appEvents.emit(AppEvents.alertSuccess, ['URL copied to clipboard']);
           });

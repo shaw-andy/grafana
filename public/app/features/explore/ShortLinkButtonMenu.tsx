@@ -6,6 +6,7 @@ import { Trans, t } from '@grafana/i18n';
 import { reportInteraction, config } from '@grafana/runtime';
 import { Dropdown, Menu, MenuGroup, ButtonGroup, Button, copyTextToClipboard } from '@grafana/ui';
 import { createAndCopyShortLink } from 'app/core/utils/shortLinks';
+import { removeUrlToken } from 'app/core/utils/urlToken';
 import { useSelector } from 'app/types/store';
 
 import { selectPanes } from './state/selectors';
@@ -44,9 +45,11 @@ export function ShortLinkButtonMenu({ hideText }: { hideText: boolean }) {
       reportInteraction('grafana_explore_shortened_link_clicked', { isAbsoluteTime: absTime });
     } else {
       copyTextToClipboard(
-        url !== undefined
-          ? `${window.location.protocol}//${window.location.host}${config.appSubUrl}${url}`
-          : global.location.href
+        removeUrlToken(
+          url !== undefined
+            ? `${window.location.protocol}//${window.location.host}${config.appSubUrl}${url}`
+            : global.location.href
+        )
       ).catch(console.error);
       reportInteraction('grafana_explore_copy_link_clicked', { isAbsoluteTime: absTime });
     }
