@@ -193,16 +193,25 @@ export class CSVReader {
 
 type FieldWriter = (value: unknown) => string;
 
+// Spreadsheet applications evaluate cell text starting with one of these as a formula, even when the
+// CSV field is quoted and even after leading whitespace. Full-width variants are converted by some locales.
+const FORMULA_PREFIX = /^[\t\r]|^[\s\u00a0\u3000]*[=+\-@\uff1d\uff0b\uff0d\uff20]/;
+
+function neutralizeFormula(str: string): string {
+  return FORMULA_PREFIX.test(str) ? `'${str}` : str;
+}
+
 function writeValue(value: unknown, config: CSVConfig): string {
   if (value === null || value === undefined) {
     return '';
   }
-  const str = value.toString();
+  const str = neutralizeFormula(value.toString());
   if (str.includes('"')) {
     // Escape the double quote characters
     return config.quoteChar + str.replace(/"/gi, '""') + config.quoteChar;
   }
-  if (str.includes('\n') || (config.delimiter && str.includes(config.delimiter))) {
+  // A bare carriage return is a row break for spreadsheet importers, so it must be quoted like a newline
+  if (/[\r\n]/.test(str) || (config.delimiter && str.includes(config.delimiter))) {
     return config.quoteChar + str + config.quoteChar;
   }
   return str;
@@ -226,7 +235,7 @@ function getHeaderLine(key: string, fields: Field[], config: CSVConfig): string 
   for (const f of fields) {
     const display = f.config;
     if (isName || isType || (display && display.hasOwnProperty(key))) {
-      let line = '#' + key + '#';
+      let line = '';
       for (let i = 0; i < fields.length; i++) {
         if (i > 0) {
           line = line + config.delimiter;
@@ -240,7 +249,9 @@ function getHeaderLine(key: string, fields: Field[], config: CSVConfig): string 
         } else {
           v = (fields[i].config as any)[key];
         }
-        if (v) {
+        if (i === 0) {
+          line = line + writeValue('#' + key + '#' + (v ? v : ''), config);
+        } else if (v) {
           line = line + writeValue(v, config);
         }
       }
@@ -296,7 +307,7 @@ export function toCSV(data: DataFrame[], config?: CSVConfig): string {
         if (i > 0) {
           csv += config.delimiter;
         }
-        csv += `"${getFieldDisplayName(fields[i], series).replace(/"/g, '""')}"`;
+        csv += `"${neutralizeFormula(getFieldDisplayName(fields[i], series)).replace(/"/g, '""')}"`;
       }
       csv += config.newline;
     }
