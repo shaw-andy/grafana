@@ -40,4 +40,10 @@ fi
 echo "Step 2: Copying endpoints.gen.ts from Enterprise to OSS..."
 cp "$ENTERPRISE_SCOPE_API_DIR/endpoints.gen.ts" "$OSS_SCOPE_API_DIR/endpoints.gen.ts"
 
+# Scope names reach these paths from page query parameters, so each one must be encoded as a single path segment.
+if grep -nE '\$\{queryArg\.[A-Za-z0-9_]+\}' "$OSS_SCOPE_API_DIR/endpoints.gen.ts"; then
+  echo "Error: unencoded path parameters in endpoints.gen.ts. Set encodePathParams: true for the scope API in local/generate-enterprise-apis.ts."
+  exit 1
+fi
+
 echo "Done! Scope API client synced from Enterprise."
