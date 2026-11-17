@@ -2,8 +2,9 @@ import { find } from 'lodash';
 
 import { type AzureCredentials } from '@grafana/azure-sdk';
 import { type ScopedVars } from '@grafana/data';
-import { DataSourceWithBackend, getTemplateSrv, type TemplateSrv, type VariableInterpolation } from '@grafana/runtime';
+import { getTemplateSrv, type TemplateSrv, type VariableInterpolation } from '@grafana/runtime';
 
+import AzureDataSourceWithBackend from '../AzureDataSourceWithBackend';
 import { getCredentials } from '../credentials';
 import { type AzureMetricQuery, AzureQueryType } from '../dataquery.gen';
 import { isBatchAPIFlagEnabled } from '../featureFlags';
@@ -12,7 +13,6 @@ import { type AzureMonitorQuery } from '../types/query';
 import {
   type AzureAPIResponse,
   type AzureMonitorDataSourceInstanceSettings,
-  type AzureMonitorDataSourceJsonData,
   type AzureMonitorLocations,
   type AzureMonitorMetricsMetadataResponse,
   type AzureMonitorProvidersResponse,
@@ -40,10 +40,7 @@ function hasValue(item?: string) {
   return !!(item && item !== defaultDropdownValue);
 }
 
-export default class AzureMonitorDatasource extends DataSourceWithBackend<
-  AzureMonitorQuery,
-  AzureMonitorDataSourceJsonData
-> {
+export default class AzureMonitorDatasource extends AzureDataSourceWithBackend {
   private readonly credentials: AzureCredentials;
   apiVersion = '2018-01-01';
   apiPreviewVersion = '2017-12-01-preview';
@@ -385,7 +382,7 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
     for (const subscription of subscriptions) {
       const subLocations = ResponseParser.parseLocations(
         await this.getResource<AzureAPIResponse<Location>>(
-          `${routeNames.azureMonitor}/subscriptions/${this.templateSrv.replace(subscription)}/locations?api-version=${
+          `${routeNames.azureMonitor}/subscriptions/${encodeURIComponent(this.templateSrv.replace(subscription))}/locations?api-version=${
             this.locationsApiVersion
           }`
         )
