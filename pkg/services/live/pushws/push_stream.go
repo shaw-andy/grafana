@@ -71,12 +71,6 @@ func (s *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		stream, err := s.managedStreamRunner.GetOrCreateStream(user.GetNamespace(), liveDto.ScopeStream, streamID)
-		if err != nil {
-			logger.Error("Error getting stream", "error", err)
-			continue
-		}
-
 		// TODO Grafana 8: decide which formats to use or keep all.
 		urlValues := r.URL.Query()
 		frameFormat := pushurl.FrameFormatFromValues(urlValues)
@@ -92,6 +86,19 @@ func (s *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		metricFrames, err := s.converter.Convert(body, frameFormat)
 		if err != nil {
 			logger.Error("Error converting metrics", "error", err, "frameFormat", frameFormat)
+			continue
+		}
+		if len(metricFrames) > managedstream.MaxFramesPerPush {
+			logger.Warn("Too many frames in push message", "streamId", streamID, "frames", len(metricFrames), "limit", managedstream.MaxFramesPerPush)
+			continue
+		}
+		if len(metricFrames) == 0 {
+			continue
+		}
+
+		stream, err := s.managedStreamRunner.GetOrCreateStream(user.GetNamespace(), liveDto.ScopeStream, streamID)
+		if err != nil {
+			logger.Error("Error getting stream", "error", err)
 			continue
 		}
 

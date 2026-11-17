@@ -12,6 +12,7 @@ import (
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
 	"github.com/grafana/grafana/pkg/services/live"
 	"github.com/grafana/grafana/pkg/services/live/convert"
+	"github.com/grafana/grafana/pkg/services/live/managedstream"
 	"github.com/grafana/grafana/pkg/services/live/pushurl"
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/web"
@@ -48,13 +49,6 @@ func (g *Gateway) Run(ctx context.Context) error {
 func (g *Gateway) Handle(ctx *contextmodel.ReqContext) {
 	streamID := web.Params(ctx.Req)[":streamId"]
 
-	stream, err := g.GrafanaLive.ManagedStreamRunner.GetOrCreateStream(ctx.GetNamespace(), liveDto.ScopeStream, streamID)
-	if err != nil {
-		logger.Error("Error getting stream", "error", err)
-		ctx.Resp.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
 	// TODO Grafana 8: decide which formats to use or keep all.
 	urlValues := ctx.Req.URL.Query()
 	frameFormat := pushurl.FrameFormatFromValues(urlValues)
@@ -83,6 +77,22 @@ func (g *Gateway) Handle(ctx *contextmodel.ReqContext) {
 		}
 		return
 	}
+	if len(metricFrames) > managedstream.MaxFramesPerPush {
+		logger.Warn("Too many frames in push request", "streamId", streamID, "frames", len(metricFrames), "limit", managedstream.MaxFramesPerPush)
+		ctx.Resp.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if len(metricFrames) == 0 {
+		ctx.Resp.WriteHeader(http.StatusOK)
+		return
+	}
+
+	stream, err := g.GrafanaLive.ManagedStreamRunner.GetOrCreateStream(ctx.GetNamespace(), liveDto.ScopeStream, streamID)
+	if err != nil {
+		logger.Error("Error getting stream", "error", err)
+		ctx.Resp.WriteHeader(pushErrorStatus(err))
+		return
+	}
 
 	// TODO -- make sure all packets are combined together!
 	// interval = "1s" vs flush_interval = "5s"
@@ -91,12 +101,19 @@ func (g *Gateway) Handle(ctx *contextmodel.ReqContext) {
 		err := stream.Push(ctx.Req.Context(), mf.Key(), mf.Frame())
 		if err != nil {
 			logger.Error("Error pushing frame", "error", err, "data", string(body))
-			ctx.Resp.WriteHeader(http.StatusInternalServerError)
+			ctx.Resp.WriteHeader(pushErrorStatus(err))
 			return
 		}
 	}
 
 	ctx.Resp.WriteHeader(http.StatusOK)
+}
+
+func pushErrorStatus(err error) int {
+	if errors.Is(err, managedstream.ErrStreamLimitExceeded) || errors.Is(err, managedstream.ErrChannelLimitExceeded) {
+		return http.StatusTooManyRequests
+	}
+	return http.StatusInternalServerError
 }
 
 func (g *Gateway) HandlePipelinePush(ctx *contextmodel.ReqContext) {

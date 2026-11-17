@@ -61,6 +61,10 @@ var (
 	tracer   = otel.Tracer("github.com/grafana/grafana/pkg/services/live")
 )
 
+// channelHandlerCacheSize bounds GetChannelHandler's cache, which is filled
+// before the subscriber is authorized for the channel.
+const channelHandlerCacheSize = 64
+
 // CoreGrafanaScope list of core features
 type CoreGrafanaScope struct {
 	Features map[string]model.ChannelHandlerFactory
@@ -1008,6 +1012,13 @@ func (g *GrafanaLive) GetChannelHandler(ctx context.Context, user identity.Reque
 	}
 
 	logger.Info("Initialized channel handler", "channel", channel, "address", addr)
+	if len(g.channels) >= channelHandlerCacheSize {
+		// Handlers are rebuilt on demand, so dropping an arbitrary entry is safe.
+		for k := range g.channels {
+			delete(g.channels, k)
+			break
+		}
+	}
 	g.channels[channel] = c
 	return c, addr, nil
 }
@@ -1060,7 +1071,7 @@ func (g *GrafanaLive) handlePluginScope(ctx context.Context, _ identity.Requeste
 }
 
 func (g *GrafanaLive) handleStreamScope(u identity.Requester, namespace string) (model.ChannelHandlerFactory, error) {
-	return g.ManagedStreamRunner.GetOrCreateStream(u.GetNamespace(), live.ScopeStream, namespace)
+	return g.ManagedStreamRunner.GetStream(u.GetNamespace(), live.ScopeStream, namespace), nil
 }
 
 func (g *GrafanaLive) handleDatasourceScope(ctx context.Context, user identity.Requester, namespace string) (model.ChannelHandlerFactory, error) {

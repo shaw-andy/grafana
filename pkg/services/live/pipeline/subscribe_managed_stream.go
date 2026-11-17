@@ -25,11 +25,7 @@ func (s *ManagedStreamSubscriber) Type() string {
 }
 
 func (s *ManagedStreamSubscriber) Subscribe(ctx context.Context, vars Vars, _ []byte) (model.SubscribeReply, backend.SubscribeStreamStatus, error) {
-	stream, err := s.managedStream.GetOrCreateStream(vars.NS, vars.Scope, vars.Stream)
-	if err != nil {
-		logger.Error("Error getting managed stream", "error", err)
-		return model.SubscribeReply{}, 0, err
-	}
+	stream := s.managedStream.GetStream(vars.NS, vars.Scope, vars.Stream)
 	u, err := identity.GetRequester(ctx)
 	if err != nil {
 		return model.SubscribeReply{}, backend.SubscribeStreamStatusPermissionDenied, nil
