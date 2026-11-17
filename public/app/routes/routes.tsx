@@ -22,6 +22,7 @@ import { AccessControlAction } from 'app/types/accessControl';
 import { DashboardRoutes } from 'app/types/dashboard';
 
 import { SafeDynamicImport } from '../core/components/DynamicImports/SafeDynamicImport';
+import { isShortUrlPath } from '../core/navigation/shortUrlPath';
 import { type RouteDescriptor } from '../core/navigation/types';
 import { getPublicDashboardRoutes } from '../features/dashboard/routes';
 import { getProvisioningRoutes } from '../features/provisioning/utils/routes';
@@ -717,10 +718,13 @@ function DataSourceEditRoute() {
 // Explicitly send "goto" URLs to server, bypassing client-side routing
 function HandleGoToRedirect() {
   const { pathname } = useLocation();
+  const isShortUrl = isShortUrlPath(pathname);
 
   useEffect(() => {
-    window.location.href = pathname;
-  }, [pathname]);
+    if (isShortUrl) {
+      window.location.href = pathname;
+    }
+  }, [pathname, isShortUrl]);
 
-  return null;
+  return isShortUrl ? null : <PageNotFound />;
 }
