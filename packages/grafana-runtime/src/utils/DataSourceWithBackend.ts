@@ -112,6 +112,17 @@ interface DatasourcesV0HealthCheckResult {
   details?: HealthCheckResultDetails;
 }
 
+const RESOURCE_PATH_BASE = 'http://resource.invalid/';
+
+/**
+ * Resolves a resource path the same way the browser will, but against a fixed root, so that
+ * dot segments (including encoded and backslash forms) cannot climb out of the resources route.
+ * The leading "./" keeps inputs such as "//host" or "scheme:" relative to that root.
+ */
+function toContainedResourcePath(path: string): string {
+  return new URL(`./${path}`, RESOURCE_PATH_BASE).href.slice(RESOURCE_PATH_BASE.length);
+}
+
 function toHealthCheckResult(v: DatasourcesV0HealthCheckResult): HealthCheckResult {
   const status: HealthStatus =
     v.status === HealthStatus.OK || v.status === HealthStatus.Error || v.status === HealthStatus.Unknown
@@ -428,13 +439,14 @@ class DataSourceWithBackend<
       'datasources.apiserver.useNewAPIsForDatasourceResources',
       false
     );
+    const resourcePath = toContainedResourcePath(path);
     if (enabledRedirect) {
       // example:
       // /apis/prometheus.datasource.grafana.app/v0alpha1/namespaces/stacks-1/datasources/local-prometheus/resources/api/v1/labels
       const apiVersion = 'v0alpha1';
-      return `/apis/${this.meta?.id ?? this.type}.datasource.grafana.app/${apiVersion}/namespaces/${config.namespace}/datasources/${this.uid}/resources/${path}`;
+      return `/apis/${this.meta?.id ?? this.type}.datasource.grafana.app/${apiVersion}/namespaces/${config.namespace}/datasources/${this.uid}/resources/${resourcePath}`;
     }
-    return `/api/datasources/uid/${this.uid}/resources/${path}`;
+    return `/api/datasources/uid/${this.uid}/resources/${resourcePath}`;
   }
 
   /**

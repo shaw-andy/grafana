@@ -385,7 +385,7 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
     for (const subscription of subscriptions) {
       const subLocations = ResponseParser.parseLocations(
         await this.getResource<AzureAPIResponse<Location>>(
-          `${routeNames.azureMonitor}/subscriptions/${this.templateSrv.replace(subscription)}/locations?api-version=${
+          `${routeNames.azureMonitor}/subscriptions/${encodeURIComponent(this.templateSrv.replace(subscription))}/locations?api-version=${
             this.locationsApiVersion
           }`
         )
