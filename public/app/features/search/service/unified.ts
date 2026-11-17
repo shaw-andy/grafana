@@ -109,8 +109,13 @@ export class UnifiedSearcher implements GrafanaSearcher {
   }
 
   async tags(query: SearchQuery): Promise<TermCount[]> {
-    const qry = query.query ?? '*';
-    let uri = `${searchURI}?facet=tags&facetLimit=1000&query=${qry}&limit=1`;
+    const params = new URLSearchParams({
+      facet: 'tags',
+      facetLimit: '1000',
+      query: query.query ?? '*',
+      limit: '1',
+    });
+    const uri = `${searchURI}?${params.toString()}`;
     const resp = await getBackendSrv().get<SearchAPIResponse>(uri);
     return resp.facets?.tags?.terms || [];
   }
@@ -297,72 +302,74 @@ export class UnifiedSearcher implements GrafanaSearcher {
   private async newRequest(query: SearchQuery): Promise<string> {
     query = await replaceCurrentFolderQuery(query);
 
-    let uri = searchURI;
-    uri += `?query=${encodeURIComponent(query.query ?? '*')}`;
-    uri += `&limit=${query.limit ?? pageSize}`;
-
-    if (query.offset) {
-      uri += `&offset=${query.offset}`;
+    if (query.deleted) {
+      return `${getAPIBaseURL(DASHBOARD_API_GROUP, 'v1beta1')}/dashboards/?labelSelector=grafana.app/get-trash=true`;
     }
 
-    if (!isEmpty(query.location)) {
-      uri += `&folder=${query.location}`;
+    // Filter values can come from the page URL, so each must stay encoded inside its own parameter.
+    const params = new URLSearchParams();
+    params.set('query', query.query ?? '*');
+    params.set('limit', String(query.limit ?? pageSize));
+
+    if (query.offset) {
+      params.set('offset', String(query.offset));
+    }
+
+    if (query.location && !isEmpty(query.location)) {
+      params.set('folder', query.location);
     }
 
     if (query.kind) {
       // filter resource types
-      uri += '&' + query.kind.map((kind) => `type=${kind}`).join('&');
+      query.kind.forEach((kind) => params.append('type', kind));
     }
 
     if (query.ds_type?.length) {
-      uri += '&dataSourceType=' + query.ds_type;
+      params.set('dataSourceType', query.ds_type);
     }
 
     if (query.panel_type?.length) {
-      uri += '&panelType=' + query.panel_type;
+      params.set('panelType', query.panel_type);
     }
 
     if (query.createdBy?.length) {
-      uri += '&createdBy=' + encodeURIComponent(query.createdBy);
+      params.set('createdBy', query.createdBy);
     }
 
     if (query.ownerReference?.length) {
-      uri += '&' + query.ownerReference.map((ref) => `ownerReference=${encodeURIComponent(ref)}`).join('&');
+      query.ownerReference.forEach((ref) => params.append('ownerReference', ref));
     }
 
     if (query.panelTitleSearch) {
-      uri += '&panelTitleSearch=true';
+      params.set('panelTitleSearch', 'true');
     }
 
     if (query.tags?.length) {
-      uri += '&' + query.tags.map((tag) => `tag=${encodeURIComponent(tag)}`).join('&');
+      query.tags.forEach((tag) => params.append('tag', tag));
     }
 
     if (query.sort) {
       const sort = toSortParam(query.sort);
-      uri += `&sort=${sort}`;
+      params.set('sort', sort);
       const sortField = sort.startsWith('-') ? sort.substring(1) : sort;
 
-      uri += `&field=${sortField}`; // we want to the sort field to be included in the response
+      params.set('field', sortField); // we want to the sort field to be included in the response
     }
 
     if (query.name?.length) {
-      uri += '&' + query.name.map((name) => `name=${encodeURIComponent(name)}`).join('&');
+      query.name.forEach((name) => params.append('name', name));
     }
 
     if (query.uid?.length) {
       // legacy support for filtering by dashboard uid
-      uri += '&' + query.uid.map((name) => `name=${encodeURIComponent(name)}`).join('&');
+      query.uid.forEach((uid) => params.append('name', uid));
     }
 
     if (query.permission) {
-      uri += `&permission=${query.permission}`;
+      params.set('permission', query.permission);
     }
 
-    if (query.deleted) {
-      uri = `${getAPIBaseURL(DASHBOARD_API_GROUP, 'v1beta1')}/dashboards/?labelSelector=grafana.app/get-trash=true`;
-    }
-    return uri;
+    return `${searchURI}?${params.toString()}`;
   }
 
   getFolderViewSort(): string {
