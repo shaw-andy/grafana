@@ -173,6 +173,12 @@ func TestCheckOrigin(t *testing.T) {
 			success: false,
 		},
 		{
+			name:    "unauthorized_origin_default_port",
+			origin:  "http://localhost",
+			appURL:  "http://localhost:3000/",
+			success: false,
+		},
+		{
 			name:    "bad_origin",
 			origin:  ":::http://localhost:8000",
 			appURL:  "http://localhost:3000/",

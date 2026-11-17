@@ -614,14 +614,10 @@ func getCheckOriginFunc(appURL *url.URL, originPatterns []string, originGlobs []
 
 func checkAllowedOrigin(origin string, originURL *url.URL, appURL *url.URL, originGlobs []glob.Glob) (bool, error) {
 	// Try to match over configured [server] root_url first.
-	if originURL.Port() == "" {
-		if strings.EqualFold(originURL.Scheme, appURL.Scheme) && strings.EqualFold(originURL.Host, appURL.Hostname()) {
-			return true, nil
-		}
-	} else {
-		if strings.EqualFold(originURL.Scheme, appURL.Scheme) && strings.EqualFold(originURL.Host, appURL.Host) {
-			return true, nil
-		}
+	if strings.EqualFold(originURL.Scheme, appURL.Scheme) &&
+		strings.EqualFold(originURL.Hostname(), appURL.Hostname()) &&
+		effectivePort(originURL) == effectivePort(appURL) {
+		return true, nil
 	}
 	// If there is still no match try [live] allowed_origins patterns.
 	for _, pattern := range originGlobs {
@@ -630,6 +626,19 @@ func checkAllowedOrigin(origin string, originURL *url.URL, appURL *url.URL, orig
 		}
 	}
 	return false, nil
+}
+
+func effectivePort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	}
+	return ""
 }
 
 var clientConcurrency = 12
