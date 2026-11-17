@@ -5,9 +5,28 @@ import (
 
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
+	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginaccesscontrol"
 
 	"k8s.io/apiserver/pkg/authorization/authorizer"
 )
+
+// The default columns and default labels objects are shared by the whole organization,
+// so a plugins:write grant scoped to individual plugins must not be enough to change them.
+var orgDefaultsWriteEvaluator = accesscontrol.EvalPermission(
+	pluginaccesscontrol.ActionWrite,
+	pluginaccesscontrol.ScopeProvider.GetResourceAllScope(),
+)
+
+func canManageOrgDefaults(u identity.Requester) bool {
+	return u.GetOrgRole() == identity.RoleAdmin && orgDefaultsWriteEvaluator.Evaluate(u.GetPermissions())
+}
+
+func orgDefaultsDecision(u identity.Requester) (authorizer.Decision, string, error) {
+	if canManageOrgDefaults(u) {
+		return authorizer.DecisionAllow, "org admin with plugins:write on all plugins", nil
+	}
+	return authorizer.DecisionDeny, "org admin with plugins:write on all plugins required", nil
+}
 
 // GetAuthorizer returns an authorizer for all kinds managed by the logsdrilldown app.
 func GetAuthorizer() authorizer.Authorizer {
@@ -39,21 +58,13 @@ func GetAuthorizer() authorizer.Authorizer {
 			return authorizer.DecisionDeny, "admin access required", nil
 		}
 
-		p := u.GetPermissions()
-
 		// Auth handling for Logs Drilldown default columns
 		if attr.GetResource() == "logsdrilldowndefaultcolumns" {
 			// Allow get for all users
 			if attr.GetVerb() == "get" {
 				return authorizer.DecisionAllow, "", nil
 			}
-			// require plugins:write permissions for other operations
-			_, ok := p[accesscontrol.PluginRolePrefix+"write"]
-			if ok {
-				return authorizer.DecisionAllow, "user has plugins:write", nil
-			} else {
-				return authorizer.DecisionDeny, "user missing plugins:write", nil
-			}
+			return orgDefaultsDecision(u)
 		}
 
 		// Auth handling for Logs Drilldown default labels
@@ -62,15 +73,10 @@ func GetAuthorizer() authorizer.Authorizer {
 			if attr.GetVerb() == "list" || attr.GetVerb() == "get" {
 				return authorizer.DecisionAllow, "", nil
 			}
-			// require plugins:write permissions for other operations
-			_, ok := p[accesscontrol.PluginRolePrefix+"write"]
-			if ok {
-				return authorizer.DecisionAllow, "user has plugins:write", nil
-			} else {
-				return authorizer.DecisionDeny, "user missing plugins:write", nil
-			}
+			return orgDefaultsDecision(u)
 		}
 
+		p := u.GetPermissions()
 		if len(p) == 0 {
 			return authorizer.DecisionDeny, "no permissions", nil
 		}
