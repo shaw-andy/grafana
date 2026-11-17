@@ -13,10 +13,10 @@ export function newLetterRandomizer(): (v: string) => string {
     }
     const r = [...v]
       .map((c) => {
-        if (c.toLowerCase() && c !== c.toUpperCase()) {
+        if (c !== c.toUpperCase()) {
           return lower.charAt(Math.floor(Math.random() * charactersLength));
         }
-        if (c.toUpperCase() && c !== c.toUpperCase()) {
+        if (c !== c.toLowerCase()) {
           return upper.charAt(Math.floor(Math.random() * charactersLength));
         }
         return c;
