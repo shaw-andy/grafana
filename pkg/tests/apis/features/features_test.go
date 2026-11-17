@@ -41,9 +41,9 @@ func TestIntegrationFeatures(t *testing.T) {
 
 	// The endpoint has no ReqSignedIn gate, so both signed-in and anonymous callers can
 	// reach it -- anonymous access matters because the frontend evaluates flags before a
-	// user is logged in. With the static provider the result is identical for both: public
-	// flag gating only applies to the remote provider path. A zero-value User sends no
-	// credentials, producing an anonymous request.
+	// user is logged in. With the static provider anonymous callers only see flags that are
+	// on, so the enabled flag below evaluates identically for both. A zero-value User sends
+	// no credentials, producing an anonymous request.
 	users := map[string]apis.User{
 		"logged-in as admin": helper.Org1.Admin,
 		"anonymous":          {},

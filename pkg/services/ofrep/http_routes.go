@@ -29,6 +29,9 @@ import (
 // the handler runs. The :namespace URL segment is used as a fallback namespace (see validateNamespace) - for
 // authenticated callers, the identity's namespace always takes precedence over the path.
 func (b *APIBuilder) RegisterHTTPRoutes(rr routing.RouteRegister) {
+	if b.apiDisabled {
+		return
+	}
 	routes := func(r routing.RouteRegister) {
 		r.Post("/v1/evaluate/flags", b.grafanaHTTPHandler(b.allFlagsHandler))
 		r.Post("/v1/evaluate/flags/:flagKey", b.grafanaHTTPHandler(b.oneFlagHandler))
@@ -40,6 +43,9 @@ func (b *APIBuilder) RegisterHTTPRoutes(rr routing.RouteRegister) {
 
 // Setup is used by the standalone enterprise features.grafana.app APIServer
 func (b *APIBuilder) Setup(m *k8smux.PathRecorderMux) {
+	if b.apiDisabled {
+		return
+	}
 	r := mux.NewRouter()
 	r.Methods(http.MethodPost).Path("/ofrep/v1/evaluate/flags").HandlerFunc(b.allFlagsHandler)
 	r.Methods(http.MethodPost).Path("/ofrep/v1/evaluate/flags/{flagKey}").HandlerFunc(b.oneFlagHandler)
@@ -126,7 +132,7 @@ func (b *APIBuilder) oneFlagHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	b.evalFlagStatic(ctx, flagKey, w)
+	b.evalFlagStatic(ctx, flagKey, isAuthedReq, w)
 }
 
 func (b *APIBuilder) allFlagsHandler(w http.ResponseWriter, r *http.Request) {
@@ -162,7 +168,7 @@ func (b *APIBuilder) allFlagsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	b.evalAllFlagsStatic(ctx, w)
+	b.evalAllFlagsStatic(ctx, isAuthedReq, w)
 }
 
 // validateNamespace resolves the namespace to forward upstream and cross-checks any

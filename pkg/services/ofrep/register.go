@@ -40,6 +40,9 @@ type APIBuilder struct {
 	staticEvaluator featuremgmt.StaticFlagEvaluator
 	logger          log.Logger
 	hgOverrideFlags map[string]bool
+	// apiDisabled is the negation of [feature_toggles.openfeature] enable_api, so
+	// builders constructed without a config keep serving the evaluation routes.
+	apiDisabled bool
 }
 
 func (b *APIBuilder) EnableLegacyOverrideLookupBypass(goffURL *url.URL, flagsWithOverrides []string) {
@@ -86,6 +89,7 @@ func ProvideService(cfg *setting.Cfg, rr routing.RouteRegister) (*APIBuilder, er
 	if err != nil {
 		return nil, err
 	}
+	b.apiDisabled = !cfg.OpenFeature.APIEnabled
 
 	// Register routes during construction (wire DI), which completes before any
 	// background service starts. Registering in Run would race the HTTP server's
