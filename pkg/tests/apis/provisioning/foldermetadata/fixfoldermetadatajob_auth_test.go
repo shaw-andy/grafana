@@ -47,7 +47,7 @@ func TestIntegrationProvisioning_FixFolderMetadataJobAuthorization(t *testing.T)
 		helper.AwaitJobs(t, repo)
 	})
 
-	t.Run("editor can create fixFolderMetadata job", func(t *testing.T) {
+	t.Run("editor cannot create fixFolderMetadata job", func(t *testing.T) {
 		var statusCode int
 		result := helper.EditorREST.Post().
 			Namespace("default").
@@ -58,10 +58,9 @@ func TestIntegrationProvisioning_FixFolderMetadataJobAuthorization(t *testing.T)
 			SetHeader("Content-Type", "application/json").
 			Do(t.Context()).StatusCode(&statusCode)
 
-		require.NoError(t, result.Error(), "editor should be able to create fixFolderMetadata job")
-		require.Equal(t, http.StatusAccepted, statusCode, "should return 202 Accepted")
-
-		helper.AwaitJobs(t, repo)
+		require.Error(t, result.Error(), "editor should not be able to create fixFolderMetadata job")
+		require.Equal(t, http.StatusForbidden, statusCode, "should return 403 Forbidden")
+		require.True(t, apierrors.IsForbidden(result.Error()), "error should be forbidden")
 	})
 
 	t.Run("viewer cannot create fixFolderMetadata job", func(t *testing.T) {

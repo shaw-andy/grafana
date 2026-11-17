@@ -175,19 +175,7 @@ func (c *jobsConnector) handleCreateJob(ctx context.Context, r *http.Request, na
 		return
 	}
 
-	if spec.Action == provisioning.JobActionPull || spec.Action == provisioning.JobActionTest {
-		if err := c.authorizeAdminJob(ctx, cfg); err != nil {
-			responder.Error(err)
-			return
-		}
-	}
-
-	if err := c.validateWriteAccess(cfg, spec); err != nil {
-		responder.Error(err)
-		return
-	}
-
-	if err := c.authorizeJob(ctx, repo, cfg, spec); err != nil {
+	if err := c.authorizeCreateJob(ctx, repo, cfg, spec); err != nil {
 		responder.Error(err)
 		return
 	}
@@ -218,6 +206,58 @@ func (c *jobsConnector) handleCreateJob(ctx context.Context, r *http.Request, na
 	}
 
 	responder.Object(http.StatusAccepted, job)
+}
+
+// isAdminJobAction reports whether the action may only be requested by a
+// repository administrator. fixFolderMetadata rewrites folder metadata and
+// removes .keep files for every directory in the repository, including ones
+// that only appear after the job is queued, so no per-folder check made at
+// creation time can cover it.
+func isAdminJobAction(action provisioning.JobAction) bool {
+	switch action {
+	case provisioning.JobActionPull, provisioning.JobActionTest, provisioning.JobActionFixFolderMetadata:
+		return true
+	default:
+		return false
+	}
+}
+
+// authorizeCreateJob runs every check the requesting user must pass before a
+// job with this spec may be queued for the repository.
+func (c *jobsConnector) authorizeCreateJob(ctx context.Context, repo repository.Repository, cfg *provisioning.Repository, spec provisioning.JobSpec) error {
+	if isAdminJobAction(spec.Action) {
+		if err := c.authorizeAdminJob(ctx, cfg); err != nil {
+			return err
+		}
+	}
+
+	if err := c.validateWriteAccess(cfg, spec); err != nil {
+		return err
+	}
+
+	return c.authorizeJob(ctx, repo, cfg, spec)
+}
+
+// authorizeJobObject applies the same authorization as the jobs subresource to
+// a Job written to the jobs resource, which callers holding jobs:create can
+// reach without going through this connector.
+func (c *jobsConnector) authorizeJobObject(ctx context.Context, namespace string, spec provisioning.JobSpec) error {
+	namespaceOnly := &provisioning.Repository{ObjectMeta: metav1.ObjectMeta{Namespace: namespace}}
+	if jobs.IsOrphanCleanupAction(spec.Action) {
+		return c.authorizeAdminJob(ctx, namespaceOnly)
+	}
+
+	repo, err := c.repoGetter.GetRepository(ctx, spec.Repository)
+	if apierrors.IsNotFound(err) {
+		// There is no repository to check the job against yet; only an
+		// administrator may queue work for it.
+		return c.authorizeAdminJob(ctx, namespaceOnly)
+	}
+	if err != nil {
+		return err
+	}
+
+	return c.authorizeCreateJob(ctx, repo, repo.Config(), spec)
 }
 
 // validateWriteAccess checks if a write operation is allowed for the given
@@ -339,8 +379,8 @@ func (c *jobsConnector) authorizeJob(ctx context.Context, repo repository.Reposi
 			return c.authorizeMoveJob(ctx, repo, cfg, spec.Move)
 		}
 	case provisioning.JobActionPull, provisioning.JobActionPullRequest, provisioning.JobActionFixFolderMetadata, provisioning.JobActionTest:
-		// Read-only / no-op operations don't require pre-flight resource authorization.
-		// Pull and test are authorized inline in handleCreateJob (admin-only).
+		// Pull, test and fixFolderMetadata are admin-only (see isAdminJobAction);
+		// pull request jobs are rejected above.
 	case provisioning.JobActionReleaseResources, provisioning.JobActionDeleteResources:
 		// Orphan cleanup actions are handled separately via handleOrphanCleanupJob
 		// and never reach authorizeJob.
@@ -412,7 +452,8 @@ func (c *jobsConnector) authorizeResourceRefs(ctx context.Context, authorizer re
 //
 // We check repositories:write (an admin-only RBAC action) rather than
 // jobs:create, because jobs:create is granted to Editor and would let editors
-// trigger admin-restricted jobs (pull, releaseResources, deleteResources).
+// trigger admin-restricted jobs (pull, test, fixFolderMetadata,
+// releaseResources, deleteResources).
 // The fallback role still allows admins whose RBAC isn't explicitly set up.
 func (c *jobsConnector) authorizeAdminJob(ctx context.Context, cfg *provisioning.Repository) error {
 	return c.access.WithFallbackRole(identity.RoleAdmin).Check(ctx, authlib.CheckRequest{
