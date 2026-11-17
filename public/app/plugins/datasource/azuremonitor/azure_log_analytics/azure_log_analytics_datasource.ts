@@ -17,7 +17,7 @@ import {
   type DatasourceValidationResult,
   type Subscription,
 } from '../types/types';
-import { fetchAllArmPages, interpolateVariable, routeNames } from '../utils/common';
+import { fetchAllArmPages, interpolateVariable, resourceUriToPath, routeNames } from '../utils/common';
 
 import { transformMetadataToKustoSchema } from './utils';
 
@@ -79,10 +79,10 @@ export default class AzureLogAnalyticsDatasource extends DataSourceWithBackend<
 
     const workspaceListUrl =
       this.azureMonitorPath +
-      `/${subscriptionId}/providers/Microsoft.OperationalInsights/workspaces?api-version=2017-04-26-preview`;
+      `/${resourceUriToPath(subscriptionId)}/providers/Microsoft.OperationalInsights/workspaces?api-version=2017-04-26-preview`;
 
     const value = await fetchAllArmPages<Workspace>(routeNames.azureMonitor, workspaceListUrl, (path) =>
-      this.getResource<AzureAPIResponse<Workspace>>(path)
+      this.getResource<AzureAPIResponse<Workspace>>(path, undefined, { validatePath: true })
     );
 
     return (
@@ -96,9 +96,9 @@ export default class AzureLogAnalyticsDatasource extends DataSourceWithBackend<
   }
 
   async getMetadata(resourceUri: string) {
-    const path = `${this.resourcePath}/v1${resourceUri}/metadata`;
+    const path = `${this.resourcePath}/v1${resourceUriToPath(resourceUri)}/metadata`;
 
-    const resp = await this.getResource(path);
+    const resp = await this.getResource(path, undefined, { validatePath: true });
     return resp;
   }
 

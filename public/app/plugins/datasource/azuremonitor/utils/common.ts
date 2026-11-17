@@ -1,6 +1,12 @@
 import { map } from 'lodash';
 
-import { AppEvents, type ScopedVars, type SelectableValue, type VariableWithMultiSupport } from '@grafana/data';
+import {
+  AppEvents,
+  PathValidationError,
+  type ScopedVars,
+  type SelectableValue,
+  type VariableWithMultiSupport,
+} from '@grafana/data';
 import { t } from '@grafana/i18n';
 import { getAppEvents, logWarning, type TemplateSrv, type VariableInterpolation } from '@grafana/runtime';
 
@@ -47,6 +53,35 @@ export const routeNames = {
 };
 
 export const MAX_ARM_PAGES = 50;
+
+function decodeResourceUriSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    throw new PathValidationError('Invalid Azure resource URI');
+  }
+}
+
+/**
+ * Converts an Azure resource URI (or a single segment such as a subscription ID) into a path that is
+ * safe to place inside a datasource resource URL. The value comes from saved queries, and the browser
+ * resolves the resulting URL against the Grafana app root, so dot segments are resolved against the
+ * URI's own root and every remaining segment is percent-encoded. The output therefore never contains
+ * a dot segment, backslash, query or fragment that could move the request out of the resource route.
+ */
+export function resourceUriToPath(resourceUri: string): string {
+  const absolute = resourceUri.startsWith('/');
+  const segments: string[] = [];
+  for (const rawSegment of (absolute ? resourceUri.slice(1) : resourceUri).split('/')) {
+    const segment = decodeResourceUriSegment(rawSegment);
+    if (segment === '..') {
+      segments.pop();
+    } else if (segment !== '.') {
+      segments.push(encodeURIComponent(segment));
+    }
+  }
+  return (absolute ? '/' : '') + segments.join('/');
+}
 
 export function nextLinkToPath(prefix: string, nextLink: string): string {
   const { pathname, search } = new URL(nextLink);
