@@ -24,6 +24,7 @@ const ofrepPath = "/ofrep/v1/evaluate/flags"
 
 const namespaceMismatchMsg = "rejecting request with namespace mismatch"
 const bodyReadFailureMsg = "rejecting request with body read failure"
+const invalidFlagKeyMsg = "rejecting request with invalid flag key"
 const mib = 1024 * 1024
 
 type evalContext struct {
