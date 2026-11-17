@@ -1010,7 +1010,9 @@ describe('AzureMonitorDatasource', () => {
         expect(getResource).toHaveBeenCalledTimes(2);
         expect(getResource).toHaveBeenNthCalledWith(
           2,
-          'azuremonitor/subscriptions?api-version=2019-03-01&$skiptoken=TOKEN123'
+          'azuremonitor/subscriptions?api-version=2019-03-01&$skiptoken=TOKEN123',
+          undefined,
+          { validatePath: true }
         );
       });
 

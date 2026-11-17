@@ -32,7 +32,7 @@ import { fetchAllArmPages, replaceTemplateVariables, routeNames } from '../utils
 import migrateQuery from '../utils/migrateQuery';
 
 import ResponseParser from './response_parser';
-import UrlBuilder from './url_builder';
+import UrlBuilder, { encodeResourceId } from './url_builder';
 
 const defaultDropdownValue = 'select';
 
@@ -208,13 +208,13 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
     const value = await fetchAllArmPages<Subscription>(
       this.resourcePath,
       `${this.resourcePath}/subscriptions?api-version=2019-03-01`,
-      (path) => this.getResource<AzureAPIResponse<Subscription>>(path)
+      (path) => this.getResource<AzureAPIResponse<Subscription>>(path, undefined, { validatePath: true })
     );
     return ResponseParser.parseSubscriptions({ value });
   }
 
   // Note globalRegion should be false when querying custom metric namespaces
-  getMetricNamespaces(
+  async getMetricNamespaces(
     query: GetMetricNamespacesQuery,
     globalRegion: boolean,
     region?: string,
@@ -230,7 +230,7 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
       this.templateSrv,
       region
     );
-    return this.getResource(url)
+    return this.getResource(url, undefined, { validatePath: true })
       .then((result: AzureAPIResponse<MetricNamespace>) => {
         if (custom) {
           result.value = result.value.filter((namespace) => namespace.classification === 'Custom');
@@ -270,7 +270,7 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
       });
   }
 
-  getMetricNames(query: GetMetricNamesQuery, multipleResources?: boolean, region?: string) {
+  async getMetricNames(query: GetMetricNamesQuery, multipleResources?: boolean, region?: string) {
     // The batch API forces a per-resource (resource-scoped) URL, so it uses the standard API
     // version rather than the subscription-scoped preview version used for multi-resource requests.
     const apiVersion = multipleResources && !this.batchAPIEnabled ? this.apiPreviewVersion : this.apiVersion;
@@ -284,12 +284,12 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
       region,
       this.batchAPIEnabled
     );
-    return this.getResource(url).then((result: AzureAPIResponse<Metric>) => {
+    return this.getResource(url, undefined, { validatePath: true }).then((result: AzureAPIResponse<Metric>) => {
       return ResponseParser.parseResponseValues(result, 'name.localizedValue', 'name.value');
     });
   }
 
-  getMetricMetadata(query: GetMetricMetadataQuery, multipleResources?: boolean, region?: string) {
+  async getMetricMetadata(query: GetMetricMetadataQuery, multipleResources?: boolean, region?: string) {
     const { metricName } = query;
     // The batch API forces a per-resource (resource-scoped) URL, so it uses the standard API
     // version rather than the subscription-scoped preview version used for multi-resource requests.
@@ -304,9 +304,11 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
       region,
       this.batchAPIEnabled
     );
-    return this.getResource(url).then((result: AzureMonitorMetricsMetadataResponse) => {
-      return ResponseParser.parseMetadata(result, this.templateSrv.replace(metricName));
-    });
+    return this.getResource(url, undefined, { validatePath: true }).then(
+      (result: AzureMonitorMetricsMetadataResponse) => {
+        return ResponseParser.parseMetadata(result, this.templateSrv.replace(metricName));
+      }
+    );
   }
 
   private validateDatasource(): DatasourceValidationResult | undefined {
@@ -350,7 +352,7 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
       this.templateSrv.replace(workspaceUri),
       this.templateSrv.replace(tableName)
     );
-    const tableResult = await this.getResource<GetLogAnalyticsTableResponse>(url);
+    const tableResult = await this.getResource<GetLogAnalyticsTableResponse>(url, undefined, { validatePath: true });
 
     if (!tableResult || instanceOfLogAnalyticsTableError(tableResult)) {
       return TablePlan.Analytics;
@@ -376,7 +378,9 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
 
   async getProvider(providerName: string) {
     return await this.getResource<AzureMonitorProvidersResponse>(
-      `${routeNames.azureMonitor}/providers/${providerName}?api-version=${this.providerApiVersion}`
+      `${routeNames.azureMonitor}/providers/${encodeResourceId(providerName)}?api-version=${this.providerApiVersion}`,
+      undefined,
+      { validatePath: true }
     );
   }
 
@@ -385,9 +389,11 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
     for (const subscription of subscriptions) {
       const subLocations = ResponseParser.parseLocations(
         await this.getResource<AzureAPIResponse<Location>>(
-          `${routeNames.azureMonitor}/subscriptions/${this.templateSrv.replace(subscription)}/locations?api-version=${
+          `${routeNames.azureMonitor}/subscriptions/${encodeResourceId(this.templateSrv.replace(subscription))}/locations?api-version=${
             this.locationsApiVersion
-          }`
+          }`,
+          undefined,
+          { validatePath: true }
         )
       );
       for (const location of subLocations) {

@@ -5,6 +5,7 @@ import { type ScopedVars } from '@grafana/data';
 import { DataSourceWithBackend, getTemplateSrv, type TemplateSrv } from '@grafana/runtime';
 
 import ResponseParser from '../azure_monitor/response_parser';
+import { encodeResourceId, encodeResourceUri } from '../azure_monitor/url_builder';
 import { getCredentials } from '../credentials';
 import { AzureQueryType } from '../dataquery.gen';
 import { type AzureMonitorQuery } from '../types/query';
@@ -69,7 +70,7 @@ export default class AzureLogAnalyticsDatasource extends DataSourceWithBackend<
     const value = await fetchAllArmPages<Subscription>(
       routeNames.azureMonitor,
       `${this.azureMonitorPath}?api-version=2019-03-01`,
-      (path) => this.getResource<AzureAPIResponse<Subscription>>(path)
+      (path) => this.getResource<AzureAPIResponse<Subscription>>(path, undefined, { validatePath: true })
     );
     return ResponseParser.parseSubscriptions({ value });
   }
@@ -79,10 +80,10 @@ export default class AzureLogAnalyticsDatasource extends DataSourceWithBackend<
 
     const workspaceListUrl =
       this.azureMonitorPath +
-      `/${subscriptionId}/providers/Microsoft.OperationalInsights/workspaces?api-version=2017-04-26-preview`;
+      `/${encodeResourceId(subscriptionId)}/providers/Microsoft.OperationalInsights/workspaces?api-version=2017-04-26-preview`;
 
     const value = await fetchAllArmPages<Workspace>(routeNames.azureMonitor, workspaceListUrl, (path) =>
-      this.getResource<AzureAPIResponse<Workspace>>(path)
+      this.getResource<AzureAPIResponse<Workspace>>(path, undefined, { validatePath: true })
     );
 
     return (
@@ -96,9 +97,9 @@ export default class AzureLogAnalyticsDatasource extends DataSourceWithBackend<
   }
 
   async getMetadata(resourceUri: string) {
-    const path = `${this.resourcePath}/v1${resourceUri}/metadata`;
+    const path = `${this.resourcePath}/v1${encodeResourceUri(resourceUri)}/metadata`;
 
-    const resp = await this.getResource(path);
+    const resp = await this.getResource(path, undefined, { validatePath: true });
     return resp;
   }
 
@@ -253,7 +254,7 @@ export default class AzureLogAnalyticsDatasource extends DataSourceWithBackend<
   }
 
   async getAzureLogAnalyticsCheatsheetQueries() {
-    return await this.getResource(`${this.resourcePath}/v1/metadata`);
+    return await this.getResource(`${this.resourcePath}/v1/metadata`, undefined, { validatePath: true });
   }
 
   async getLogsQueryUsage(query: AzureMonitorQuery, table: string): Promise<number> {

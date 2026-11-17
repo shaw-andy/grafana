@@ -119,7 +119,9 @@ describe('AzureLogAnalyticsDatasource', () => {
       });
       ctx.datasource.azureLogAnalyticsDatasource.getResource = ctx.getResource;
       await ctx.datasource.azureLogAnalyticsDatasource.getKustoSchema('myWorkspace/$var1');
-      expect(ctx.getResource).lastCalledWith('loganalytics/v1myWorkspace/var1-foo/metadata');
+      expect(ctx.getResource).lastCalledWith('loganalytics/v1myWorkspace/var1-foo/metadata', undefined, {
+        validatePath: true,
+      });
     });
 
     it('should include macros as suggested functions', async () => {
