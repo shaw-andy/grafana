@@ -323,6 +323,7 @@ func TestCreateFolder(t *testing.T) {
 				rw := repository.NewMockReaderWriter(t)
 				rw.On("Config").Return(config)
 				rw.On("Read", mock.Anything, "newfolder/_folder.json", "").Return(nil, repository.ErrFileNotFound)
+				rw.On("Read", mock.Anything, "newfolder/", "").Return(nil, repository.ErrFileNotFound)
 				var capturedUID string
 				rw.On("Create", mock.Anything, "newfolder/_folder.json", "", mock.MatchedBy(func(b []byte) bool {
 					var res folders.Folder
@@ -412,6 +413,7 @@ func TestCreateFolder(t *testing.T) {
 				config := newTestRepoConfig("test-repo")
 				rw.On("Config").Return(config)
 				rw.On("Read", mock.Anything, "newfolder/_folder.json", "").Return(nil, repository.ErrFileNotFound)
+				rw.On("Read", mock.Anything, "newfolder/", "").Return(nil, repository.ErrFileNotFound)
 				rw.On("Create", mock.Anything, "newfolder/_folder.json", "", mock.Anything, "").Return(fmt.Errorf("repo error"))
 				accessMock := auth.NewMockAccessChecker(t)
 				accessMock.On("Check", mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -472,6 +474,8 @@ func TestCreateFolder(t *testing.T) {
 				rw.On("Read", mock.Anything, "newfolder/_folder.json", "new-branch").Return(nil, repository.ErrRefNotFound)
 				// Fallback read targets the configured branch → file not found either
 				rw.On("Read", mock.Anything, "newfolder/_folder.json", "").Return(nil, repository.ErrFileNotFound)
+				rw.On("Read", mock.Anything, "newfolder/", "new-branch").Return(nil, repository.ErrRefNotFound)
+				rw.On("Read", mock.Anything, "newfolder/", "").Return(nil, repository.ErrFileNotFound)
 				rw.On("Create", mock.Anything, "newfolder/_folder.json", "new-branch", mock.MatchedBy(func(b []byte) bool {
 					var res folders.Folder
 					if err := json.Unmarshal(b, &res); err != nil {
@@ -517,6 +521,8 @@ func TestCreateFolder(t *testing.T) {
 				// Child (leaf): branch doesn't exist → fallback → not found → create
 				rw.On("Read", mock.Anything, "parent/child/_folder.json", "new-branch").Return(nil, repository.ErrRefNotFound)
 				rw.On("Read", mock.Anything, "parent/child/_folder.json", "").Return(nil, repository.ErrFileNotFound)
+				rw.On("Read", mock.Anything, "parent/child/", "new-branch").Return(nil, repository.ErrRefNotFound)
+				rw.On("Read", mock.Anything, "parent/child/", "").Return(nil, repository.ErrFileNotFound)
 				rw.On("Create", mock.Anything, "parent/child/_folder.json", "new-branch", mock.MatchedBy(func(b []byte) bool {
 					var f folders.Folder
 					return json.Unmarshal(b, &f) == nil && f.Name != "" && f.Spec.Title == "child"
@@ -650,6 +656,7 @@ func TestCreateFolder(t *testing.T) {
 				rw := repository.NewMockReaderWriter(t)
 				rw.On("Config").Return(config)
 				rw.On("Read", mock.Anything, "newfolder/_folder.json", "").Return(nil, repository.ErrFileNotFound)
+				rw.On("Read", mock.Anything, "newfolder/", "").Return(nil, repository.ErrFileNotFound)
 				rw.On("Create", mock.Anything, "newfolder/_folder.json", "", mock.Anything, "").Return(nil)
 				accessMock := auth.NewMockAccessChecker(t)
 				accessMock.On("Check", mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -682,6 +689,7 @@ func TestCreateFolder(t *testing.T) {
 				rw := repository.NewMockReaderWriter(t)
 				rw.On("Config").Return(config)
 				rw.On("Read", mock.Anything, "newfolder/_folder.json", "").Return(nil, repository.ErrFileNotFound)
+				rw.On("Read", mock.Anything, "newfolder/", "").Return(nil, repository.ErrFileNotFound)
 				rw.On("Create", mock.Anything, "newfolder/_folder.json", "", mock.Anything, "").Return(nil)
 				accessMock := auth.NewMockAccessChecker(t)
 				accessMock.On("Check", mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -927,6 +935,7 @@ func TestCreateFolder_Nested_FolderMetadata(t *testing.T) {
 
 		// Parent: not found → create
 		rw.On("Read", mock.Anything, "parent/_folder.json", "").Return(nil, repository.ErrFileNotFound)
+		rw.On("Read", mock.Anything, "parent/", "").Return(nil, repository.ErrFileNotFound)
 		rw.On("Create", mock.Anything, "parent/_folder.json", "", mock.MatchedBy(func(b []byte) bool {
 			var f folders.Folder
 			return json.Unmarshal(b, &f) == nil && f.Name != "" && f.Spec.Title == "parent"
@@ -934,6 +943,7 @@ func TestCreateFolder_Nested_FolderMetadata(t *testing.T) {
 
 		// Child (leaf): not found → create
 		rw.On("Read", mock.Anything, "parent/child/_folder.json", "").Return(nil, repository.ErrFileNotFound)
+		rw.On("Read", mock.Anything, "parent/child/", "").Return(nil, repository.ErrFileNotFound)
 		rw.On("Create", mock.Anything, "parent/child/_folder.json", "", mock.MatchedBy(func(b []byte) bool {
 			var f folders.Folder
 			return json.Unmarshal(b, &f) == nil && f.Name != "" && f.Spec.Title == "child"
@@ -963,6 +973,7 @@ func TestCreateFolder_Nested_FolderMetadata(t *testing.T) {
 
 		// Child: not found → create
 		rw.On("Read", mock.Anything, "parent/child/_folder.json", "").Return(nil, repository.ErrFileNotFound)
+		rw.On("Read", mock.Anything, "parent/child/", "").Return(nil, repository.ErrFileNotFound)
 		rw.On("Create", mock.Anything, "parent/child/_folder.json", "", mock.MatchedBy(func(b []byte) bool {
 			var f folders.Folder
 			return json.Unmarshal(b, &f) == nil && f.Name != "" && f.Spec.Title == "child"

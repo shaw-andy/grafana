@@ -173,7 +173,9 @@ func (r *DualReadWriter) CreateFolder(ctx context.Context, opts DualWriteOptions
 	}
 
 	// When the feature flag is enabled, write folder metadata for every path segment
-	// (ancestor and leaf), skipping any segment that already has one.
+	// (ancestor and leaf) that does not exist yet. Existing folders are never
+	// backfilled: giving one a _folder.json changes its identity, and the caller
+	// was only authorized to create inside the parent.
 	var stableUID string
 	if r.folderMetadataEnabled {
 		leafPath := strings.TrimSuffix(opts.Path, "/")
@@ -199,6 +201,19 @@ func (r *DualReadWriter) CreateFolder(ctx context.Context, opts DualWriteOptions
 			}
 			if !errors.Is(readErr, repository.ErrFileNotFound) {
 				return fmt.Errorf("failed to read folder metadata for %q: %w", folderPath, readErr)
+			}
+			exists, existsErr := folderExists(ctx, r.repo, folderPath, opts.Ref)
+			if existsErr != nil {
+				return fmt.Errorf("check if folder exists for %q: %w", folderPath, existsErr)
+			}
+			if exists {
+				if segPath == leafPath {
+					return apierrors.NewAlreadyExists(
+						provisioning.RepositoryResourceInfo.GroupResource(),
+						opts.Path,
+					)
+				}
+				return nil
 			}
 			// Not found: write a new folder metadata file
 			uid := util.GenerateShortUID()
@@ -516,16 +531,12 @@ func (r *DualReadWriter) writeNewFoldersMetadata(ctx context.Context, rw reposit
 		folderPath := safepath.EnsureTrailingSlash(segPath)
 
 		// Skip folders that already exist in the repository (with or without metadata).
-		_, err := rw.Read(ctx, folderPath, ref)
-		if errors.Is(err, repository.ErrRefNotFound) {
-			// Target branch not created yet; check the branch it will inherit from.
-			_, err = rw.Read(ctx, folderPath, "")
-		}
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, repository.ErrFileNotFound) && !apierrors.IsNotFound(err) {
+		exists, err := folderExists(ctx, rw, folderPath, ref)
+		if err != nil {
 			return fmt.Errorf("check if folder exists for %q: %w", folderPath, err)
+		}
+		if exists {
+			return nil
 		}
 
 		manifest := NewFolderManifest(util.GenerateShortUID(), safepath.Base(folderPath), r.folders.FolderGVK())
@@ -534,6 +545,22 @@ func (r *DualReadWriter) writeNewFoldersMetadata(ctx context.Context, rw reposit
 		}
 		return nil
 	})
+}
+
+// folderExists reports whether the directory at folderPath exists on ref, or on
+// the configured branch when ref has not been created yet.
+func folderExists(ctx context.Context, rw repository.Reader, folderPath, ref string) (bool, error) {
+	_, err := rw.Read(ctx, folderPath, ref)
+	if errors.Is(err, repository.ErrRefNotFound) {
+		_, err = rw.Read(ctx, folderPath, "")
+	}
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, repository.ErrFileNotFound) || apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	return false, err
 }
 
 // MoveResource moves a resource from one path to another in the repository
