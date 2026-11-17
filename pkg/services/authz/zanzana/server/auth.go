@@ -13,10 +13,17 @@ import (
 	"github.com/grafana/grafana/pkg/setting"
 )
 
-func authorize(ctx context.Context, namespace string, cfg setting.ZanzanaServerSettings) error {
+// skipAuthorization must match the condition under which the gRPC server swaps
+// in a no-op authenticator. Outside development the token is still verified, so
+// its namespace has to be enforced even when allow_insecure is set.
+func skipAuthorization(cfg *setting.Cfg) bool {
+	return cfg.ZanzanaServer.AllowInsecure && cfg.Env == setting.Dev
+}
+
+func authorize(ctx context.Context, namespace string, skip bool) error {
 	logger := log.New("zanzana.server.auth")
-	if cfg.AllowInsecure {
-		logger.Debug("AllowInsecure=true; skipping authorization check")
+	if skip {
+		logger.Debug("AllowInsecure=true in development; skipping authorization check")
 		return nil
 	}
 	c, ok := claims.AuthInfoFrom(ctx)
@@ -32,8 +39,8 @@ func authorize(ctx context.Context, namespace string, cfg setting.ZanzanaServerS
 	return nil
 }
 
-func authorizeWrite(ctx context.Context, namespace string, ss setting.ZanzanaServerSettings) error {
-	if err := authorize(ctx, namespace, ss); err != nil {
+func authorizeWrite(ctx context.Context, namespace string, skip bool) error {
+	if err := authorize(ctx, namespace, skip); err != nil {
 		return err
 	}
 
