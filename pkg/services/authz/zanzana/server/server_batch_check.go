@@ -84,7 +84,7 @@ func (s *Server) BatchCheck(ctx context.Context, r *authzv1.BatchCheckRequest) (
 }
 
 func (s *Server) batchCheck(ctx context.Context, r *authzv1.BatchCheckRequest, namespace string) (*authzv1.BatchCheckResponse, error) {
-	if err := authorize(ctx, namespace, s.cfg); err != nil {
+	if err := authorize(ctx, namespace, s.skipAuthorization); err != nil {
 		return nil, err
 	}
 

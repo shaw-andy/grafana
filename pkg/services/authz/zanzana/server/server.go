@@ -58,11 +58,12 @@ type Server struct {
 	openFGAClient openfgav1.OpenFGAServiceClient
 	store         storage.OpenFGADatastore
 
-	cfg      setting.ZanzanaServerSettings
-	stores   map[string]zanzana.StoreInfo
-	storesMU sync.RWMutex
-	storeSF  singleflight.Group
-	cache    *localcache.CacheService
+	cfg               setting.ZanzanaServerSettings
+	skipAuthorization bool
+	stores            map[string]zanzana.StoreInfo
+	storesMU          sync.RWMutex
+	storeSF           singleflight.Group
+	cache             *localcache.CacheService
 
 	mtReconciler zanzana.MTReconciler
 
@@ -105,16 +106,17 @@ func newServer(cfg *setting.Cfg, openfga OpenFGAServer, store storage.OpenFGADat
 	zanzanaCfg := cfg.ZanzanaServer
 
 	s := &Server{
-		openFGAServer: openfga,
-		openFGAClient: openFGAClient,
-		store:         store,
-		stores:        make(map[string]zanzana.StoreInfo),
-		cfg:           zanzanaCfg,
-		cache:         localcache.New(zanzanaCfg.CacheSettings.CheckQueryCacheTTL, cacheCleanInterval),
-		logger:        logger,
-		tracer:        tracer,
-		metrics:       newZanzanaServerMetrics(reg),
-		nsLimiterSize: int64(zanzanaCfg.MaxConcurrentRequestsPerNamespace),
+		openFGAServer:     openfga,
+		openFGAClient:     openFGAClient,
+		store:             store,
+		stores:            make(map[string]zanzana.StoreInfo),
+		cfg:               zanzanaCfg,
+		skipAuthorization: skipAuthorization(cfg),
+		cache:             localcache.New(zanzanaCfg.CacheSettings.CheckQueryCacheTTL, cacheCleanInterval),
+		logger:            logger,
+		tracer:            tracer,
+		metrics:           newZanzanaServerMetrics(reg),
+		nsLimiterSize:     int64(zanzanaCfg.MaxConcurrentRequestsPerNamespace),
 	}
 
 	if zanzanaCfg.MaxConcurrentRequests > 0 {

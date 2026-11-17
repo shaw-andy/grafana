@@ -48,7 +48,7 @@ func (s *Server) Mutate(ctx context.Context, req *authzextv1.MutateRequest) (*au
 }
 
 func (s *Server) mutate(ctx context.Context, req *authzextv1.MutateRequest) (*authzextv1.MutateResponse, error) {
-	if err := authorizeWrite(ctx, req.GetNamespace(), s.cfg); err != nil {
+	if err := authorizeWrite(ctx, req.GetNamespace(), s.skipAuthorization); err != nil {
 		return nil, err
 	}
 

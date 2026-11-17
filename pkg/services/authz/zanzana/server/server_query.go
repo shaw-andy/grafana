@@ -33,7 +33,7 @@ func (s *Server) Query(ctx context.Context, req *authzextv1.QueryRequest) (*auth
 }
 
 func (s *Server) query(ctx context.Context, req *authzextv1.QueryRequest) (*authzextv1.QueryResponse, error) {
-	if err := authorize(ctx, req.GetNamespace(), s.cfg); err != nil {
+	if err := authorize(ctx, req.GetNamespace(), s.skipAuthorization); err != nil {
 		return nil, err
 	}
 
