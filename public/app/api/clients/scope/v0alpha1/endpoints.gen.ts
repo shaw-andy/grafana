@@ -127,7 +127,7 @@ const injectedRtkApi = api
       }),
       getScopeDashboardBinding: build.query<GetScopeDashboardBindingApiResponse, GetScopeDashboardBindingApiArg>({
         query: (queryArg) => ({
-          url: `/scopedashboardbindings/${queryArg.name}`,
+          url: `/scopedashboardbindings/${encodeURIComponent(String(queryArg.name))}`,
           params: {
             pretty: queryArg.pretty,
           },
@@ -139,7 +139,7 @@ const injectedRtkApi = api
         ReplaceScopeDashboardBindingApiArg
       >({
         query: (queryArg) => ({
-          url: `/scopedashboardbindings/${queryArg.name}`,
+          url: `/scopedashboardbindings/${encodeURIComponent(String(queryArg.name))}`,
           method: 'PUT',
           body: queryArg.scopeDashboardBinding,
           params: {
@@ -156,7 +156,7 @@ const injectedRtkApi = api
         DeleteScopeDashboardBindingApiArg
       >({
         query: (queryArg) => ({
-          url: `/scopedashboardbindings/${queryArg.name}`,
+          url: `/scopedashboardbindings/${encodeURIComponent(String(queryArg.name))}`,
           method: 'DELETE',
           params: {
             pretty: queryArg.pretty,
@@ -174,7 +174,7 @@ const injectedRtkApi = api
         UpdateScopeDashboardBindingApiArg
       >({
         query: (queryArg) => ({
-          url: `/scopedashboardbindings/${queryArg.name}`,
+          url: `/scopedashboardbindings/${encodeURIComponent(String(queryArg.name))}`,
           method: 'PATCH',
           body: queryArg.patch,
           params: {
@@ -192,7 +192,7 @@ const injectedRtkApi = api
         GetScopeDashboardBindingStatusApiArg
       >({
         query: (queryArg) => ({
-          url: `/scopedashboardbindings/${queryArg.name}/status`,
+          url: `/scopedashboardbindings/${encodeURIComponent(String(queryArg.name))}/status`,
           params: {
             pretty: queryArg.pretty,
           },
@@ -204,7 +204,7 @@ const injectedRtkApi = api
         ReplaceScopeDashboardBindingStatusApiArg
       >({
         query: (queryArg) => ({
-          url: `/scopedashboardbindings/${queryArg.name}/status`,
+          url: `/scopedashboardbindings/${encodeURIComponent(String(queryArg.name))}/status`,
           method: 'PUT',
           body: queryArg.scopeDashboardBinding,
           params: {
@@ -221,7 +221,7 @@ const injectedRtkApi = api
         UpdateScopeDashboardBindingStatusApiArg
       >({
         query: (queryArg) => ({
-          url: `/scopedashboardbindings/${queryArg.name}/status`,
+          url: `/scopedashboardbindings/${encodeURIComponent(String(queryArg.name))}/status`,
           method: 'PATCH',
           body: queryArg.patch,
           params: {
@@ -293,7 +293,7 @@ const injectedRtkApi = api
       }),
       getScopeNavigation: build.query<GetScopeNavigationApiResponse, GetScopeNavigationApiArg>({
         query: (queryArg) => ({
-          url: `/scopenavigations/${queryArg.name}`,
+          url: `/scopenavigations/${encodeURIComponent(String(queryArg.name))}`,
           params: {
             pretty: queryArg.pretty,
           },
@@ -302,7 +302,7 @@ const injectedRtkApi = api
       }),
       replaceScopeNavigation: build.mutation<ReplaceScopeNavigationApiResponse, ReplaceScopeNavigationApiArg>({
         query: (queryArg) => ({
-          url: `/scopenavigations/${queryArg.name}`,
+          url: `/scopenavigations/${encodeURIComponent(String(queryArg.name))}`,
           method: 'PUT',
           body: queryArg.scopeNavigation,
           params: {
@@ -316,7 +316,7 @@ const injectedRtkApi = api
       }),
       deleteScopeNavigation: build.mutation<DeleteScopeNavigationApiResponse, DeleteScopeNavigationApiArg>({
         query: (queryArg) => ({
-          url: `/scopenavigations/${queryArg.name}`,
+          url: `/scopenavigations/${encodeURIComponent(String(queryArg.name))}`,
           method: 'DELETE',
           params: {
             pretty: queryArg.pretty,
@@ -331,7 +331,7 @@ const injectedRtkApi = api
       }),
       updateScopeNavigation: build.mutation<UpdateScopeNavigationApiResponse, UpdateScopeNavigationApiArg>({
         query: (queryArg) => ({
-          url: `/scopenavigations/${queryArg.name}`,
+          url: `/scopenavigations/${encodeURIComponent(String(queryArg.name))}`,
           method: 'PATCH',
           body: queryArg.patch,
           params: {
@@ -346,7 +346,7 @@ const injectedRtkApi = api
       }),
       getScopeNavigationStatus: build.query<GetScopeNavigationStatusApiResponse, GetScopeNavigationStatusApiArg>({
         query: (queryArg) => ({
-          url: `/scopenavigations/${queryArg.name}/status`,
+          url: `/scopenavigations/${encodeURIComponent(String(queryArg.name))}/status`,
           params: {
             pretty: queryArg.pretty,
           },
@@ -358,7 +358,7 @@ const injectedRtkApi = api
         ReplaceScopeNavigationStatusApiArg
       >({
         query: (queryArg) => ({
-          url: `/scopenavigations/${queryArg.name}/status`,
+          url: `/scopenavigations/${encodeURIComponent(String(queryArg.name))}/status`,
           method: 'PUT',
           body: queryArg.scopeNavigation,
           params: {
@@ -375,7 +375,7 @@ const injectedRtkApi = api
         UpdateScopeNavigationStatusApiArg
       >({
         query: (queryArg) => ({
-          url: `/scopenavigations/${queryArg.name}/status`,
+          url: `/scopenavigations/${encodeURIComponent(String(queryArg.name))}/status`,
           method: 'PATCH',
           body: queryArg.patch,
           params: {
@@ -444,7 +444,7 @@ const injectedRtkApi = api
       }),
       getScopeNode: build.query<GetScopeNodeApiResponse, GetScopeNodeApiArg>({
         query: (queryArg) => ({
-          url: `/scopenodes/${queryArg.name}`,
+          url: `/scopenodes/${encodeURIComponent(String(queryArg.name))}`,
           params: {
             pretty: queryArg.pretty,
           },
@@ -453,7 +453,7 @@ const injectedRtkApi = api
       }),
       replaceScopeNode: build.mutation<ReplaceScopeNodeApiResponse, ReplaceScopeNodeApiArg>({
         query: (queryArg) => ({
-          url: `/scopenodes/${queryArg.name}`,
+          url: `/scopenodes/${encodeURIComponent(String(queryArg.name))}`,
           method: 'PUT',
           body: queryArg.scopeNode,
           params: {
@@ -467,7 +467,7 @@ const injectedRtkApi = api
       }),
       deleteScopeNode: build.mutation<DeleteScopeNodeApiResponse, DeleteScopeNodeApiArg>({
         query: (queryArg) => ({
-          url: `/scopenodes/${queryArg.name}`,
+          url: `/scopenodes/${encodeURIComponent(String(queryArg.name))}`,
           method: 'DELETE',
           params: {
             pretty: queryArg.pretty,
@@ -482,7 +482,7 @@ const injectedRtkApi = api
       }),
       updateScopeNode: build.mutation<UpdateScopeNodeApiResponse, UpdateScopeNodeApiArg>({
         query: (queryArg) => ({
-          url: `/scopenodes/${queryArg.name}`,
+          url: `/scopenodes/${encodeURIComponent(String(queryArg.name))}`,
           method: 'PATCH',
           body: queryArg.patch,
           params: {
@@ -551,7 +551,7 @@ const injectedRtkApi = api
       }),
       getScope: build.query<GetScopeApiResponse, GetScopeApiArg>({
         query: (queryArg) => ({
-          url: `/scopes/${queryArg.name}`,
+          url: `/scopes/${encodeURIComponent(String(queryArg.name))}`,
           params: {
             pretty: queryArg.pretty,
           },
@@ -560,7 +560,7 @@ const injectedRtkApi = api
       }),
       replaceScope: build.mutation<ReplaceScopeApiResponse, ReplaceScopeApiArg>({
         query: (queryArg) => ({
-          url: `/scopes/${queryArg.name}`,
+          url: `/scopes/${encodeURIComponent(String(queryArg.name))}`,
           method: 'PUT',
           body: queryArg.scope,
           params: {
@@ -574,7 +574,7 @@ const injectedRtkApi = api
       }),
       deleteScope: build.mutation<DeleteScopeApiResponse, DeleteScopeApiArg>({
         query: (queryArg) => ({
-          url: `/scopes/${queryArg.name}`,
+          url: `/scopes/${encodeURIComponent(String(queryArg.name))}`,
           method: 'DELETE',
           params: {
             pretty: queryArg.pretty,
@@ -589,7 +589,7 @@ const injectedRtkApi = api
       }),
       updateScope: build.mutation<UpdateScopeApiResponse, UpdateScopeApiArg>({
         query: (queryArg) => ({
-          url: `/scopes/${queryArg.name}`,
+          url: `/scopes/${encodeURIComponent(String(queryArg.name))}`,
           method: 'PATCH',
           body: queryArg.patch,
           params: {
