@@ -1392,9 +1392,13 @@ func predictableSeries(timeRange backend.TimeRange, timeStep, length int64, getV
 	from := timeRange.From.UnixNano() / int64(time.Millisecond)
 	to := timeRange.To.UnixNano() / int64(time.Millisecond)
 
-	timeCursor := from - (from % timeStep) // Truncate Start
 	wavePeriod := timeStep * length
-	maxPoints := 10000 // Don't return too many points
+	if timeStep <= 0 || wavePeriod <= 0 {
+		return nil, fmt.Errorf("timeStep and wave length must be greater than zero")
+	}
+
+	timeCursor := from - (from % timeStep) // Truncate Start
+	maxPoints := 10000                     // Don't return too many points
 
 	timeVec := make([]time.Time, 0)
 	floatVec := make([]*float64, 0)
