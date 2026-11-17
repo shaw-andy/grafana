@@ -217,3 +217,36 @@ func TestApplyUserHeader(t *testing.T) {
 		})
 	}
 }
+
+func TestHasDotSegment(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want bool
+	}{
+		{path: "", want: false},
+		{path: "api/v1/query", want: false},
+		{path: "/api/v1/query/", want: false},
+		{path: "a.b/..c/c../...", want: false},
+		{path: "100%", want: false},
+		{path: "%zz", want: false},
+		{path: ".", want: true},
+		{path: "..", want: true},
+		{path: "../admin", want: true},
+		{path: "a/./b", want: true},
+		{path: "a/b/..", want: true},
+		{path: "%2e%2e/admin", want: true},
+		{path: "%2E%2E/admin", want: true},
+		{path: "%2e%2e%2fadmin", want: true},
+		{path: "%252e%252e/admin", want: true},
+		{path: "%25252e%25252e/admin", want: true},
+		{path: "%zz/%2e%2e/admin", want: true},
+		{path: "a\\..\\admin", want: true},
+		{path: "a%5c..%5cadmin", want: true},
+		{path: "..;x/admin", want: true},
+		{path: "a/.%2e/admin", want: true},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			require.Equal(t, tc.want, HasDotSegment(tc.path))
+		})
+	}
+}

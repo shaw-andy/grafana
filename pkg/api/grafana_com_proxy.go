@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"path"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/grafana/grafana/pkg/infra/log"
@@ -47,8 +49,22 @@ var grafanaComProxyTransport = &http.Transport{
 	TLSHandshakeTimeout: 10 * time.Second,
 }
 
+// gnetProxyPath resolves dot segments in proxyPath as if it were rooted, so the
+// result cannot leave the grafana.com API URL path it is joined onto.
+func gnetProxyPath(proxyPath string) string {
+	if proxyPath == "" {
+		return ""
+	}
+	cleaned := path.Clean("/" + proxyPath)
+	if strings.HasSuffix(proxyPath, "/") && cleaned != "/" {
+		cleaned += "/"
+	}
+	return cleaned
+}
+
 func ReverseProxyGnetReq(logger log.Logger, proxyPath, version, grafanaComAPIUrl, grafanaComAPIToken string) *httputil.ReverseProxy {
 	url, _ := url.Parse(grafanaComAPIUrl)
+	proxyPath = gnetProxyPath(proxyPath)
 
 	director := func(req *http.Request) {
 		req.URL.Scheme = url.Scheme
@@ -65,7 +81,7 @@ func ReverseProxyGnetReq(logger log.Logger, proxyPath, version, grafanaComAPIUrl
 		// send the current Grafana version for each request proxied to GCOM
 		req.Header.Add("grafana-version", version)
 
-		if grafanaComAPIToken != "" && req.Method == http.MethodGet && ssoTokenAllowedPath(proxyPath) {
+		if grafanaComAPIToken != "" && req.Method == http.MethodGet && ssoTokenAllowedPath(proxyPath) && !proxyutil.HasDotSegment(proxyPath) {
 			req.Header.Set("Authorization", "Bearer "+grafanaComAPIToken)
 		}
 	}
@@ -75,6 +91,10 @@ func ReverseProxyGnetReq(logger log.Logger, proxyPath, version, grafanaComAPIUrl
 
 func (hs *HTTPServer) ProxyGnetRequest(c *contextmodel.ReqContext) {
 	proxyPath := web.Params(c.Req)["*"]
+	if proxyutil.HasDotSegment(proxyPath) {
+		c.JsonApiErr(http.StatusBadRequest, "grafana.com proxy path must not contain dot segments", nil)
+		return
+	}
 	proxy := ReverseProxyGnetReq(c.Logger, proxyPath, hs.Cfg.BuildVersion, hs.Cfg.GrafanaComAPIURL, hs.Cfg.GrafanaComProxyAPIToken)
 	proxy.Transport = grafanaComProxyTransport
 	proxy.ServeHTTP(c.Resp, c.Req)
