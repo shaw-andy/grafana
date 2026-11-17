@@ -1905,30 +1905,24 @@ func TestIntegrationProvisioning_JobPermissions(t *testing.T) {
 		Pull:   &provisioning.SyncJobOptions{},
 	})
 
-	editorJobBody := common.AsJSON(provisioning.JobSpec{
+	fixFolderMetadataJobBody := common.AsJSON(provisioning.JobSpec{
 		Action: provisioning.JobActionFixFolderMetadata,
 	})
 
-	t.Run("editor can POST jobs", func(t *testing.T) {
+	t.Run("editor cannot POST admin-only jobs", func(t *testing.T) {
 		var statusCode int
 		result := helper.EditorREST.Post().
 			Namespace("default").
 			Resource("repositories").
 			Name(repo).
 			SubResource("jobs").
-			Body(editorJobBody).
+			Body(fixFolderMetadataJobBody).
 			SetHeader("Content-Type", "application/json").
 			Do(t.Context()).StatusCode(&statusCode)
 
-		require.NoError(t, result.Error(), "editor should be able to POST jobs")
-		require.Equal(t, http.StatusAccepted, statusCode, "should return 202 Accepted")
-
-		// Verify the job was created
-		obj, err := result.Get()
-		require.NoError(t, err, "should get job object")
-		unstruct, ok := obj.(*unstructured.Unstructured)
-		require.True(t, ok, "expecting unstructured object")
-		require.NotEmpty(t, unstruct.GetName(), "job should have a name")
+		require.Error(t, result.Error(), "editor should not be able to POST fixFolderMetadata jobs")
+		require.Equal(t, http.StatusForbidden, statusCode, "should return 403 Forbidden")
+		require.True(t, apierrors.IsForbidden(result.Error()), "error should be forbidden")
 	})
 
 	t.Run("viewer cannot POST jobs", func(t *testing.T) {
@@ -1938,7 +1932,7 @@ func TestIntegrationProvisioning_JobPermissions(t *testing.T) {
 			Resource("repositories").
 			Name(repo).
 			SubResource("jobs").
-			Body(editorJobBody).
+			Body(fixFolderMetadataJobBody).
 			SetHeader("Content-Type", "application/json").
 			Do(t.Context()).StatusCode(&statusCode)
 

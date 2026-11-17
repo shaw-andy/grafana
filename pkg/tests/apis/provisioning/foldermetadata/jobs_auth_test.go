@@ -82,7 +82,7 @@ func TestIntegrationProvisioning_JobsAuthorization(t *testing.T) {
 		helper.AwaitJobs(t, repo)
 	})
 
-	t.Run("editor can create job", func(t *testing.T) {
+	t.Run("editor cannot create admin-only job", func(t *testing.T) {
 		body := common.AsJSON(provisioning.JobSpec{
 			Action: provisioning.JobActionFixFolderMetadata,
 		})
@@ -97,10 +97,9 @@ func TestIntegrationProvisioning_JobsAuthorization(t *testing.T) {
 			SetHeader("Content-Type", "application/json").
 			Do(t.Context()).StatusCode(&statusCode)
 
-		require.NoError(t, result.Error(), "editor should be able to create job")
-		require.Equal(t, http.StatusAccepted, statusCode, "should return 202 Accepted")
-
-		helper.AwaitJobs(t, repo)
+		require.Error(t, result.Error(), "editor should not be able to create fixFolderMetadata job")
+		require.Equal(t, http.StatusForbidden, statusCode, "should return 403 Forbidden")
+		require.True(t, apierrors.IsForbidden(result.Error()), "error should be forbidden")
 	})
 
 	t.Run("viewer cannot create job", func(t *testing.T) {
