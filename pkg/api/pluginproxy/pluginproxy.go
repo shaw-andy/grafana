@@ -96,6 +96,11 @@ func (proxy *PluginProxy) HandleRequest() {
 			proxy.proxyPath = ""
 		}
 
+		if proxyutil.HasDotSegment(proxy.proxyPath) {
+			writeJSONErr(proxy.resp, proxy.req, http.StatusBadRequest, "plugin proxy path must not contain dot segments", nil)
+			return
+		}
+
 		proxy.matchedRoute = route
 		break
 	}

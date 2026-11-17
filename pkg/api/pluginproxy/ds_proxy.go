@@ -116,6 +116,11 @@ func newHTTPClient() httpClient {
 }
 
 func (proxy *DataSourceProxy) HandleRequest() {
+	if proxyutil.HasDotSegment(proxy.proxyPath) {
+		writeJSONErr(proxy.ctx.Resp, proxy.ctx.Req, http.StatusBadRequest, "data source proxy path must not contain dot segments", nil)
+		return
+	}
+
 	if err := proxy.validateRequest(); err != nil {
 		writeJSONErr(proxy.ctx.Resp, proxy.ctx.Req, 403, err.Error(), nil)
 		return

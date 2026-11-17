@@ -115,6 +115,70 @@ func ApplyUserHeader(sendUserHeader bool, req *http.Request, user identity.Reque
 	}
 }
 
+// HasDotSegment reports whether p contains a "." or ".." path segment, either
+// as given or after any number of rounds of percent-decoding. A proxy path that
+// is appended to a configured upstream URL path must not contain dot segments,
+// or the upstream can resolve the request outside that path.
+//
+// Backslashes and ";" path parameters are treated as segment boundaries because
+// some upstream servers normalize them that way.
+func HasDotSegment(p string) bool {
+	for {
+		if containsDotSegment(p) {
+			return true
+		}
+		decoded := lenientPathUnescape(p)
+		if decoded == p {
+			return false
+		}
+		p = decoded
+	}
+}
+
+func containsDotSegment(p string) bool {
+	for _, segment := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
+		segment, _, _ = strings.Cut(segment, ";")
+		if segment == "." || segment == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+// lenientPathUnescape decodes every valid %XX escape and keeps invalid ones
+// as-is, so a stray "%" cannot hide escapes that follow it.
+func lenientPathUnescape(s string) string {
+	if !strings.Contains(s, "%") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) && isHex(s[i+1]) && isHex(s[i+2]) {
+			b.WriteByte(unhex(s[i+1])<<4 | unhex(s[i+2]))
+			i += 2
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+func isHex(c byte) bool {
+	return ('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F')
+}
+
+func unhex(c byte) byte {
+	switch {
+	case '0' <= c && c <= '9':
+		return c - '0'
+	case 'a' <= c && c <= 'f':
+		return c - 'a' + 10
+	default:
+		return c - 'A' + 10
+	}
+}
+
 func ApplyForwardIDHeader(req *http.Request, user identity.Requester) {
 	if user == nil || user.IsNil() {
 		return
