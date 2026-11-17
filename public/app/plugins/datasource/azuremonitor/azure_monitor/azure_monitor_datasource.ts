@@ -28,7 +28,7 @@ import {
   type Subscription,
   TablePlan,
 } from '../types/types';
-import { fetchAllArmPages, replaceTemplateVariables, routeNames } from '../utils/common';
+import { fetchAllArmPages, replaceTemplateVariables, resourceUriToPath, routeNames } from '../utils/common';
 import migrateQuery from '../utils/migrateQuery';
 
 import ResponseParser from './response_parser';
@@ -230,7 +230,7 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
       this.templateSrv,
       region
     );
-    return this.getResource(url)
+    return this.getResource(url, undefined, { validatePath: true })
       .then((result: AzureAPIResponse<MetricNamespace>) => {
         if (custom) {
           result.value = result.value.filter((namespace) => namespace.classification === 'Custom');
@@ -284,7 +284,7 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
       region,
       this.batchAPIEnabled
     );
-    return this.getResource(url).then((result: AzureAPIResponse<Metric>) => {
+    return this.getResource(url, undefined, { validatePath: true }).then((result: AzureAPIResponse<Metric>) => {
       return ResponseParser.parseResponseValues(result, 'name.localizedValue', 'name.value');
     });
   }
@@ -304,9 +304,11 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
       region,
       this.batchAPIEnabled
     );
-    return this.getResource(url).then((result: AzureMonitorMetricsMetadataResponse) => {
-      return ResponseParser.parseMetadata(result, this.templateSrv.replace(metricName));
-    });
+    return this.getResource(url, undefined, { validatePath: true }).then(
+      (result: AzureMonitorMetricsMetadataResponse) => {
+        return ResponseParser.parseMetadata(result, this.templateSrv.replace(metricName));
+      }
+    );
   }
 
   private validateDatasource(): DatasourceValidationResult | undefined {
@@ -350,7 +352,7 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
       this.templateSrv.replace(workspaceUri),
       this.templateSrv.replace(tableName)
     );
-    const tableResult = await this.getResource<GetLogAnalyticsTableResponse>(url);
+    const tableResult = await this.getResource<GetLogAnalyticsTableResponse>(url, undefined, { validatePath: true });
 
     if (!tableResult || instanceOfLogAnalyticsTableError(tableResult)) {
       return TablePlan.Analytics;
@@ -376,7 +378,9 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
 
   async getProvider(providerName: string) {
     return await this.getResource<AzureMonitorProvidersResponse>(
-      `${routeNames.azureMonitor}/providers/${providerName}?api-version=${this.providerApiVersion}`
+      `${routeNames.azureMonitor}/providers/${resourceUriToPath(providerName)}?api-version=${this.providerApiVersion}`,
+      undefined,
+      { validatePath: true }
     );
   }
 
@@ -385,9 +389,11 @@ export default class AzureMonitorDatasource extends DataSourceWithBackend<
     for (const subscription of subscriptions) {
       const subLocations = ResponseParser.parseLocations(
         await this.getResource<AzureAPIResponse<Location>>(
-          `${routeNames.azureMonitor}/subscriptions/${this.templateSrv.replace(subscription)}/locations?api-version=${
+          `${routeNames.azureMonitor}/subscriptions/${resourceUriToPath(this.templateSrv.replace(subscription))}/locations?api-version=${
             this.locationsApiVersion
-          }`
+          }`,
+          undefined,
+          { validatePath: true }
         )
       );
       for (const location of subLocations) {

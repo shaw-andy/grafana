@@ -2,6 +2,7 @@ import { type TemplateSrv } from '@grafana/runtime';
 
 import { type AzureMonitorResource } from '../dataquery.gen';
 import { type GetMetricNamespacesQuery, type GetMetricNamesQuery } from '../types/types';
+import { resourceUriToPath } from '../utils/common';
 
 export default class UrlBuilder {
   static buildResourceUri(templateSrv: TemplateSrv, resource: AzureMonitorResource, multipleResources?: boolean) {
@@ -69,7 +70,7 @@ export default class UrlBuilder {
       });
     }
 
-    return `${baseUrl}${resourceUri}/providers/microsoft.insights/metricNamespaces?api-version=${apiVersion}${
+    return `${baseUrl}${resourceUriToPath(resourceUri)}/providers/microsoft.insights/metricNamespaces?api-version=${apiVersion}${
       region ? `&region=${region}` : globalRegion ? '&region=global' : ''
     }`;
   }
@@ -105,7 +106,7 @@ export default class UrlBuilder {
         multipleResources
       );
     }
-    let url = `${baseUrl}${resourceUri}/providers/microsoft.insights/metricdefinitions?api-version=${apiVersion}`;
+    let url = `${baseUrl}${resourceUriToPath(resourceUri)}/providers/microsoft.insights/metricdefinitions?api-version=${apiVersion}`;
     if (customNamespace) {
       url += `&metricnamespace=${encodeURIComponent(customNamespace)}`;
     }
@@ -127,6 +128,6 @@ export default class UrlBuilder {
     tableName: string,
     apiVersion = '2025-02-01'
   ) {
-    return `${baseUrl}${resourceUri}/tables/${tableName}?api-version=${apiVersion}`;
+    return `${baseUrl}${resourceUriToPath(resourceUri)}/tables/${encodeURIComponent(tableName)}?api-version=${apiVersion}`;
   }
 }
