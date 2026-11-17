@@ -35,6 +35,11 @@ type State struct {
 	// returns an error instead of proceeding. A value of 0 disables the limit.
 	MemoryLimit int64
 
+	// budget bounds the series this evaluation allocates, intermediates
+	// included. allocated is what it has allocated so far.
+	budget    *MemoryBudget
+	allocated int64
+
 	tracer tracing.Tracer
 }
 
@@ -65,6 +70,25 @@ func WithMemoryLimit(limit int64) ExecuteOption {
 	return func(s *State) {
 		s.MemoryLimit = limit
 	}
+}
+
+// WithMemoryBudget refuses to allocate a series once the series this
+// evaluation has allocated would no longer fit in what remains of budget.
+// A nil budget has no limit.
+func WithMemoryBudget(budget *MemoryBudget) ExecuteOption {
+	return func(s *State) {
+		s.budget = budget
+	}
+}
+
+// reserve accounts for bytes about to be allocated by this evaluation, or
+// returns an error when they do not fit in the remaining budget.
+func (e *State) reserve(bytes int64) error {
+	if err := e.budget.Check(e.RefID, e.allocated+bytes); err != nil {
+		return err
+	}
+	e.allocated += bytes
+	return nil
 }
 
 // Execute applies a parse expression to the context and executes it
@@ -162,6 +186,9 @@ func (e *State) walkUnary(node *parse.UnaryNode) (Results, error) {
 }
 
 func (e *State) unarySeries(s Series, op string) (Series, error) {
+	if err := e.reserve(EstimateSeriesBytes(s.Len())); err != nil {
+		return Series{}, err
+	}
 	newSeries := NewSeries(e.RefID, s.GetLabels(), s.Len())
 	for i := range s.Len() {
 		t, f := s.GetPoint(i)
@@ -691,6 +718,9 @@ func (e *State) biScalarNumber(labels data.Labels, op string, number Number, sca
 }
 
 func (e *State) biSeriesNumber(labels data.Labels, op string, s Series, scalarVal *float64, seriesFirst bool) (Series, error) {
+	if err := e.reserve(EstimateSeriesBytes(s.Len())); err != nil {
+		return Series{}, err
+	}
 	newSeries := NewSeries(e.RefID, labels, s.Len())
 	var err error
 	for i := range s.Len() {
@@ -717,6 +747,9 @@ func (e *State) biSeriesNumber(labels data.Labels, op string, s Series, scalarVa
 // biSeriesSeries performs a the binary operation for each value in the two series where the times
 // are equal. If there are datapoints in A or B that do not share a time, they will be dropped.
 func (e *State) biSeriesSeries(labels data.Labels, op string, aSeries, bSeries Series) (Series, error) {
+	if err := e.reserve(EstimateSeriesBytes(aSeries.Len()) + int64(bSeries.Len())*bytesPerBPoint); err != nil {
+		return Series{}, err
+	}
 	bPoints := make(map[string]*float64)
 	for i := range bSeries.Len() {
 		t, f := bSeries.GetPoint(i)

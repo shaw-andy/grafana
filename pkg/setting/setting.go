@@ -561,7 +561,9 @@ type Cfg struct {
 	// MathExpressionMemoryLimit is the maximum estimated memory (in bytes) for a
 	// single math expression binary operation. Memory usage is estimated before
 	// the expression runs. When the estimate exceeds this limit, evaluation fails
-	// with a descriptive error. A value of 0 disables the limit. Default: 1 GiB.
+	// with a descriptive error. It also bounds the total estimated output of all
+	// expression nodes in one pipeline execution, since every node's result is
+	// kept until the pipeline finishes. A value of 0 disables the limit. Default: 1 GiB.
 	MathExpressionMemoryLimit int64
 
 	ImageUploadProvider string
