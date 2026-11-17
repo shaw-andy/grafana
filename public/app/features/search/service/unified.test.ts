@@ -265,6 +265,96 @@ describe('Unified Storage Searcher', () => {
       expect(findStarredSearchRequest()).toBeUndefined();
     });
   });
+
+  // A dashboards link can carry these values. The page decodes them, then the
+  // search client must keep each value inside its own query parameter. An
+  // unencoded "&" becomes a second parameter on the same-origin search request.
+  describe('filter values stay inside their own query parameter', () => {
+    const injected = 'x&orgId=2';
+    let searchRequests: URL[] = [];
+
+    const captureSearchHandler = http.get(searchRoute, ({ request }) => {
+      searchRequests.push(new URL(request.url));
+      return HttpResponse.json({ totalHits: 0, hits: [] });
+    });
+
+    beforeEach(() => {
+      searchRequests = [];
+      server.use(captureSearchHandler);
+    });
+
+    const requestWith = (name: string) => searchRequests.find((url) => url.searchParams.has(name));
+
+    it.each([
+      { field: 'panel_type', param: 'panelType' },
+      { field: 'location', param: 'folder' },
+      { field: 'ds_type', param: 'dataSourceType' },
+      { field: 'permission', param: 'permission' },
+    ] as const)('keeps $field in $param and does not add orgId', async ({ field, param }) => {
+      const searcher = new UnifiedSearcher();
+      await searcher.search({ query: '*', [field]: injected });
+
+      const request = requestWith(param) ?? requestWith('orgId');
+      expect(request).toBeDefined();
+      expect(request!.searchParams.get('orgId')).toBeNull();
+      expect(request!.searchParams.get(param)).toBe(injected);
+    });
+
+    it('keeps each kind inside its type parameter and does not add orgId', async () => {
+      const searcher = new UnifiedSearcher();
+      await searcher.search({ query: '*', kind: [injected, 'folder'] });
+
+      // The searcher also loads folder location info with type=folder and no query.
+      const request = searchRequests.find((url) => url.searchParams.has('query'));
+      expect(request).toBeDefined();
+      expect(request!.searchParams.get('orgId')).toBeNull();
+      expect(request!.searchParams.getAll('type')).toEqual([injected, 'folder']);
+    });
+
+    it('does not let an unknown sort value add orgId', async () => {
+      const searcher = new UnifiedSearcher();
+      await searcher.search({ query: '*', sort: injected });
+
+      const request = requestWith('sort') ?? requestWith('field') ?? requestWith('orgId');
+      expect(request).toBeDefined();
+      expect(request!.searchParams.get('orgId')).toBeNull();
+      const sort = request!.searchParams.get('sort');
+      const field = request!.searchParams.get('field');
+      // Unknown sorts are either omitted or sent as one encoded value.
+      expect(sort === null || sort === injected).toBe(true);
+      expect(field === null || field === injected).toBe(true);
+    });
+
+    it('does not treat a known sort prefix as a safe sort value', async () => {
+      const searcher = new UnifiedSearcher();
+      await searcher.search({ query: '*', sort: 'alpha-desc&orgId=2' });
+
+      const request = requestWith('sort') ?? requestWith('orgId');
+      expect(request).toBeDefined();
+      expect(request!.searchParams.get('orgId')).toBeNull();
+      const sort = request!.searchParams.get('sort');
+      expect(sort === null || sort === 'alpha-desc&orgId=2').toBe(true);
+    });
+
+    it('keeps the free-text query inside the tag facet request', async () => {
+      const searcher = new UnifiedSearcher();
+      await searcher.tags({ query: 'hello&orgId=2' });
+
+      const request = searchRequests.find((url) => url.searchParams.get('facet') === 'tags') ?? requestWith('orgId');
+      expect(request).toBeDefined();
+      expect(request!.searchParams.get('orgId')).toBeNull();
+      expect(request!.searchParams.get('query')).toBe('hello&orgId=2');
+    });
+
+    it('keeps an ampersand in the free-text query on the dashboard search', async () => {
+      const searcher = new UnifiedSearcher();
+      await searcher.search({ query: 'hello&orgId=2' });
+
+      const request = searchRequests.find((url) => url.searchParams.get('query') === 'hello&orgId=2');
+      expect(request).toBeDefined();
+      expect(request!.searchParams.get('orgId')).toBeNull();
+    });
+  });
 });
 
 describe('toDashboardResults', () => {

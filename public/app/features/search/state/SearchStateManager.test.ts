@@ -267,4 +267,83 @@ describe('SearchStateManager', () => {
       expect(stm.state.sort).toBe('-name_sort');
     });
   });
+
+  describe('dashboards address filters', () => {
+    let searchRequests: URL[] = [];
+
+    beforeEach(() => {
+      jest.useRealTimers();
+      localStorage.clear();
+      searchRequests = [];
+      server.use(
+        http.get(searchRoute, ({ request }) => {
+          searchRequests.push(new URL(request.url));
+          return HttpResponse.json({ totalHits: 0, hits: [] });
+        })
+      );
+    });
+
+    afterEach(() => {
+      locationService.push('/');
+      localStorage.clear();
+    });
+
+    const openDashboards = (search: string) => {
+      locationService.push({ pathname: '/dashboards', search });
+    };
+
+    const dashboardSearch = () =>
+      searchRequests.find(
+        (url) => url.searchParams.get('facet') !== 'tags' && url.searchParams.get('limit') !== '100000'
+      );
+
+    it('does not turn a panel_type from the address into an orgId on the search request', async () => {
+      openDashboards('?panel_type=' + encodeURIComponent('timeseries&orgId=2'));
+      const stm = createSearchStateManager();
+      await stm.initStateFromUrl();
+
+      await waitFor(() => expect(dashboardSearch()).toBeDefined());
+      const request = dashboardSearch()!;
+      expect(request.searchParams.get('orgId')).toBeNull();
+      expect(request.searchParams.get('panelType')).toBe('timeseries&orgId=2');
+    });
+
+    it('does not turn a sort from the address into an orgId when the list layout is saved', async () => {
+      store.set(SEARCH_SELECTED_LAYOUT, SearchLayout.List);
+      openDashboards('?sort=' + encodeURIComponent('not-a-sort&orgId=2'));
+      const stm = createSearchStateManager();
+      await stm.initStateFromUrl();
+
+      await waitFor(() => expect(dashboardSearch()).toBeDefined());
+      const request = dashboardSearch()!;
+      expect(request.searchParams.get('orgId')).toBeNull();
+      const sort = request.searchParams.get('sort');
+      expect(sort === null || sort === 'not-a-sort&orgId=2').toBe(true);
+    });
+
+    it('does not turn a folder uid from the address into an orgId on the search request', async () => {
+      openDashboards('?query=hello');
+      const stm = createSearchStateManager();
+      await stm.initStateFromUrl('folder&orgId=2');
+
+      await waitFor(() => expect(dashboardSearch()).toBeDefined());
+      const request = dashboardSearch()!;
+      expect(request.searchParams.get('orgId')).toBeNull();
+      expect(request.searchParams.get('folder')).toBe('folder&orgId=2');
+    });
+
+    it('does not turn the free-text query into an orgId on the tag facet request', async () => {
+      openDashboards('?query=' + encodeURIComponent('hello&orgId=2') + '&tag=ops');
+      const stm = createSearchStateManager();
+      const searchDone = stm.initStateFromUrl();
+      await searchDone;
+      const tags = await stm.getTagOptions();
+
+      const facet = searchRequests.find((url) => url.searchParams.get('facet') === 'tags');
+      expect(facet).toBeDefined();
+      expect(facet!.searchParams.get('orgId')).toBeNull();
+      expect(facet!.searchParams.get('query')).toBe('hello&orgId=2');
+      expect(tags).toEqual([]);
+    });
+  });
 });
