@@ -1,8 +1,9 @@
 import { uniq } from 'lodash';
 
 import { AzureCloud, getDefaultAzureCloud } from '@grafana/azure-sdk';
-import { DataSourceWithBackend, reportInteraction } from '@grafana/runtime';
+import { reportInteraction } from '@grafana/runtime';
 
+import AzureDataSourceWithBackend from '../AzureDataSourceWithBackend';
 import { logsResourceTypes } from '../azureMetadata/logsResourceTypes';
 import { resourceTypeDisplayNames, resourceTypes } from '../azureMetadata/resourceTypes';
 import type AzureMonitorDatasource from '../azure_monitor/azure_monitor_datasource';
@@ -17,10 +18,8 @@ import {
 } from '../components/ResourcePicker/utils';
 import { getCredentials } from '../credentials';
 import { type AzureMonitorResource } from '../dataquery.gen';
-import { type AzureMonitorQuery } from '../types/query';
 import {
   type AzureMonitorDataSourceInstanceSettings,
-  type AzureMonitorDataSourceJsonData,
   type AzureResourceSummaryItem,
   type RawAzureResourceItem,
   type ResourceGraphFilters,
@@ -30,10 +29,7 @@ const logsSupportedResourceTypesKusto = logsResourceTypes.map((v) => `"${v}"`).j
 
 export type ResourcePickerQueryType = 'logs' | 'metrics' | 'traces';
 
-export default class ResourcePickerData extends DataSourceWithBackend<
-  AzureMonitorQuery,
-  AzureMonitorDataSourceJsonData
-> {
+export default class ResourcePickerData extends AzureDataSourceWithBackend {
   resultLimit = 200;
   azureMonitorDatasource;
   azureResourceGraphDatasource;

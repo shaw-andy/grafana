@@ -48,6 +48,22 @@ export const routeNames = {
 
 export const MAX_ARM_PAGES = 50;
 
+const RESOURCE_PATH_ROOTS = ['a', 'b'];
+
+// Browsers resolve dot segments (including percent-encoded and backslash forms) before sending a
+// request, so a resource path that climbs above the resources route reaches other same-origin
+// Grafana endpoints with the viewer's session. Resolving against two differently named roots means a
+// path that climbs out and re-enters by name cannot stay under both.
+export function assertResourcePathContained(path: string): string {
+  const contained = RESOURCE_PATH_ROOTS.every((root) =>
+    new URL(path, `http://resource.invalid/${root}/`).pathname.startsWith(`/${root}/`)
+  );
+  if (!contained) {
+    throw new Error('Azure Monitor resource path must stay within the data source resource route');
+  }
+  return path;
+}
+
 export function nextLinkToPath(prefix: string, nextLink: string): string {
   const { pathname, search } = new URL(nextLink);
   return `${prefix}${pathname}${search}`;

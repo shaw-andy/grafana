@@ -12,8 +12,9 @@ import {
   type QueryFixAction,
   type ScopedVars,
 } from '@grafana/data';
-import { DataSourceWithBackend, getTemplateSrv, type TemplateSrv } from '@grafana/runtime';
+import { getTemplateSrv, type TemplateSrv } from '@grafana/runtime';
 
+import AzureDataSourceWithBackend from './AzureDataSourceWithBackend';
 import AzureLogAnalyticsDatasource from './azure_log_analytics/azure_log_analytics_datasource';
 import AzureMonitorDatasource from './azure_monitor/azure_monitor_datasource';
 import AzureResourceGraphDatasource from './azure_resource_graph/azure_resource_graph_datasource';
@@ -25,7 +26,7 @@ import migrateAnnotation from './utils/migrateAnnotation';
 import migrateQuery from './utils/migrateQuery';
 import { VariableSupport } from './variables';
 
-export default class Datasource extends DataSourceWithBackend<AzureMonitorQuery, AzureMonitorDataSourceJsonData> {
+export default class Datasource extends AzureDataSourceWithBackend {
   annotations = {
     prepareAnnotation: migrateAnnotation,
   };

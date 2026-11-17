@@ -20,6 +20,8 @@ import { type AzureMonitorQuery } from './types/query';
 import { type RawAzureResourceItem } from './types/types';
 import messageFromError from './utils/messageFromError';
 
+const INVALID_PATH_SEGMENT_CHARS = /[/\\?#%\t\n\r]/;
+
 function parseResourceNamesAsTemplateVariable(resources: RawAzureResourceItem[], metricNamespace?: string) {
   return resources.map((r) => {
     if (startsWith(metricNamespace?.toLowerCase(), 'microsoft.storage/storageaccounts/')) {
@@ -51,11 +53,33 @@ export class VariableSupport extends CustomVariableSupport<DataSource, AzureMoni
     return values.every((v) => !!this.templateSrv.replace(v));
   }
 
+  // Subscriptions and resource groups are placed into resource URLs as single path segments, where a
+  // separator, query, fragment or dot segment would move the request off the data source resource route.
+  private assertPathSegments(...values: Array<string | undefined>) {
+    for (const value of values) {
+      const segments = this.templateSrv.replace(value ?? '', undefined, 'raw').split(',');
+      for (const segment of segments) {
+        const trimmed = segment.trim();
+        if (INVALID_PATH_SEGMENT_CHARS.test(segment) || trimmed === '.' || trimmed === '..') {
+          throw new Error('Subscription and resource group values must be single resource path segments');
+        }
+      }
+    }
+  }
+
   query(request: DataQueryRequest<AzureMonitorQuery>): Observable<DataQueryResponse> {
     const promisedResults = async () => {
       const queryObj = await migrateQuery(request.targets[0], { datasource: this.datasource });
 
       try {
+        const legacyQuery = queryObj.grafanaTemplateVariableFn;
+        this.assertPathSegments(
+          queryObj.subscription,
+          queryObj.resourceGroup,
+          legacyQuery && 'subscription' in legacyQuery ? legacyQuery.subscription : undefined,
+          legacyQuery && 'resourceGroup' in legacyQuery ? legacyQuery.resourceGroup : undefined
+        );
+
         switch (queryObj.queryType) {
           case AzureQueryType.SubscriptionsQuery:
             const res = await this.datasource.getSubscriptions();

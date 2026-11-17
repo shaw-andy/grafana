@@ -2,14 +2,14 @@ import { map } from 'lodash';
 
 import { type AzureCredentials } from '@grafana/azure-sdk';
 import { type ScopedVars } from '@grafana/data';
-import { DataSourceWithBackend, getTemplateSrv, type TemplateSrv } from '@grafana/runtime';
+import { getTemplateSrv, type TemplateSrv } from '@grafana/runtime';
 
+import AzureDataSourceWithBackend from '../AzureDataSourceWithBackend';
 import ResponseParser from '../azure_monitor/response_parser';
 import { getCredentials } from '../credentials';
 import { AzureQueryType } from '../dataquery.gen';
 import { type AzureMonitorQuery } from '../types/query';
 import {
-  type AzureMonitorDataSourceJsonData,
   type AzureMonitorDataSourceInstanceSettings,
   type AzureAPIResponse,
   type AzureLogsVariable,
@@ -21,10 +21,7 @@ import { fetchAllArmPages, interpolateVariable, routeNames } from '../utils/comm
 
 import { transformMetadataToKustoSchema } from './utils';
 
-export default class AzureLogAnalyticsDatasource extends DataSourceWithBackend<
-  AzureMonitorQuery,
-  AzureMonitorDataSourceJsonData
-> {
+export default class AzureLogAnalyticsDatasource extends AzureDataSourceWithBackend {
   readonly credentials: AzureCredentials;
   resourcePath: string;
   declare applicationId: string;
@@ -75,7 +72,7 @@ export default class AzureLogAnalyticsDatasource extends DataSourceWithBackend<
   }
 
   async getWorkspaces(subscription: string): Promise<AzureLogsVariable[]> {
-    const subscriptionId = this.templateSrv.replace(subscription || this.defaultSubscriptionId);
+    const subscriptionId = encodeURIComponent(this.templateSrv.replace(subscription || this.defaultSubscriptionId));
 
     const workspaceListUrl =
       this.azureMonitorPath +

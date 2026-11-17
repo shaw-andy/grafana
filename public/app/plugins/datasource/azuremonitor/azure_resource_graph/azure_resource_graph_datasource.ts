@@ -1,8 +1,9 @@
 import { filter, find, includes, startsWith } from 'lodash';
 
 import { type ScopedVars } from '@grafana/data';
-import { DataSourceWithBackend, getTemplateSrv, type TemplateSrv } from '@grafana/runtime';
+import { getTemplateSrv, type TemplateSrv } from '@grafana/runtime';
 
+import AzureDataSourceWithBackend from '../AzureDataSourceWithBackend';
 import { resourceTypes } from '../azureMetadata/resourceTypes';
 import { ARGScope, AzureQueryType } from '../dataquery.gen';
 import { createFilter } from '../resourcePicker/resourcePickerData';
@@ -11,7 +12,6 @@ import {
   type AzureGetResourceNamesQuery,
   type AzureGraphResponse,
   type AzureMonitorDataSourceInstanceSettings,
-  type AzureMonitorDataSourceJsonData,
   type AzureResourceGraphOptions,
   type RawAzureResourceGroupItem,
   type RawAzureResourceItem,
@@ -20,10 +20,7 @@ import {
 } from '../types/types';
 import { interpolateVariable, replaceTemplateVariables, routeNames } from '../utils/common';
 
-export default class AzureResourceGraphDatasource extends DataSourceWithBackend<
-  AzureMonitorQuery,
-  AzureMonitorDataSourceJsonData
-> {
+export default class AzureResourceGraphDatasource extends AzureDataSourceWithBackend {
   resourcePath: string;
   resourceGraphURL = '/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01';
   constructor(
