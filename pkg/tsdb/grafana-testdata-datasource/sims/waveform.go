@@ -49,8 +49,8 @@ func (s *waveformSim) NewFrame(size int) *data.Frame {
 
 func (s *waveformSim) GetValues(t time.Time) map[string]any {
 	x := 0.0
-	if s.cfg.Period > 0 {
-		periodMS := s.cfg.Period * 1000
+	periodMS := s.cfg.Period * 1000
+	if int64(periodMS) > 0 {
 		ms := t.UnixMilli() % int64(periodMS)
 		x = ((float64(ms) / periodMS) * 2 * math.Pi) // 0 >> 2Pi
 	}

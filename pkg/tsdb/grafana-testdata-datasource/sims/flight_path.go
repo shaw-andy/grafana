@@ -115,9 +115,11 @@ func newFlightSimInfo() simulationInfo {
 }
 
 func (f *flightConfig) getNextPoint(t time.Time) flightDataPoint {
-	periodNS := int64(f.Period * float64(time.Second))
-	ms := t.UnixNano() % periodNS
-	per := float64(ms) / float64(periodNS)
+	per := 0.0
+	if periodNS := int64(f.Period * float64(time.Second)); periodNS > 0 {
+		ms := t.UnixNano() % periodNS
+		per = float64(ms) / float64(periodNS)
+	}
 	rad := per * 2.0 * math.Pi // 0 >> 2Pi
 	delta := f.AltitudeMax - f.AltitudeMin
 
