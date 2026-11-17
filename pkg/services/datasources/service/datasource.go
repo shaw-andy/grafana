@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +48,10 @@ const (
 
 var (
 	_ queryV0.DataSourceConnectionProvider = (*Service)(nil)
+
+	// The type is interpolated into plugin URL paths (for example /api/plugins/<type>/dashboards),
+	// so it must not contain path separators, dot segments, or URL delimiters.
+	validDatasourceType = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 )
 
 type Service struct {
@@ -447,6 +452,10 @@ func (s *Service) prepareInstanceSettings(ctx context.Context, settings *backend
 		return settings, nil // NOOP used in tests
 	}
 
+	if !validDatasourceType.MatchString(settings.Type) {
+		return nil, datasources.ErrDataSourceTypeInvalid.Errorf("type may only contain letters, digits, '-' and '_'")
+	}
+
 	// Make sure it is a known plugin type
 	p, found := s.pluginStore.Plugin(ctx, settings.Type)
 	if !found {
@@ -601,7 +610,7 @@ func (s *Service) decryptSecureJsonDataFn(ctx context.Context) func(ds *datasour
 func (s *Service) UpdateDataSource(ctx context.Context, cmd *datasources.UpdateDataSourceCommand) (*datasources.DataSource, error) {
 	var dataSource *datasources.DataSource
 
-	return dataSource, s.db.InTransaction(ctx, func(ctx context.Context) error {
+	err := s.db.InTransaction(ctx, func(ctx context.Context) error {
 		var err error
 
 		query := &datasources.GetDataSourceQuery{
@@ -719,6 +728,10 @@ func (s *Service) UpdateDataSource(ctx context.Context, cmd *datasources.UpdateD
 		dataSource, err = s.SQLStore.UpdateDataSource(ctx, cmd)
 		return err
 	})
+	if err != nil {
+		return nil, err
+	}
+	return dataSource, nil
 }
 
 func (s *Service) GetHTTPTransport(ctx context.Context, ds *datasources.DataSource, provider httpclient.Provider,

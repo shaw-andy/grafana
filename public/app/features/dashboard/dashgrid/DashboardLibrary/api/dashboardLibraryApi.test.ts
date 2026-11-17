@@ -319,6 +319,7 @@ describe('dashboardLibraryApi', () => {
 
       expect(mockGet).toHaveBeenCalledWith('api/plugins/prometheus/dashboards', undefined, undefined, {
         showErrorAlert: false,
+        validatePath: true,
       });
       expect(result).toEqual(mockDashboards);
     });
