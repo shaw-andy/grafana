@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
+	claims "github.com/grafana/authlib/types"
 	iamv0alpha1 "github.com/grafana/grafana/apps/iam/pkg/apis/iam/v0alpha1"
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
@@ -619,7 +620,7 @@ func (s *UserK8sService) GetSignedInUser(ctx context.Context, cmd *user.GetSigne
 		return nil, lookupErr
 	}
 
-	return toSignedInUser(found, orgID), nil
+	return toSignedInUser(found, orgID, namespace), nil
 }
 
 func (s *UserK8sService) Search(ctx context.Context, cmd *user.SearchUsersQuery) (*user.SearchUserQueryResult, error) {
@@ -844,7 +845,11 @@ func (s *UserK8sService) getByFieldSelector(ctx context.Context, logger log.Logg
 	return toUser(found, orgID), nil
 }
 
-func toSignedInUser(u *iamv0alpha1.User, orgID int64) *user.SignedInUser {
+// toSignedInUser only attaches Spec.Role when the namespace the user was read
+// from is the namespace of orgID. Spec.Role is the user's role in the
+// namespace's organization, and a stack namespace serves every orgID while
+// always parsing as organization 1.
+func toSignedInUser(u *iamv0alpha1.User, orgID int64, namespace string) *user.SignedInUser {
 	userID := getUserID(u)
 
 	signedInUser := &user.SignedInUser{
@@ -861,7 +866,8 @@ func toSignedInUser(u *iamv0alpha1.User, orgID int64) *user.SignedInUser {
 	}
 
 	role := identity.RoleType(u.Spec.Role)
-	if role.IsValid() {
+	nsInfo, err := claims.ParseNamespace(namespace)
+	if err == nil && orgID > 0 && nsInfo.OrgID == orgID && role.IsValid() {
 		signedInUser.OrgRole = role
 	} else {
 		signedInUser.OrgID = -1
