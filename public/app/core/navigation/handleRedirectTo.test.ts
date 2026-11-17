@@ -138,4 +138,91 @@ describe('handleRedirectTo', () => {
     expect(window.location.replace).not.toHaveBeenCalled();
     expect(locationService.replace).toHaveBeenCalledWith('/d/test?orgId=1');
   });
+
+  // `new URL` is the resolution Chrome applies before it requests a location.replace target.
+  // A check of the raw string misses a parent segment that is still percent-encoded at that point.
+  function routesFromFullPageNavigation(appSubUrl: string): string[] {
+    return (window.location.replace as jest.Mock).mock.calls.map((call) => {
+      const pathname = new URL(String(call[0]), 'http://grafana.local').pathname;
+      if (appSubUrl && (pathname === appSubUrl || pathname.startsWith(`${appSubUrl}/`))) {
+        const rest = pathname.slice(appSubUrl.length);
+        return rest.startsWith('/') ? rest : `/${rest}`;
+      }
+      return pathname;
+    });
+  }
+
+  function signInFromLoginQuery(appSubUrl: string, query: string) {
+    locationUtil.initialize({
+      config: { appSubUrl } as GrafanaConfig,
+      getVariablesUrlParams: jest.fn(),
+      getTimeRangeForUrl: jest.fn(),
+    });
+
+    const replace = jest.fn();
+    const location = {
+      origin: 'http://grafana.local',
+      pathname: '/login',
+      replace,
+    };
+    Object.defineProperty(window, 'location', { configurable: true, value: location });
+
+    const mockLocationService = locationService as jest.Mocked<typeof locationService>;
+    mockLocationService.getSearch.mockReturnValue(new URLSearchParams(query));
+    contextSrv.user.isSignedIn = false;
+    contextSrv.user.orgId = 1;
+
+    handleRedirectTo();
+
+    mockLocationService.getSearch.mockReturnValue(new URLSearchParams());
+    contextSrv.user.isSignedIn = true;
+    location.pathname = '/';
+
+    handleRedirectTo();
+  }
+
+  describe('post-login full-page navigation', () => {
+    it.each([
+      ['parent segment then logout', 'redirectTo=%2Fgoto%2F..%2Flogout'],
+      ['nested parent segments then logout', 'redirectTo=%2Fgoto%2Ffoo%2F..%2F..%2Flogout'],
+      ['percent-encoded parent segment then logout', 'redirectTo=%2Fgoto%2F%252e%252e%2Flogout'],
+      ['parent segment then org switch', 'redirectTo=%2Fgoto%2F..%2Fprofile%2Fswitch-org%2F2'],
+      ['percent-encoded parent segment then org switch', 'redirectTo=%2Fgoto%2F%252e%252e%2Fprofile%2Fswitch-org%2F2'],
+      ['parent segment then auth token rotation', 'redirectTo=%2Fgoto%2F..%2Fuser%2Fauth-tokens%2Frotate'],
+    ])('does not request a state-changing route for a /goto/ %s', (_name, query) => {
+      signInFromLoginQuery('', query);
+
+      const routes = routesFromFullPageNavigation('');
+      // A full-page /goto/ navigation is only a short-url lookup. Anything else is a request
+      // the browser will send with the session cookie, including paths produced by dot removal.
+      for (const route of routes) {
+        expect(route).toMatch(/^\/goto\/[A-Za-z0-9_-]+$/);
+      }
+    });
+
+    it('still full-page navigates a single short-url key', () => {
+      signInFromLoginQuery('', 'redirectTo=%2Fgoto%2Fabc123');
+
+      expect(routesFromFullPageNavigation('')).toEqual(['/goto/abc123']);
+    });
+
+    it.each([
+      ['logout with a different orgId', 'redirectTo=%2Flogout%3ForgId%3D2', '/logout'],
+      [
+        'org switch with a different orgId',
+        'redirectTo=%2Fprofile%2Fswitch-org%2F2%3ForgId%3D2',
+        '/profile/switch-org/2',
+      ],
+    ])('does not full-page navigate to %s', (_name, query, forbidden) => {
+      signInFromLoginQuery('', query);
+
+      expect(routesFromFullPageNavigation('')).not.toContain(forbidden);
+    });
+
+    it('does not full-page navigate to logout when the app is served from a subpath', () => {
+      signInFromLoginQuery('/grafana', 'redirectTo=%2Fgoto%2F..%2Flogout');
+
+      expect(routesFromFullPageNavigation('/grafana')).not.toContain('/logout');
+    });
+  });
 });
