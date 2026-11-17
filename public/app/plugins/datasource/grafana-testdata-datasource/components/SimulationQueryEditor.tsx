@@ -50,11 +50,11 @@ export const SimulationQueryEditor = ({ onChange, query, ds }: EditorProps) => {
   }, [info.value, simKey?.type]);
 
   let config = useAsync(async () => {
-    let path = simKey.type + '/' + simKey.tick + 'hz';
+    let path = encodeURIComponent(simKey.type) + '/' + encodeURIComponent(String(simKey.tick)) + 'hz';
     if (simKey.uid) {
-      path += '/' + simKey.uid;
+      path += '/' + encodeURIComponent(simKey.uid);
     }
-    let config = (await ds.getResource('sim/' + path))?.config;
+    let config = (await ds.getResource('sim/' + path, undefined, { validatePath: true }))?.config;
     setCfgValue(config.value);
     return config;
   }, [simKey.type, simKey.tick, simKey.uid]);
