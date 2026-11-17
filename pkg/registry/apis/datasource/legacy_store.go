@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/apiserver/pkg/registry/rest"
 
+	"github.com/grafana/grafana/pkg/api/datasource/validation"
 	common "github.com/grafana/grafana/pkg/apimachinery/apis/common/v0alpha1"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
 	"github.com/grafana/grafana/pkg/apis/datasource/v0alpha1"
@@ -70,7 +71,11 @@ func (s *legacyStorage) List(ctx context.Context, options *internalversion.ListO
 			metricutil.ObserveWithExemplar(ctx, s.dsConfigHandlerRequestsDuration.WithLabelValues("legacyStorage.List"), time.Since(start).Seconds())
 		}()
 	}
-	return s.datasources.ListDataSources(ctx)
+	list, err := s.datasources.ListDataSources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return redactDataSourceListURLs(list), nil
 }
 
 func (s *legacyStorage) Get(ctx context.Context, name string, options *metav1.GetOptions) (runtime.Object, error) {
@@ -81,7 +86,37 @@ func (s *legacyStorage) Get(ctx context.Context, name string, options *metav1.Ge
 		}()
 	}
 
-	return s.datasources.GetDataSource(ctx, name)
+	ds, err := s.datasources.GetDataSource(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return redactDataSourceURL(ds), nil
+}
+
+// redactDataSourceURL removes userinfo that legacy or provisioned data sources may still have in their URL, since
+// the spec is visible to everyone who can read the data source.
+func redactDataSourceURL(ds *v0alpha1.DataSource) *v0alpha1.DataSource {
+	if ds != nil && validation.HasURLUserinfo(ds.Spec.URL()) {
+		ds.Spec.SetURL(validation.RedactURLUserinfo(ds.Spec.URL()))
+	}
+	return ds
+}
+
+func redactDataSourceListURLs(list *v0alpha1.DataSourceList) *v0alpha1.DataSourceList {
+	if list != nil {
+		for i := range list.Items {
+			redactDataSourceURL(&list.Items[i])
+		}
+	}
+	return list
+}
+
+func (s *legacyStorage) rejectURLUserinfo(ds *v0alpha1.DataSource) error {
+	if !validation.HasURLUserinfo(ds.Spec.URL()) {
+		return nil
+	}
+	return apierrors.NewInvalid(s.resourceInfo.GroupVersionKind().GroupKind(), ds.Name, field.ErrorList{
+		field.Forbidden(field.NewPath("spec", "url"), "must not contain a username or password, use secure values instead")})
 }
 
 // Create implements rest.Creater.
@@ -96,6 +131,9 @@ func (s *legacyStorage) Create(ctx context.Context, obj runtime.Object, createVa
 	ds, ok := obj.(*v0alpha1.DataSource)
 	if !ok {
 		return nil, fmt.Errorf("expected a datasource object")
+	}
+	if err := s.rejectURLUserinfo(ds); err != nil {
+		return nil, err
 	}
 
 	// Verify the secure value commands. While we're using dual writer, we can only support raw secret values and not references to secrets that already exist. This is because we need the raw values to write to the legacy store.
@@ -145,6 +183,9 @@ func (s *legacyStorage) Update(ctx context.Context, name string, objInfo rest.Up
 	ds, ok := obj.(*v0alpha1.DataSource)
 	if !ok {
 		return nil, false, fmt.Errorf("expected a datasource object")
+	}
+	if err := s.rejectURLUserinfo(ds); err != nil {
+		return nil, false, err
 	}
 
 	oldDS, ok := old.(*v0alpha1.DataSource)
