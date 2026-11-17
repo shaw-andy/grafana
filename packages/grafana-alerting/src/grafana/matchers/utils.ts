@@ -1,7 +1,6 @@
 import memoize from 'micro-memoize';
 
-import { parseFlags } from '@grafana/data';
-
+import { type CompiledRegex, compileRegex } from './regex';
 import { type Label, type LabelMatcher } from './types';
 
 type LabelMatchingResult = {
@@ -97,8 +96,10 @@ export function matchIndexedLabels(matchers: LabelMatcher[], indexedLabels: Inde
  *
  * This is the same answer as checking the matcher against every label in order, because a matcher
  * can only ever accept a label that carries its own name. Labels with a different name are skipped
- * without running the operator, so an invalid regular expression still only throws when the label
- * set actually carries that name.
+ * without running the operator.
+ *
+ * A matcher whose regular expression is invalid or too expensive accepts no label, the same as it
+ * counts as not matching in isLabelMatchInSet, so one bad matcher cannot abort a whole route tree.
  */
 function findMatchingLabelIndex(matcher: LabelMatcher, indexedLabels: IndexedLabels): number {
   const indices = indexedLabels.indicesByName.get(matcher.label);
@@ -107,10 +108,14 @@ function findMatchingLabelIndex(matcher: LabelMatcher, indexedLabels: IndexedLab
   }
 
   const matchFunction = OperatorFunctions[matcher.type];
-  for (const index of indices) {
-    if (matchFunction(indexedLabels.labels[index][1], matcher.value)) {
-      return index;
+  try {
+    for (const index of indices) {
+      if (matchFunction(indexedLabels.labels[index][1], matcher.value)) {
+        return index;
+      }
     }
+  } catch (err) {
+    return -1;
   }
 
   return -1;
@@ -156,8 +161,8 @@ function isLabelMatchInSet(matcher: LabelMatcher, indexedLabels: IndexedLabels):
 
   const matchFunction = OperatorFunctions[type];
   try {
-    // This can throw because the regex operators use the JavaScript regex engine
-    // and "new RegExp()" throws on invalid regular expressions.
+    // This can throw because the regex operators throw on invalid regular expressions, and on
+    // evaluations that run past their step budget.
     //
     // This is usually a user-error (because matcher values are taken from user input)
     return matchFunction(labelValue, value);
@@ -174,28 +179,23 @@ function isLabelMatchInSet(matcher: LabelMatcher, indexedLabels: IndexedLabels):
 //
 // Values that don't compile throw and are not cached. Callers above decide what to do with that,
 // and recompiling a broken value is the rare path.
+//
+// Never hand matcher values to the JavaScript RegExp engine: it backtracks, and a value such as
+// "(a+)+$" would hang the page (or the route matching worker) on an ordinary label.
 const compileAnchoredRegex = memoize(
-  (matcherValue: string): RegExp => {
+  (matcherValue: string): CompiledRegex => {
     // At the time of writing, Alertmanager compiles to another (anchored) Regular Expression,
     // so we should also anchor our UI matches for consistency with this behaviour
     // https://github.com/prometheus/alertmanager/blob/fd37ce9c95898ca68be1ab4d4529517174b73c33/pkg/labels/matcher.go#L69
-    const valueWithFlagsParsed = parseFlags(`^(?:${matcherValue})$`);
-    return new RegExp(valueWithFlagsParsed.cleaned, valueWithFlagsParsed.flags);
+    return compileRegex(`^(?:${matcherValue})$`);
   },
   { maxSize: 500 }
 );
-
-function getAnchoredRegex(matcherValue: string): RegExp {
-  const regex = compileAnchoredRegex(matcherValue);
-  // A regex carrying the "g" flag remembers where the last match stopped, so rewind it first.
-  regex.lastIndex = 0;
-  return regex;
-}
 
 type OperatorPredicate = (labelValue: string, matcherValue: string) => boolean;
 const OperatorFunctions: Record<LabelMatcher['type'], OperatorPredicate> = {
   '=': (lv, mv) => lv === mv,
   '!=': (lv, mv) => lv !== mv,
-  '=~': (lv, mv) => getAnchoredRegex(mv).test(lv),
-  '!~': (lv, mv) => !getAnchoredRegex(mv).test(lv),
+  '=~': (lv, mv) => compileAnchoredRegex(mv).test(lv),
+  '!~': (lv, mv) => !compileAnchoredRegex(mv).test(lv),
 };
