@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -30,6 +31,8 @@ import (
 )
 
 var tracer = otel.Tracer("github.com/grafana/grafana/pkg/services/frontend")
+
+const maxBootErrorBodyBytes = 4 << 10
 
 // Initialize metrics
 var bootErrorMetric = promauto.NewCounter(prometheus.CounterOpts{
@@ -222,25 +225,26 @@ func (s *frontendService) registerRoutes(m *web.Mux) {
 
 // handleBootError handles frontend boot error reports
 func (s *frontendService) handleBootError(w http.ResponseWriter, r *http.Request) {
-	// Read the request body
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		s.log.Error("failed to read boot error request body", "error", err)
+	// The endpoint is unauthenticated and the boot script sends no body, so the
+	// body is drained up to a small limit and never buffered or logged.
+	if _, err := io.Copy(io.Discard, http.MaxBytesReader(w, r.Body, maxBootErrorBodyBytes)); err != nil {
+		// Closing the connection stops net/http from draining the rest of the
+		// body before the response is sent; w may be wrapped, so MaxBytesReader
+		// can't always mark the connection itself.
+		w.Header().Set("Connection", "close")
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		s.log.Warn("failed to read boot error request body", "error", err)
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
 
-	defer func() {
-		if err := r.Body.Close(); err != nil {
-			s.log.Warn("Failed to close response body", "err", err)
-		}
-	}()
-
-	// Increment the Prometheus counter
 	bootErrorMetric.Inc()
 
-	// Log the error details
-	s.log.Error("frontend boot error reported", "error", body)
+	s.log.Error("frontend boot error reported")
 
 	// Return success response
 	w.WriteHeader(http.StatusOK)
