@@ -13,16 +13,20 @@ import { defaultStatus } from '../../../../apps/shorturl/plugin/src/generated/sh
 import {
   createShortLink,
   createAndCopyShortLink,
+  createAndCopyShareDashboardLink,
   createDashboardShareUrl,
   getLogsPermalinkRange,
   buildShortUrl,
 } from './shortLinks';
 
+const mockPostedShortUrlBodies: Array<{ path?: string }> = [];
+
 jest.mock('@grafana/runtime', () => ({
   ...jest.requireActual('@grafana/runtime'),
   getBackendSrv: () => {
     return {
-      post: () => {
+      post: (_url: string, body: { path?: string }) => {
+        mockPostedShortUrlBodies.push(body);
         return Promise.resolve({ url: 'https://www.test.grafana.com/goto/bewyw48durgu8d?orgId=1' });
       },
     };
@@ -64,6 +68,8 @@ beforeEach(() => {
   if ('clear' in createShortLink) {
     (createShortLink as { clear: () => void }).clear();
   }
+
+  mockPostedShortUrlBodies.length = 0;
 
   // Clear any caches between tests
   jest.clearAllMocks();
@@ -293,7 +299,110 @@ describe('createDashboardShareUrl', () => {
 
     expect(url).toBe('/d/original-dashboard-uid/my-dashboard?orgId=1');
   });
+
+  it('omits the URL login query parameter from a link copied for someone else', () => {
+    jest.replaceProperty(config, 'appUrl', 'http://localhost:3000/');
+    locationService.push('/d/original-dashboard-uid/my-dashboard?orgId=1&from=now-6h&to=now&auth_token=placeholder');
+
+    const url = createDashboardShareUrl(regularDashboard(), {
+      useAbsoluteTimeRange: false,
+      theme: 'current',
+      useShortUrl: false,
+    });
+
+    expect(url).toBe('http://localhost:3000/d/original-dashboard-uid/my-dashboard?orgId=1&from=now-6h&to=now');
+  });
+
+  it('omits the URL login query parameter from the path stored for a short link', async () => {
+    locationService.push('/d/original-dashboard-uid/my-dashboard?orgId=1&from=now-6h&to=now&auth_token=placeholder');
+
+    const shareUrl = createDashboardShareUrl(regularDashboard(), {
+      useAbsoluteTimeRange: false,
+      theme: 'current',
+      useShortUrl: true,
+    });
+    await createShortLink(shareUrl);
+
+    expect(mockPostedShortUrlBodies).toEqual([
+      { path: 'd/original-dashboard-uid/my-dashboard?orgId=1&from=now-6h&to=now' },
+    ]);
+  });
+
+  it('omits the URL login query parameter from the path stored by the kubernetes short-link API', async () => {
+    setTestFlags({ [FlagKeys.UseKubernetesShortURLsAPI]: true });
+    const { dispatch } = require('app/store/store');
+    const storedPaths: string[] = [];
+    // Drive the real initiate thunk and mutation thunk so the pending action's originalArgs
+    // are the ShortURL spec this call submits. The store dispatch is the only stub.
+    dispatch.mockImplementation((action: unknown) => {
+      if (typeof action !== 'function') {
+        return {};
+      }
+      return (action as (dispatch: (inner: unknown) => unknown, getState: () => unknown) => unknown)(
+        (inner: unknown) => {
+          if (typeof inner === 'function') {
+            (inner as (dispatch: (pending: unknown) => unknown, getState: () => unknown, extra: unknown) => unknown)(
+              (pending: unknown) => {
+                const path = (
+                  pending as {
+                    meta?: { arg?: { originalArgs?: { shortUrl?: { spec?: { path?: string } } } } };
+                  }
+                ).meta?.arg?.originalArgs?.shortUrl?.spec?.path;
+                if (path) {
+                  storedPaths.push(path);
+                }
+                return pending;
+              },
+              () => ({}),
+              undefined
+            );
+          }
+          return {
+            requestId: 'req-1',
+            abort: () => undefined,
+            unwrap: () => Promise.resolve({ metadata: { name: 'k8sname', namespace: 'org-1' } }),
+          };
+        },
+        () => ({})
+      );
+    });
+
+    locationService.push('/d/original-dashboard-uid/my-dashboard?orgId=1&from=now-6h&to=now&auth_token=placeholder');
+    const shareUrl = createDashboardShareUrl(regularDashboard(), {
+      useAbsoluteTimeRange: false,
+      theme: 'current',
+      useShortUrl: true,
+    });
+    await createShortLink(shareUrl);
+
+    expect(storedPaths).toEqual(['d/original-dashboard-uid/my-dashboard?orgId=1&from=now-6h&to=now']);
+  });
+
+  it('omits the URL login query parameter from the link the toolbar copy action writes', async () => {
+    jest.replaceProperty(config, 'appUrl', 'http://localhost:3000/');
+    window.isSecureContext = true;
+    delete (global as { ClipboardItem?: unknown }).ClipboardItem;
+    locationService.push('/d/original-dashboard-uid/my-dashboard?orgId=1&from=now-6h&to=now&auth_token=placeholder');
+
+    await createAndCopyShareDashboardLink(regularDashboard(), {
+      useAbsoluteTimeRange: false,
+      theme: 'current',
+      useShortUrl: false,
+    });
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      'http://localhost:3000/d/original-dashboard-uid/my-dashboard?orgId=1&from=now-6h&to=now'
+    );
+  });
 });
+
+function regularDashboard() {
+  return new DashboardScene({
+    uid: 'original-dashboard-uid',
+    meta: { isSnapshot: false, slug: 'my-dashboard' },
+    $timeRange: new SceneTimeRange({}),
+  });
+}
 
 describe('getLogsPermalinkRange', () => {
   let row: LogRowModel, rows: LogRowModel[];
