@@ -79,6 +79,49 @@ describe('inspector download', () => {
 
       expect(text).toEqual('"time","name","value"\r\n100,Åäö中文العربية,1\r\n');
     });
+
+    // Inspect data download and the logs panel CSV download both call this function.
+    it.each(['=1+1', '+1+1', '-2+3', '@SUM(1+1)', '\t=1+1'])(
+      'neutralizes formula text %j in the CSV file',
+      async (payload) => {
+        const frame = dataFrameFromJSON({
+          schema: {
+            fields: [
+              { name: 'label', type: FieldType.string },
+              { name: 'note', type: FieldType.string },
+            ],
+          },
+          data: { values: [['keep'], [payload]] },
+        });
+
+        downloadDataFrameAsCsv(frame, 'panel');
+        const text = await blobText(jest.mocked(saveAs).mock.calls[0][0]);
+        const rows = parseCsvRecords(text, ',');
+
+        expect(rows[1][0]).toBe('keep');
+        expectFormulaTextNeutralized(rows[1][1], payload);
+      }
+    );
+
+    it('neutralizes formula text in the Excel-compatible file bytes', async () => {
+      const frame = dataFrameFromJSON({
+        schema: {
+          fields: [{ name: 'note', type: FieldType.string }],
+        },
+        data: { values: [['=1+1']] },
+      });
+
+      downloadDataFrameAsCsv(frame, 'panel', undefined, undefined, true);
+      const blob = jest.mocked(saveAs).mock.calls[0][0];
+      expect(blob).toBeInstanceOf(Blob);
+      const bytes = new Uint8Array(await (blob as Blob).arrayBuffer());
+      expect(bytes[0]).toBe(0xff);
+      expect(bytes[1]).toBe(0xfe);
+
+      const text = decodeUtf16Le(bytes);
+      const cell = parseCsvRecords(text, '\t')[1][0];
+      expectFormulaTextNeutralized(cell, '=1+1');
+    });
   });
 
   describe('downloadAsJson', () => {
@@ -170,6 +213,77 @@ describe('inspector download', () => {
     });
   });
 });
+
+const FORMULA_TRIGGERS = ['=', '+', '-', '@', '\t'];
+
+function parseCsvRecords(csv: string, delimiter: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let quoted = false;
+
+  for (let i = 0; i < csv.length; i++) {
+    const char = csv[i];
+    if (quoted) {
+      if (char === '"') {
+        if (csv[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          quoted = false;
+        }
+      } else {
+        field += char;
+      }
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+      continue;
+    }
+    if (char === delimiter) {
+      row.push(field);
+      field = '';
+      continue;
+    }
+    if (char === '\n') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+      continue;
+    }
+    if (char === '\r') {
+      continue;
+    }
+    field += char;
+  }
+
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
+}
+
+function expectFormulaTextNeutralized(cell: string, source: string) {
+  expect(FORMULA_TRIGGERS).not.toContain(cell.charAt(0));
+  expect(cell.endsWith(source)).toBe(true);
+  expect(cell.length).toBeGreaterThan(source.length);
+}
+
+async function blobText(blob: Blob | string): Promise<string> {
+  return typeof blob === 'string' ? blob : blob.text();
+}
+
+function decodeUtf16Le(bytes: Uint8Array): string {
+  const start = bytes[0] === 0xff && bytes[1] === 0xfe ? 2 : 0;
+  let text = '';
+  for (let i = start; i + 1 < bytes.length; i += 2) {
+    text += String.fromCharCode(bytes[i] | (bytes[i + 1] << 8));
+  }
+  return text;
+}
 
 async function getBomType(blob: Blob): Promise<'utf-8' | 'utf-16le' | undefined> {
   const reader = new FileReader();

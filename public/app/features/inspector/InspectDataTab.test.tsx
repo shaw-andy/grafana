@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { type ComponentProps } from 'react';
 import { type Props } from 'react-virtualized-auto-sizer';
 
+import saveAs from 'file-saver';
+
 import { type DataFrame, FieldType } from '@grafana/data';
 import { selectors } from '@grafana/e2e-selectors';
 import { config } from '@grafana/runtime';
@@ -13,6 +15,8 @@ import { type TableNG } from '@grafana/ui/unstable';
 import { InspectDataTab } from './InspectDataTab';
 
 type TableNGProps = ComponentProps<typeof TableNG>;
+
+jest.mock('file-saver', () => jest.fn());
 
 jest.mock('react-virtualized-auto-sizer', () => {
   return ({ children }: Props) =>
@@ -245,6 +249,31 @@ describe('InspectDataTab', () => {
       await screen.findByRole('table');
       expect(screen.getByText(/Download service graph/i)).toBeInTheDocument();
     });
+
+    it('downloads a CSV without formula text from formatted cells', async () => {
+      render(<InspectDataTab {...formulaFrameProps()} />);
+      await screen.findByRole('table');
+
+      await userEvent.click(screen.getByRole('button', { name: /Download CSV/i }));
+      const csvBlob = jest.mocked(saveAs).mock.calls[0][0];
+      expect(csvBlob).toBeInstanceOf(Blob);
+      const csvRows = parseCsvRecords(await (csvBlob as Blob).text(), ',');
+      expect(csvRows[1][0]).toBe('keep');
+      expectFormulaTextNeutralized(csvRows[1][1], '=1+1');
+    });
+
+    it('downloads an Excel-compatible file without formula text from formatted cells', async () => {
+      render(<InspectDataTab {...formulaFrameProps()} />);
+      await screen.findByRole('table');
+
+      await userEvent.click(screen.getByText(/Data options/i));
+      await userEvent.click(screen.getByRole('switch', { name: /Download for Excel/i }));
+      await userEvent.click(screen.getByRole('button', { name: /Download CSV/i }));
+      const excelBlob = jest.mocked(saveAs).mock.calls[0][0];
+      expect(excelBlob).toBeInstanceOf(Blob);
+      const excelText = decodeUtf16Le(new Uint8Array(await (excelBlob as Blob).arrayBuffer()));
+      expectFormulaTextNeutralized(parseCsvRecords(excelText, '\t')[1][1], '=1+1');
+    });
   });
 
   describe('when useTableNG is true', () => {
@@ -281,3 +310,86 @@ describe('InspectDataTab', () => {
     });
   });
 });
+
+function formulaFrameProps() {
+  return createProps({
+    options: { withTransforms: false, withFieldConfig: true },
+    data: [
+      {
+        name: 'Formula',
+        fields: [
+          { name: 'label', type: FieldType.string, values: ['keep'], config: {} },
+          { name: 'note', type: FieldType.string, values: ['=1+1'], config: {} },
+        ],
+        length: 1,
+      },
+    ],
+  });
+}
+
+const FORMULA_TRIGGERS = ['=', '+', '-', '@', '\t'];
+
+function parseCsvRecords(csv: string, delimiter: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let quoted = false;
+
+  for (let i = 0; i < csv.length; i++) {
+    const char = csv[i];
+    if (quoted) {
+      if (char === '"') {
+        if (csv[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          quoted = false;
+        }
+      } else {
+        field += char;
+      }
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+      continue;
+    }
+    if (char === delimiter) {
+      row.push(field);
+      field = '';
+      continue;
+    }
+    if (char === '\n') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+      continue;
+    }
+    if (char === '\r') {
+      continue;
+    }
+    field += char;
+  }
+
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
+}
+
+function expectFormulaTextNeutralized(cell: string, source: string) {
+  expect(FORMULA_TRIGGERS).not.toContain(cell.charAt(0));
+  expect(cell.endsWith(source)).toBe(true);
+  expect(cell.length).toBeGreaterThan(source.length);
+}
+
+function decodeUtf16Le(bytes: Uint8Array): string {
+  const start = bytes[0] === 0xff && bytes[1] === 0xfe ? 2 : 0;
+  let text = '';
+  for (let i = start; i + 1 < bytes.length; i += 2) {
+    text += String.fromCharCode(bytes[i] | (bytes[i + 1] << 8));
+  }
+  return text;
+}
