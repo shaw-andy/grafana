@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -116,21 +117,60 @@ func (r *Runner) GetManagedChannels(ns string) ([]*ManagedChannel, error) {
 }
 
 // GetOrCreateStream -- for now this will create new manager for each key.
-// Eventually, the stream behavior will need to be configured explicitly
+// Eventually, the stream behavior will need to be configured explicitly.
+// Returns ErrStreamLimitExceeded when the namespace already holds
+// MaxStreamsPerNamespace streams and none has been idle for IdleEvictionTimeout.
 func (r *Runner) GetOrCreateStream(ns string, scope string, stream string) (*Stream, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	_, ok := r.streams[ns]
+	streams, ok := r.streams[ns]
 	if !ok {
-		r.streams[ns] = map[string]*Stream{}
+		streams = map[string]*Stream{}
 	}
 	prefix := scope + "/" + stream
-	s, ok := r.streams[ns][prefix]
-	if !ok {
-		s = NewStream(ns, scope, stream, r.publisher, r.localPublisher, r.frameCache)
-		r.streams[ns][prefix] = s
+	if s, ok := streams[prefix]; ok {
+		return s, nil
 	}
+	if !makeStreamRoom(streams, time.Now()) {
+		return nil, ErrStreamLimitExceeded
+	}
+	s := NewStream(ns, scope, stream, r.publisher, r.localPublisher, r.frameCache)
+	streams[prefix] = s
+	r.streams[ns] = streams
 	return s, nil
+}
+
+// GetStream returns the registered stream, or an unregistered one when none
+// exists. Use it on read paths such as subscribe, which must not register
+// streams on behalf of callers that cannot push to them.
+func (r *Runner) GetStream(ns string, scope string, stream string) *Stream {
+	r.mu.RLock()
+	s, ok := r.streams[ns][scope+"/"+stream]
+	r.mu.RUnlock()
+	if ok {
+		return s
+	}
+	return NewStream(ns, scope, stream, r.publisher, r.localPublisher, r.frameCache)
+}
+
+func makeStreamRoom(streams map[string]*Stream, now time.Time) bool {
+	if len(streams) < MaxStreamsPerNamespace {
+		return true
+	}
+	var oldestPrefix string
+	var oldest int64
+	found := false
+	for prefix, s := range streams {
+		lastPush := s.lastPush.Load()
+		if !found || lastPush < oldest {
+			oldestPrefix, oldest, found = prefix, lastPush, true
+		}
+	}
+	if !found || now.Sub(time.Unix(0, oldest)) < IdleEvictionTimeout {
+		return false
+	}
+	delete(streams, oldestPrefix)
+	return true
 }
 
 // Stream holds the state of a managed stream.
@@ -143,6 +183,8 @@ type Stream struct {
 	frameCache     FrameCache
 	rateMu         sync.RWMutex
 	rates          map[string][60]rateEntry
+	// lastPush is the UnixNano time of creation or of the last successful push.
+	lastPush atomic.Int64
 }
 
 type rateEntry struct {
@@ -159,7 +201,7 @@ type ManagedChannel struct {
 
 // NewStream creates new NewStream.
 func NewStream(ns string, scope string, stream string, publisher model.ChannelPublisher, localPublisher LocalPublisher, schemaUpdater FrameCache) *Stream {
-	return &Stream{
+	s := &Stream{
 		ns:             ns,
 		scope:          scope,
 		stream:         stream,
@@ -168,11 +210,15 @@ func NewStream(ns string, scope string, stream string, publisher model.ChannelPu
 		frameCache:     schemaUpdater,
 		rates:          map[string][60]rateEntry{},
 	}
+	s.lastPush.Store(time.Now().UnixNano())
+	return s
 }
 
 // Push sends frame to the stream and saves it for later retrieval by subscribers.
 // * Saves the entire frame to cache.
 // * If schema has been changed sends entire frame to channel, otherwise only data.
+// * If publishing a new or changed schema fails, the cached frame is dropped so
+// the next push sends the full frame again.
 func (s *Stream) Push(ctx context.Context, path string, frame *data.Frame) error {
 	jsonFrameCache, err := data.FrameToJSONCache(frame)
 	if err != nil {
@@ -197,17 +243,36 @@ func (s *Stream) Push(ctx context.Context, path string, frame *data.Frame) error
 	frameJSON := jsonFrameCache.Bytes(include)
 
 	logger.Debug("Publish data to channel", "channel", channel, "dataLength", len(frameJSON))
-	s.incRate(path, time.Now().Unix())
 	if s.scope == live.ScopeDatasource || s.scope == live.ScopePlugin {
-		return s.localPublisher.PublishLocal(orgchannel.PrependK8sNamespace(s.ns, channel), frameJSON)
+		err = s.localPublisher.PublishLocal(orgchannel.PrependK8sNamespace(s.ns, channel), frameJSON)
+	} else {
+		err = s.publisher(s.ns, channel, frameJSON)
 	}
-	return s.publisher(s.ns, channel, frameJSON)
+	if err != nil {
+		if isUpdated {
+			if delErr := s.frameCache.Delete(ctx, s.ns, channel); delErr != nil {
+				logger.Error("Error removing unpublished frame from cache", "error", delErr, "channel", channel)
+			}
+		}
+		return err
+	}
+	now := time.Now()
+	s.lastPush.Store(now.UnixNano())
+	s.incRate(path, now.Unix())
+	return nil
 }
 
 func (s *Stream) incRate(path string, nowUnix int64) {
 	s.rateMu.Lock()
 	pathRate, ok := s.rates[path]
 	if !ok {
+		if len(s.rates) >= MaxChannelsPerNamespace {
+			s.pruneRatesLocked(nowUnix)
+		}
+		if len(s.rates) >= MaxChannelsPerNamespace {
+			s.rateMu.Unlock()
+			return
+		}
 		pathRate = [60]rateEntry{}
 	}
 	now := time.Unix(nowUnix, 0)
@@ -219,6 +284,23 @@ func (s *Stream) incRate(path string, nowUnix int64) {
 	pathRate[slot].count += 1
 	s.rates[path] = pathRate
 	s.rateMu.Unlock()
+}
+
+// pruneRatesLocked drops paths with no pushes in the last minute; they no
+// longer contribute to minuteRate.
+func (s *Stream) pruneRatesLocked(nowUnix int64) {
+	for path, pathRate := range s.rates {
+		active := false
+		for _, val := range pathRate {
+			if int64(val.time) > nowUnix-60 {
+				active = true
+				break
+			}
+		}
+		if !active {
+			delete(s.rates, path)
+		}
+	}
 }
 
 func (s *Stream) minuteRate(path string) int64 {

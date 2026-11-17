@@ -19,7 +19,7 @@ import (
 type RedisFrameCache struct {
 	mu          sync.RWMutex
 	redisClient *redis.Client
-	frames      map[string]map[string]data.FrameJSONCache
+	frames      map[string]map[string]*cachedFrame
 	keyPrefix   string
 }
 
@@ -27,7 +27,7 @@ type RedisFrameCache struct {
 func NewRedisFrameCache(redisClient *redis.Client, keyPrefix string) *RedisFrameCache {
 	return &RedisFrameCache{
 		keyPrefix:   keyPrefix,
-		frames:      map[string]map[string]data.FrameJSONCache{},
+		frames:      map[string]map[string]*cachedFrame{},
 		redisClient: redisClient,
 	}
 }
@@ -39,11 +39,7 @@ func (c *RedisFrameCache) GetActiveChannels(ns string) (map[string]json.RawMessa
 	if !ok {
 		return nil, nil
 	}
-	info := make(map[string]json.RawMessage, len(frames))
-	for k, v := range frames {
-		info[k] = v.Bytes(data.IncludeSchemaOnly)
-	}
-	return info, nil
+	return activeChannels(frames), nil
 }
 
 func (c *RedisFrameCache) GetFrame(ctx context.Context, ns string, channel string) (json.RawMessage, bool, error) {
@@ -63,14 +59,84 @@ const (
 	frameCacheTTL = 7 * 24 * time.Hour
 )
 
-func (c *RedisFrameCache) Update(ctx context.Context, ns string, channel string, jsonFrame data.FrameJSONCache) (bool, error) {
+// reserve claims a slot for channel in the local map before it is written to
+// Redis, so the namespace limit also bounds the keys written to Redis.
+func (c *RedisFrameCache) reserve(ns string, channel string) (*cachedFrame, error) {
+	now := time.Now()
 	c.mu.Lock()
-	if _, ok := c.frames[ns]; !ok {
-		c.frames[ns] = map[string]data.FrameJSONCache{}
+	defer c.mu.Unlock()
+	frames, ok := c.frames[ns]
+	if !ok {
+		frames = map[string]*cachedFrame{}
 	}
-	c.frames[ns][channel] = jsonFrame
-	c.mu.Unlock()
+	if existing, ok := frames[channel]; ok {
+		if !existing.pending {
+			existing.updatedAt = now
+		}
+		return nil, nil
+	}
+	if !makeRoom(frames, now) {
+		return nil, ErrChannelLimitExceeded
+	}
+	c.frames[ns] = frames
+	reservation := &cachedFrame{updatedAt: now, pending: true}
+	frames[channel] = reservation
+	return reservation, nil
+}
 
+func (c *RedisFrameCache) release(ns string, channel string, reservation *cachedFrame) {
+	if reservation == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.frames[ns][channel] == reservation {
+		c.deleteLocked(ns, channel)
+	}
+}
+
+func (c *RedisFrameCache) commit(ns string, channel string, jsonFrame data.FrameJSONCache) {
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	frames, ok := c.frames[ns]
+	if !ok {
+		frames = map[string]*cachedFrame{}
+	}
+	if _, ok := frames[channel]; !ok && !makeRoom(frames, now) {
+		return
+	}
+	c.frames[ns] = frames
+	frames[channel] = &cachedFrame{frame: jsonFrame, updatedAt: now}
+}
+
+func (c *RedisFrameCache) deleteLocked(ns string, channel string) {
+	frames, ok := c.frames[ns]
+	if !ok {
+		return
+	}
+	delete(frames, channel)
+	if len(frames) == 0 {
+		delete(c.frames, ns)
+	}
+}
+
+func (c *RedisFrameCache) Update(ctx context.Context, ns string, channel string, jsonFrame data.FrameJSONCache) (bool, error) {
+	reservation, err := c.reserve(ns, channel)
+	if err != nil {
+		return false, err
+	}
+
+	schemaUpdated, err := c.updateRedis(ctx, ns, channel, jsonFrame)
+	if err != nil {
+		c.release(ns, channel, reservation)
+		return false, err
+	}
+	c.commit(ns, channel, jsonFrame)
+	return schemaUpdated, nil
+}
+
+func (c *RedisFrameCache) updateRedis(ctx context.Context, ns string, channel string, jsonFrame data.FrameJSONCache) (bool, error) {
 	stringSchema := string(jsonFrame.Bytes(data.IncludeSchemaOnly))
 
 	key := c.getCacheKey(orgchannel.PrependK8sNamespace(ns, channel))
@@ -103,6 +169,14 @@ func (c *RedisFrameCache) Update(ctx context.Context, ns string, channel string,
 		return true, nil
 	}
 	return result["schema"] != stringSchema, nil
+}
+
+func (c *RedisFrameCache) Delete(ctx context.Context, ns string, channel string) error {
+	c.mu.Lock()
+	c.deleteLocked(ns, channel)
+	c.mu.Unlock()
+	key := c.getCacheKey(orgchannel.PrependK8sNamespace(ns, channel))
+	return c.redisClient.Del(ctx, key).Err()
 }
 
 func (c *RedisFrameCache) getCacheKey(channelID string) string {
