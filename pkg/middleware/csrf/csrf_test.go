@@ -62,12 +62,12 @@ func TestMiddlewareCSRF(t *testing.T) {
 			code:       http.StatusOK,
 		},
 		{
-			name:       "port does not have to match",
+			name:       "mismatched port is forbidden",
 			cookieName: "foo",
 			method:     "GET",
 			host:       "localhost:80",
 			origin:     "http://localhost:3000",
-			code:       http.StatusOK,
+			code:       http.StatusForbidden,
 		},
 		{
 			name:       "IPv6 host works with port",
@@ -152,6 +152,59 @@ func TestCSRF_Check(t *testing.T) {
 			},
 			request:    postRequest(t, "grafana.localhost", map[string]string{"X-Forwarded-Host": "grafana.org", "Origin": "https://grafana.org"}, true),
 			addtHeader: map[string]struct{}{"X-Forwarded-Host": {}},
+			expectedOK: true,
+		},
+		{
+			name: "grafana.org with X-Forwarded-Host and header trusted from another port",
+			getCfg: func() *setting.Cfg {
+				return setting.NewCfg()
+			},
+			request:        postRequest(t, "grafana.localhost", map[string]string{"X-Forwarded-Host": "grafana.org:3000", "Origin": "https://grafana.org:8443"}, true),
+			addtHeader:     map[string]struct{}{"X-Forwarded-Host": {}},
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name: "grafana.org from a non-default port",
+			getCfg: func() *setting.Cfg {
+				return setting.NewCfg()
+			},
+			request:        postRequest(t, "grafana.org", map[string]string{"Origin": "https://grafana.org:8443"}, true),
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name: "grafana.org from the scheme root_url does not use",
+			getCfg: func() *setting.Cfg {
+				cfg := setting.NewCfg()
+				cfg.AppURL = "https://grafana.org/"
+				return cfg
+			},
+			request:        postRequest(t, "grafana.org", map[string]string{"Origin": "http://grafana.org"}, true),
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name: "grafana.org from a cross-site page of the other scheme",
+			getCfg: func() *setting.Cfg {
+				return setting.NewCfg()
+			},
+			request:        postRequest(t, "grafana.org", map[string]string{"Origin": "http://grafana.org", "Sec-Fetch-Site": "cross-site"}, true),
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name: "grafana.org from a same-origin page",
+			getCfg: func() *setting.Cfg {
+				return setting.NewCfg()
+			},
+			request:    postRequest(t, "grafana.org", map[string]string{"Origin": "https://grafana.org", "Sec-Fetch-Site": "same-origin"}, true),
+			expectedOK: true,
+		},
+		{
+			name: "root_url origin behind a proxy that rewrites Host",
+			getCfg: func() *setting.Cfg {
+				cfg := setting.NewCfg()
+				cfg.AppURL = "https://grafana.org:8443/"
+				return cfg
+			},
+			request:    postRequest(t, "grafana.internal:3000", map[string]string{"Origin": "https://grafana.org:8443"}, true),
 			expectedOK: true,
 		},
 		{

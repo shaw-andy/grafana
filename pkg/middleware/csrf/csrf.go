@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/util"
@@ -93,7 +94,7 @@ func (c *CSRF) check(r *http.Request) error {
 		}
 	}
 	// Otherwise - verify that Origin matches the server origin
-	netAddr, err := util.SplitHostPortDefault(r.Host, "", "0") // we ignore the port
+	netAddr, err := util.SplitHostPortDefault(r.Host, "", "")
 	if err != nil {
 		return &errorWithStatus{Underlying: err, HTTPStatus: http.StatusBadRequest}
 	}
@@ -109,34 +110,119 @@ func (c *CSRF) check(r *http.Request) error {
 	if err != nil {
 		return &errorWithStatus{Underlying: err, HTTPStatus: http.StatusBadRequest}
 	}
-	origin := originURL.Hostname()
+	origin := parseOrigin(originURL)
+	appURL, _ := url.Parse(c.cfg.AppURL)
 
 	trustedOrigin := false
 	for h := range c.headers {
-		customHost := r.Header.Get(h)
-		addr, err := util.SplitHostPortDefault(customHost, "", "0") // we ignore the port
+		addr, err := util.SplitHostPortDefault(r.Header.Get(h), "", "")
 		if err != nil {
 			return &errorWithStatus{Underlying: err, HTTPStatus: http.StatusBadRequest}
 		}
-		if addr.Host == origin {
+		if origin.servedBy(r, addr, appURL) {
 			trustedOrigin = true
 			break
 		}
 	}
 
 	for o := range c.trustedOrigins {
-		if o == origin {
+		if origin.host != "" && o == origin.host {
 			trustedOrigin = true
 			break
 		}
 	}
 
-	hostnameMatches := origin == netAddr.Host
-	if netAddr.Host == "" || !trustedOrigin && !hostnameMatches {
+	originMatches := origin.equals(parseOrigin(appURL)) || origin.servedBy(r, netAddr, appURL)
+	if netAddr.Host == "" || !trustedOrigin && !originMatches {
 		return &errorWithStatus{Underlying: errors.New("origin not allowed"), HTTPStatus: http.StatusForbidden}
 	}
 
 	return nil
+}
+
+type webOrigin struct {
+	scheme string
+	host   string
+	port   string
+}
+
+func defaultPort(scheme string) string {
+	switch scheme {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	}
+	return ""
+}
+
+func parseOrigin(u *url.URL) webOrigin {
+	if u == nil {
+		return webOrigin{}
+	}
+	scheme := strings.ToLower(u.Scheme)
+	port := u.Port()
+	if port == "" {
+		port = defaultPort(scheme)
+	}
+	return webOrigin{scheme: scheme, host: strings.ToLower(u.Hostname()), port: port}
+}
+
+func (o webOrigin) valid() bool {
+	return o.host != "" && defaultPort(o.scheme) != ""
+}
+
+func (o webOrigin) equals(other webOrigin) bool {
+	return o.valid() && o == other
+}
+
+// servedBy reports whether o is the origin the browser addressed when it sent r to
+// authority, which is the Host header or a trusted header carrying the public host.
+func (o webOrigin) servedBy(r *http.Request, authority util.NetworkAddress, appURL *url.URL) bool {
+	if !o.valid() || !strings.EqualFold(o.host, authority.Host) {
+		return false
+	}
+
+	if scheme := servedScheme(r, authority, appURL); scheme != "" {
+		port := authority.Port
+		if port == "" {
+			port = defaultPort(scheme)
+		}
+		return o.scheme == scheme && o.port == port
+	}
+
+	// A host and port can only be served by one listener, so either scheme is that listener.
+	if authority.Port != "" {
+		return o.port == authority.Port
+	}
+
+	// Without a port the browser used the default port of a scheme Grafana cannot
+	// determine, so only a default-port origin can match. Fetch Metadata, when sent,
+	// tells whether the requesting page is this exact origin rather than the other scheme.
+	if o.port != defaultPort(o.scheme) {
+		return false
+	}
+	site := r.Header.Get("Sec-Fetch-Site")
+	return site == "" || site == "same-origin"
+}
+
+// servedScheme returns the scheme r was served over for authority, or "" when it is unknown.
+func servedScheme(r *http.Request, authority util.NetworkAddress, appURL *url.URL) string {
+	if r.TLS != nil {
+		return "https"
+	}
+	app := parseOrigin(appURL)
+	if !app.valid() || !strings.EqualFold(app.host, authority.Host) {
+		return ""
+	}
+	port := authority.Port
+	if port == "" {
+		port = defaultPort(app.scheme)
+	}
+	if port != app.port {
+		return ""
+	}
+	return app.scheme
 }
 
 func (c *CSRF) TrustOrigin(origin string) {
