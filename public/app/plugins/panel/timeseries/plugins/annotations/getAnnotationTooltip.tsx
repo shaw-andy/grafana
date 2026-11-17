@@ -1,5 +1,6 @@
 import { dateTimeFormat, systemDateFormats } from '@grafana/data';
 import alertDef from 'app/features/alerting/state/alertDef';
+import { isAnnotationId } from 'app/features/annotations/annotationId';
 
 import { type AnnotationVals } from './types';
 
@@ -24,9 +25,11 @@ export function getAnnotationTooltip(
 
   // Grafana can be configured to load alert rules from Loki; those annotations cannot be
   // edited or deleted, and a falsy id (0 from the legacy API, or absent) is the best
-  // signal. k8s annotations carry non-numeric string ids; so falsy - not `> 0`
-  // This matches the `if (!annotation.id)` guard in the annotation API client.
-  const canUpdateAnno = dashboardUID !== undefined && Boolean(annoId);
+  // signal. k8s annotations carry non-numeric string ids; so not `> 0`.
+  // Any data source can emit annotation frames, so the id must also be one the annotation
+  // API could have issued, matching the check the annotation API client applies.
+  const hasAnnotationId = isAnnotationId(annoId);
+  const canUpdateAnno = dashboardUID !== undefined && hasAnnotationId;
   const canEdit = canUpdateAnno && canEditAnnotations(dashboardUID);
   const canDelete = canUpdateAnno && canDeleteAnnotations(dashboardUID) && onAnnotationDelete != null;
 
@@ -49,7 +52,7 @@ export function getAnnotationTooltip(
 
   return {
     title,
-    onDelete: annoId != null && onAnnotationDelete ? () => onAnnotationDelete(annoId) : undefined,
+    onDelete: hasAnnotationId && onAnnotationDelete ? () => onAnnotationDelete(annoId) : undefined,
     canEdit,
     canDelete,
     time,

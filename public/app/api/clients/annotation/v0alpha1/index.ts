@@ -1,6 +1,7 @@
 import { type AnnotationEvent } from '@grafana/data';
 import { getBackendSrv } from '@grafana/runtime';
 import { getAPINamespace } from 'app/api/utils';
+import { annotationIdPathSegment, isAnnotationId } from 'app/features/annotations/annotationId';
 import { ScopedResourceClient } from 'app/features/apiserver/client';
 import { AnnoKeyCreatedBy } from 'app/features/apiserver/types';
 
@@ -70,6 +71,13 @@ function toK8sName(id: string | number): string {
     return s;
   }
   return /^\d+$/.test(s) ? `a-${s}` : s;
+}
+
+function annotationResourceUrl(id: unknown): string {
+  if (!isAnnotationId(id)) {
+    throw new Error('Invalid annotation id');
+  }
+  return `/apis/${ANNOTATION_API_GROUP}/${ANNOTATION_API_VERSION}/namespaces/${getAPINamespace()}/${ANNOTATIONS_RESOURCE}/${annotationIdPathSegment(toK8sName(id))}`;
 }
 
 function nameToLegacyId(name: string | undefined): string | undefined {
@@ -173,10 +181,11 @@ export const annotationK8sClient = {
   // atomically — no need to fetch the existing resourceVersion first. Optional
   // fields (timeEnd, tags, scopes) are sent as explicit `null` when absent so
   // stale values are cleared; an omitted field would be a no-op under merge-patch.
-  update(event: AnnotationEvent, scopes?: string[]): Promise<Annotation> {
+  async update(event: AnnotationEvent, scopes?: string[]): Promise<Annotation> {
     if (!event.id) {
-      return Promise.reject(new Error('Annotation id (metadata.name) is required for update'));
+      throw new Error('Annotation id (metadata.name) is required for update');
     }
+    const url = annotationResourceUrl(event.id);
 
     const nextSpec = annotationEventToSpec(event, scopes);
     const patchSpec: Record<string, unknown> = {
@@ -193,16 +202,18 @@ export const annotationK8sClient = {
       patchSpec.panelID = nextSpec.panelID;
     }
 
-    const url = `/apis/${ANNOTATION_API_GROUP}/${ANNOTATION_API_VERSION}/namespaces/${getAPINamespace()}/${ANNOTATIONS_RESOURCE}/${toK8sName(event.id)}`;
     return getBackendSrv().patch<Annotation>(
       url,
       { spec: patchSpec },
-      { headers: { 'Content-Type': 'application/merge-patch+json' } }
+      { headers: { 'Content-Type': 'application/merge-patch+json' }, validatePath: true }
     );
   },
 
-  remove(name: string | number): Promise<unknown> {
-    return resourceClient().delete(toK8sName(name), false);
+  async remove(name: string | number): Promise<unknown> {
+    return getBackendSrv().delete(annotationResourceUrl(name), undefined, {
+      showSuccessAlert: false,
+      validatePath: true,
+    });
   },
 
   async tags(limit = 1000): Promise<AnnotationTagItem[]> {

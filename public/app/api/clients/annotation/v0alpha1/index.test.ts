@@ -156,7 +156,7 @@ describe('annotationK8sClient', () => {
 
     const [delUrl, , delOpts] = deleteFn.mock.calls[0];
     expect(delUrl).toBe(`${baseURL}/annotations/a-3`);
-    expect(delOpts).toEqual({ showSuccessAlert: false });
+    expect(delOpts).toEqual({ showSuccessAlert: false, validatePath: true });
   });
 
   it('tags hits the custom /tags route and unwraps items', async () => {

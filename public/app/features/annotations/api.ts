@@ -4,6 +4,7 @@ import { FlagKeys, getFeatureFlagClient } from '@grafana/runtime/internal';
 import { annotationK8sClient } from 'app/api/clients/annotation/v0alpha1';
 import { type StateHistoryItem } from 'app/types/unified-alerting';
 
+import { annotationIdPathSegment } from './annotationId';
 import { isAnnotationApiAvailable } from './isAnnotationApiAvailable';
 import { type AnnotationTagsResponse } from './types';
 
@@ -33,12 +34,16 @@ class LegacyAnnotationServer implements AnnotationServer {
     return getBackendSrv().post('/api/annotations', annotation);
   }
 
-  update(annotation: AnnotationEvent) {
-    return getBackendSrv().put(`/api/annotations/${annotation.id}`, annotation);
+  async update(annotation: AnnotationEvent) {
+    return getBackendSrv().put(`/api/annotations/${annotationIdPathSegment(annotation.id)}`, annotation, {
+      validatePath: true,
+    });
   }
 
-  delete(annotation: AnnotationEvent) {
-    return getBackendSrv().delete(`/api/annotations/${annotation.id}`);
+  async delete(annotation: AnnotationEvent) {
+    return getBackendSrv().delete(`/api/annotations/${annotationIdPathSegment(annotation.id)}`, undefined, {
+      validatePath: true,
+    });
   }
 
   async tags() {

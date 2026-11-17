@@ -285,16 +285,20 @@ describe('setDashboardPanelContext', () => {
 
       await context.onAnnotationUpdate!({ from: 100, to: 200, id: 'event-id-123', description: 'updated', tags: [] });
 
-      expect(putFn).toHaveBeenCalledWith('/api/annotations/event-id-123', {
-        id: 'event-id-123',
-        dashboardUID: 'dash-1',
-        isRegion: true,
-        panelId: 4,
-        tags: [],
-        text: 'updated',
-        time: 100,
-        timeEnd: 200,
-      });
+      expect(putFn).toHaveBeenCalledWith(
+        '/api/annotations/event-id-123',
+        {
+          id: 'event-id-123',
+          dashboardUID: 'dash-1',
+          isRegion: true,
+          panelId: 4,
+          tags: [],
+          text: 'updated',
+          time: 100,
+          timeEnd: 200,
+        },
+        { validatePath: true }
+      );
     });
 
     it('should PATCH the k8s endpoint when the k8s annotation client is enabled and the API is discovered', async () => {
@@ -351,7 +355,7 @@ describe('setDashboardPanelContext', () => {
 
       await context.onAnnotationDelete!('I-do-not-want-you');
 
-      expect(deleteFn).toHaveBeenCalledWith('/api/annotations/I-do-not-want-you');
+      expect(deleteFn).toHaveBeenCalledWith('/api/annotations/I-do-not-want-you', undefined, { validatePath: true });
     });
 
     it('should DELETE the k8s resource when the k8s annotation client is enabled and the API is discovered', async () => {
@@ -369,7 +373,7 @@ describe('setDashboardPanelContext', () => {
       expect(deleteFn).toHaveBeenCalledWith(
         '/apis/annotation.grafana.app/v0alpha1/namespaces/stack-1/annotations/a-123',
         undefined,
-        { showSuccessAlert: false }
+        { showSuccessAlert: false, validatePath: true }
       );
     });
   });

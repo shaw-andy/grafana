@@ -67,12 +67,14 @@ describe('annotationServer with FE flag OFF', () => {
 
   it('update PUTs to legacy /api/annotations/:id', async () => {
     await annotationServer().update({ id: '42', time: 1, text: 'x' });
-    expect(putFn).toHaveBeenCalledWith('/api/annotations/42', expect.objectContaining({ id: '42' }));
+    expect(putFn).toHaveBeenCalledWith('/api/annotations/42', expect.objectContaining({ id: '42' }), {
+      validatePath: true,
+    });
   });
 
   it('delete DELETEs the legacy resource', async () => {
     await annotationServer().delete({ id: '42' });
-    expect(deleteFn).toHaveBeenCalledWith('/api/annotations/42');
+    expect(deleteFn).toHaveBeenCalledWith('/api/annotations/42', undefined, { validatePath: true });
   });
 
   it('tags reads from legacy /api/annotations/tags', async () => {
@@ -160,7 +162,7 @@ describe('annotationServer with FE flag ON and API group available', () => {
 
     const [url, , opts] = deleteFn.mock.calls[0];
     expect(url).toBe(`${baseURL}/annotations/a-1`);
-    expect(opts).toEqual({ showSuccessAlert: false });
+    expect(opts).toEqual({ showSuccessAlert: false, validatePath: true });
   });
 
   it('tags hits the custom k8s /tags route and maps to {term,count}', async () => {
