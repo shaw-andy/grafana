@@ -298,7 +298,7 @@ func (l *LibraryElementService) patchHandler(c *contextmodel.ReqContext) respons
 		return nil // already handled in the k8s handler
 	}
 
-	cmd := model.PatchLibraryElementCommand{}
+	cmd := model.PatchLibraryElementCommand{FolderID: -1} // nolint:staticcheck
 	if err := web.Bind(c.Req, &cmd); err != nil {
 		return response.Error(http.StatusBadRequest, "bad request data", err)
 	}
@@ -330,14 +330,11 @@ func (l *LibraryElementService) patchHandler(c *contextmodel.ReqContext) respons
 
 	metrics.MFolderIDsServiceCount.WithLabelValues(metrics.LibraryElements).Inc()
 	// nolint:staticcheck
-	if element.FolderID != 0 {
-		metrics.MFolderIDsServiceCount.WithLabelValues(metrics.LibraryElements).Inc()
-		// nolint:staticcheck
-		folder, err := l.folderService.Get(c.Req.Context(), &foldermodel.GetFolderQuery{OrgID: c.SignedInUser.GetOrgID(), ID: &element.FolderID, SignedInUser: c.SignedInUser})
+	if element.FolderID != 0 && element.FolderUID != "" {
+		folder, err := l.folderService.Get(c.Req.Context(), &foldermodel.GetFolderQuery{OrgID: c.SignedInUser.GetOrgID(), UID: &element.FolderUID, SignedInUser: c.SignedInUser})
 		if err != nil {
 			return response.Error(http.StatusInternalServerError, "failed to get folder", err)
 		}
-		element.FolderUID = folder.UID
 		element.Meta.FolderUID = folder.UID
 		element.Meta.FolderName = folder.Title
 	}

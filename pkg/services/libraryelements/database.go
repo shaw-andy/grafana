@@ -592,8 +592,9 @@ func (l *LibraryElementService) getAllLibraryElements(c context.Context, signedI
 
 func (l *LibraryElementService) handleFolderIDPatches(ctx context.Context, elementToPatch *model.LibraryElement,
 	fromFolderID int64, toFolderID int64, user identity.Requester) error {
-	// FolderID was not provided in the PATCH request
-	if toFolderID == -1 {
+	// FolderID was not provided in the PATCH request. Any negative id counts as
+	// not provided, matching the destination checks in PatchLibraryElement.
+	if toFolderID < 0 {
 		toFolderID = fromFolderID
 	}
 
@@ -604,6 +605,45 @@ func (l *LibraryElementService) handleFolderIDPatches(ctx context.Context, eleme
 	return nil
 }
 
+// resolvePatchDestinationFolder resolves the destination named by cmd.FolderUID
+// or, when that is absent, by the deprecated cmd.FolderID, and rewrites both
+// fields on cmd to describe the resolved folder.
+func (l *LibraryElementService) resolvePatchDestinationFolder(ctx context.Context, user identity.Requester, cmd *model.PatchLibraryElementCommand) (*folder.Folder, error) {
+	query := &folder.GetFolderQuery{OrgID: user.GetOrgID(), SignedInUser: user}
+	switch {
+	case cmd.FolderUID != nil:
+		query.UID = cmd.FolderUID
+	case cmd.FolderID == 0: // nolint:staticcheck
+		root := ""
+		query.UID = &root
+	default:
+		folderID := cmd.FolderID // nolint:staticcheck
+		query.ID = &folderID     // nolint:staticcheck
+	}
+	f, err := l.folderService.Get(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if f == nil {
+		return nil, dashboards.ErrFolderNotFound
+	}
+	if cmd.FolderUID == nil {
+		uid := f.UID
+		if cmd.FolderID == 0 || f.IsGeneral() { // nolint:staticcheck
+			uid = ""
+		}
+		cmd.FolderUID = &uid
+	}
+	// folder_uid is authoritative; align the legacy folder_id with it so
+	// handleFolderIDPatches writes the id of the same folder.
+	if *cmd.FolderUID == "" {
+		cmd.FolderID = 0 // nolint:staticcheck
+	} else {
+		cmd.FolderID = f.ID // nolint:staticcheck
+	}
+	return f, nil
+}
+
 // patchLibraryElement updates a Library Element.
 func (l *LibraryElementService) PatchLibraryElement(c context.Context, signedInUser identity.Requester, cmd model.PatchLibraryElementCommand, uid string) (model.LibraryElementDTO, error) {
 	var dto model.LibraryElementDTO
@@ -611,24 +651,17 @@ func (l *LibraryElementService) PatchLibraryElement(c context.Context, signedInU
 		return model.LibraryElementDTO{}, err
 	}
 
-	if cmd.FolderUID != nil {
-		f, err := l.folderService.Get(c, &folder.GetFolderQuery{
-			OrgID:        signedInUser.GetOrgID(),
-			UID:          cmd.FolderUID,
-			SignedInUser: signedInUser,
-		})
+	// A move can be requested with folderUid or with the deprecated folderId
+	// (-1 means not provided). Both forms are resolved to one folder here, and
+	// that folder's uid and id are what get authorized below and written later;
+	// the folder is not looked up again after this point.
+	if cmd.FolderUID != nil || cmd.FolderID >= 0 { // nolint:staticcheck
+		f, err := l.resolvePatchDestinationFolder(c, signedInUser, &cmd)
 		if err != nil {
 			return model.LibraryElementDTO{}, err
 		}
 		if f.ManagedBy == utils.ManagerKindRepo && !identity.IsProvisioningServiceIdentity(signedInUser) {
 			return model.LibraryElementDTO{}, model.ErrLibraryElementProvisionedFolder
-		}
-		// The k8s write path supplies only folder_uid. Align the legacy folder_id so
-		// handleFolderIDPatches doesn't treat the panel as moving to the general folder.
-		if *cmd.FolderUID == "" {
-			cmd.FolderID = 0 // nolint:staticcheck
-		} else {
-			cmd.FolderID = f.ID // nolint:staticcheck
 		}
 
 		// The destination folder must allow the caller to create library
@@ -753,6 +786,7 @@ func (l *LibraryElementService) PatchLibraryElement(c context.Context, signedInU
 			ID:          libraryElement.ID,
 			OrgID:       libraryElement.OrgID,
 			FolderID:    libraryElement.FolderID, // nolint:staticcheck
+			FolderUID:   libraryElement.FolderUID,
 			UID:         libraryElement.UID,
 			Name:        libraryElement.Name,
 			Kind:        libraryElement.Kind,
