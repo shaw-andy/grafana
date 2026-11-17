@@ -9,6 +9,7 @@ import { map as rxjsmap, first } from 'rxjs/operators';
 
 import { type MapLayerRegistryItem, type PanelData, PluginState, type DataFrame } from '@grafana/data';
 import { findField } from 'app/features/dimensions/utils';
+import { getMapAssetUrl } from 'app/features/geo/utils/mapAssetUrl';
 
 import { StyleEditor } from '../../editor/StyleEditor';
 import { polyStyle } from '../../style/markers';
@@ -63,7 +64,7 @@ export const dynamicGeoJSONLayer: MapLayerRegistryItem<DynamicGeoJSONMapperConfi
     const config = { ...defaultOptions, ...options.config };
 
     const source = new VectorSource({
-      url: config.src,
+      url: getMapAssetUrl(config.src),
       format: new GeoJSON(),
     });
 

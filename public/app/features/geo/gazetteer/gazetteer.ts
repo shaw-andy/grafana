@@ -5,6 +5,7 @@ import { type DataFrame, type Field, FieldType, type KeyValue, toDataFrame } fro
 
 import { frameFromGeoJSON } from '../format/geojson';
 import { pointFieldFromLonLat, pointFieldFromGeohash } from '../format/utils';
+import { getMapAssetUrl } from '../utils/mapAssetUrl';
 
 import { loadWorldmapPoints } from './worldmap';
 
@@ -222,8 +223,12 @@ export async function getGazetteer(path?: string): Promise<Gazetteer> {
   let lookup = registry[path];
   if (!lookup) {
     try {
+      const url = getMapAssetUrl(path);
+      if (!url) {
+        throw new Error('URL is not allowed');
+      }
       // block the async function
-      const response = await fetch(path);
+      const response = await fetch(url);
       const data = await response.json();
       lookup = loadGazetteer(path, data);
     } catch (err) {
