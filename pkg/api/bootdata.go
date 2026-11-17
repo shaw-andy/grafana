@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/grafana/grafana/pkg/api/datasource/validation"
 	"github.com/grafana/grafana/pkg/api/dtos"
 	"github.com/grafana/grafana/pkg/api/frontendsettings"
 	"github.com/grafana/grafana/pkg/api/webassets"
@@ -255,7 +256,7 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 	dataSources := make(map[string]plugins.DataSourceDTO)
 
 	for _, ds := range orgDataSources {
-		url := ds.URL
+		url := validation.RedactURLUserinfo(ds.URL)
 
 		if ds.Access == datasources.DS_ACCESS_PROXY {
 			url = "/api/datasources/proxy/uid/" + ds.UID
@@ -351,7 +352,7 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 
 		if ds.Type == datasources.DS_PROMETHEUS || ds.Type == datasources.DS_AMAZON_PROMETHEUS || ds.Type == datasources.DS_AZURE_PROMETHEUS {
 			// add unproxied server URL for link to Prometheus web UI
-			ds.JsonData.Set("directUrl", ds.URL)
+			ds.JsonData.Set("directUrl", validation.RedactURLUserinfo(ds.URL))
 		}
 
 		dataSources[ds.Name] = dsDTO

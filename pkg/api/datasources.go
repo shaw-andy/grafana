@@ -61,7 +61,7 @@ func (hs *HTTPServer) GetDataSources(c *contextmodel.ReqContext) response.Respon
 			Id:        ds.ID,
 			UID:       ds.UID,
 			Name:      ds.Name,
-			Url:       ds.URL,
+			Url:       validation.RedactURLUserinfo(ds.URL),
 			Type:      ds.Type,
 			TypeName:  ds.Type,
 			Access:    ds.Access,
@@ -335,8 +335,14 @@ func (hs *HTTPServer) DeleteDataSourceByName(c *contextmodel.ReqContext) respons
 
 func validateURL(cmdType string, url string) response.Response {
 	if _, err := validation.ValidateURL(cmdType, url); err != nil {
-		datasourcesLogger.Error("Failed to validate URL", "url", url)
+		datasourcesLogger.Error("Failed to validate URL", "url", validation.RedactURLUserinfo(url))
 		return response.Error(http.StatusBadRequest, "Validation error, invalid URL", err)
+	}
+
+	// The URL is stored unencrypted and shown to every user who can read the data source, so credentials must go
+	// in the encrypted secure fields instead.
+	if validation.HasURLUserinfo(url) {
+		return response.Error(http.StatusBadRequest, "Validation error, URL must not contain a username or password, use the data source authentication settings instead", nil)
 	}
 
 	return nil
@@ -395,7 +401,7 @@ func (hs *HTTPServer) AddDataSource(c *contextmodel.ReqContext) response.Respons
 
 	userID, _ := identity.UserIdentifier(c.GetID())
 
-	datasourcesLogger.Debug("Received command to add data source", "url", cmd.URL)
+	datasourcesLogger.Debug("Received command to add data source", "url", validation.RedactURLUserinfo(cmd.URL))
 	cmd.OrgID = c.GetOrgID()
 	cmd.UserID = userID
 	if cmd.URL != "" {
@@ -462,7 +468,7 @@ func (hs *HTTPServer) UpdateDataSourceByID(c *contextmodel.ReqContext) response.
 	if err := web.Bind(c.Req, &cmd); err != nil {
 		return response.Error(http.StatusBadRequest, "bad request data", err)
 	}
-	datasourcesLogger.Debug("Received command to update data source", "url", cmd.URL)
+	datasourcesLogger.Debug("Received command to update data source", "url", validation.RedactURLUserinfo(cmd.URL))
 	cmd.OrgID = c.GetOrgID()
 	var err error
 	if cmd.ID, err = strconv.ParseInt(web.Params(c.Req)[":id"], 10, 64); err != nil {
@@ -511,7 +517,7 @@ func (hs *HTTPServer) UpdateDataSourceByUID(c *contextmodel.ReqContext) response
 	if err := web.Bind(c.Req, &cmd); err != nil {
 		return response.Error(http.StatusBadRequest, "bad request data", err)
 	}
-	datasourcesLogger.Debug("Received command to update data source", "url", cmd.URL)
+	datasourcesLogger.Debug("Received command to update data source", "url", validation.RedactURLUserinfo(cmd.URL))
 	cmd.OrgID = c.GetOrgID()
 	if resp := validateURL(cmd.Type, cmd.URL); resp != nil {
 		return resp
@@ -749,7 +755,7 @@ func (hs *HTTPServer) convertModelToDtos(ctx context.Context, ds *datasources.Da
 		UID:              ds.UID,
 		OrgId:            ds.OrgID,
 		Name:             ds.Name,
-		Url:              ds.URL,
+		Url:              validation.RedactURLUserinfo(ds.URL),
 		Type:             ds.Type,
 		Access:           ds.Access,
 		Database:         ds.Database,
