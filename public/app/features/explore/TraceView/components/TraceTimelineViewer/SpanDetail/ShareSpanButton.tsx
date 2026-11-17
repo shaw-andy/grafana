@@ -3,6 +3,7 @@ import { css } from '@emotion/css';
 import { type GrafanaTheme2, type LinkModel, textUtil } from '@grafana/data';
 import { Trans } from '@grafana/i18n';
 import { ClipboardButton, useStyles2 } from '@grafana/ui';
+import { removeUrlToken } from 'app/core/utils/urlToken';
 
 type Props = {
   focusSpanLink: LinkModel;
@@ -21,6 +22,10 @@ function getStyles(theme: GrafanaTheme2) {
 }
 
 function getShareUrl(href: string | undefined): string {
+  return removeUrlToken(resolveShareUrl(href));
+}
+
+function resolveShareUrl(href: string | undefined): string {
   const current = window.location.href;
   if (!href) {
     return current;

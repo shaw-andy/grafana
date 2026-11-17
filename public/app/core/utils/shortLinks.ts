@@ -18,6 +18,7 @@ import { type ShareLinkConfiguration } from '../../features/dashboard-scene/shar
 import { notifyApp } from '../reducers/appNotification';
 
 import { isOnPrem } from './isOnPrem';
+import { removeUrlToken } from './urlToken';
 
 function buildHostUrl() {
   return `${window.location.protocol}//${window.location.host}${config.appSubUrl}`;
@@ -38,7 +39,7 @@ export function buildShortUrl(k8sShortUrl: ShortURL) {
 }
 
 function getRelativeURLPath(url: string) {
-  let path = url.replace(buildHostUrl(), '');
+  let path = removeUrlToken(url).replace(buildHostUrl(), '');
   return path.startsWith('/') ? path.substring(1, path.length) : path;
 }
 
@@ -128,7 +129,7 @@ export const createDashboardShareUrl = (dashboard: DashboardScene, opts: ShareLi
   return getDashboardUrl({
     uid: isSnapshot ? (dashboard.state.meta.snapshotKey ?? dashboard.state.uid) : dashboard.state.uid,
     slug: isSnapshot ? undefined : dashboard.state.meta.slug,
-    currentQueryParams: location.search,
+    currentQueryParams: removeUrlToken(location.search),
     updateQuery: urlParamsUpdate,
     absolute: !opts.useShortUrl,
     isSnapshot,
