@@ -8,6 +8,8 @@ import { selectors } from '@grafana/e2e-selectors';
 import { config, locationService, setPluginImportUtils } from '@grafana/runtime';
 import { LocalValueVariable, SceneTimeRange, SceneVariableSet, VizPanel } from '@grafana/scenes';
 
+import { createShortLink } from 'app/core/utils/shortLinks';
+
 import { contextSrv } from '../../../core/services/context_srv';
 import { DashboardScene } from '../scene/DashboardScene';
 import { DefaultGridLayoutManager } from '../scene/layout-default/DefaultGridLayoutManager';
@@ -90,6 +92,50 @@ describe('ShareLinkTab', () => {
       'href',
       'http://dashboards.grafana.com/grafana/render/d-solo/dash-1?from=2019-02-11T13:00:00.000Z&to=2019-02-11T19:00:00.000Z&panelId=A$panel-12&hideLogo=true&width=1000&height=500&tz=Pacific%2FEaster'
     );
+  });
+
+  describe('when the address contains a URL login query parameter', () => {
+    const search = '?orgId=1&from=now-6h&to=now&auth_token=placeholder';
+
+    beforeEach(() => {
+      locationService.push(`/d/dash-1${search}`);
+      window.history.pushState({}, '', `/d/dash-1${search}`);
+    });
+
+    afterEach(() => {
+      window.history.pushState({}, '', '/');
+      locationService.push('/d/dash-1?from=now-6h&to=now');
+    });
+
+    it('omits that parameter from the link shown for copying', async () => {
+      buildAndRenderScenario({});
+
+      expect(await screen.findByRole('textbox', { name: 'Link URL' })).toHaveValue(
+        'http://dashboards.grafana.com/grafana/d/dash-1?orgId=1&from=2019-02-11T13:00:00.000Z&to=2019-02-11T19:00:00.000Z&viewPanel=A$panel-12'
+      );
+    });
+
+    it('omits that parameter from the direct rendered-image link', async () => {
+      buildAndRenderScenario({});
+
+      expect(
+        await screen.findByRole('link', { name: selectors.pages.SharePanelModal.linkToRenderedImage })
+      ).toHaveAttribute(
+        'href',
+        'http://dashboards.grafana.com/grafana/render/d-solo/dash-1?orgId=1&from=2019-02-11T13:00:00.000Z&to=2019-02-11T19:00:00.000Z&panelId=A$panel-12&hideLogo=true&width=1000&height=500&tz=Pacific%2FEaster'
+      );
+    });
+
+    it('omits that parameter from the path passed to the short-link API', async () => {
+      buildAndRenderScenario({});
+      (createShortLink as jest.Mock).mockClear();
+
+      await userEvent.click(await screen.findByLabelText('Shorten URL'));
+
+      expect(createShortLink).toHaveBeenCalledWith(
+        '/d/dash-1?orgId=1&from=2019-02-11T13:00:00.000Z&to=2019-02-11T19:00:00.000Z&viewPanel=A$panel-12'
+      );
+    });
   });
 });
 
