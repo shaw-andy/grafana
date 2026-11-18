@@ -28,6 +28,18 @@ export interface RegressionTransformerOptions {
 
 export const DEFAULTS = { predictionCount: 100, modelType: ModelType.linear, degree: 2 };
 
+export const MIN_PREDICTION_COUNT = 2;
+export const MAX_PREDICTION_COUNT = 1000;
+
+// Saved dashboard JSON is untyped, so the count may be a string, non-finite, or unbounded.
+export function getPredictionCount(value: unknown): number {
+  const count = typeof value === 'number' || typeof value === 'string' ? Number(value) : NaN;
+  if (!Number.isFinite(count) || count <= 0) {
+    return DEFAULTS.predictionCount;
+  }
+  return Math.min(Math.max(Math.floor(count), MIN_PREDICTION_COUNT), MAX_PREDICTION_COUNT);
+}
+
 export const DEGREES = [
   { label: () => t('transformers.regression-transformer-editor.label.quadratic', 'Quadratic'), value: 2 },
   { label: () => t('transformers.regression-transformer-editor.label.cubic', 'Cubic'), value: 3 },
@@ -51,7 +63,8 @@ export const getRegressionTransformer: () => SynchronousDataTransformerInfo<Regr
     source.pipe(map((data) => getRegressionTransformer().transformer(options, ctx)(data))),
   transformer: (options, ctx) => {
     return (frames: DataFrame[]) => {
-      const { predictionCount, modelType, degree } = { ...DEFAULTS, ...options };
+      const { modelType, degree } = { ...DEFAULTS, ...options };
+      const predictionCount = getPredictionCount(options.predictionCount);
       if (frames.length === 0) {
         return frames;
       }

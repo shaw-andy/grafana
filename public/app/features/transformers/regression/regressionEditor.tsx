@@ -7,7 +7,15 @@ import { FieldNamePicker } from '@grafana/ui/internal';
 import { NumberInput } from 'app/core/components/OptionsUI/NumberInput';
 
 import { FIELD_MATCHERS, LABEL_WIDTH, fieldNamePickerSettings, getModelTypeOptions } from './constants';
-import { DEFAULTS, DEGREES, ModelType, type RegressionTransformerOptions } from './regression';
+import {
+  DEFAULTS,
+  DEGREES,
+  MAX_PREDICTION_COUNT,
+  MIN_PREDICTION_COUNT,
+  ModelType,
+  getPredictionCount,
+  type RegressionTransformerOptions,
+} from './regression';
 import { findFirstFieldByMatcher } from './utils';
 
 export const RegressionTransformerEditor = ({
@@ -88,7 +96,10 @@ export const RegressionTransformerEditor = ({
       >
         <NumberInput
           value={options.predictionCount ?? DEFAULTS.predictionCount}
-          onChange={(v) => onChange({ ...options, predictionCount: v })}
+          min={MIN_PREDICTION_COUNT}
+          max={MAX_PREDICTION_COUNT}
+          step={1}
+          onChange={(v) => onChange({ ...options, predictionCount: v === undefined ? v : getPredictionCount(v) })}
         />
       </RegressionField>
       {options.modelType === ModelType.polynomial && (
