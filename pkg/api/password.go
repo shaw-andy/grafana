@@ -26,33 +26,38 @@ func (hs *HTTPServer) SendResetPasswordEmail(c *contextmodel.ReqContext) respons
 		return response.Error(http.StatusBadRequest, "bad request data", err)
 	}
 
-	userQuery := user.GetUserByLoginQuery{LoginOrEmail: form.UserOrEmail}
+	// The response must be identical for every outcome below, otherwise this
+	// unauthenticated endpoint reveals which accounts exist.
+	hs.sendResetPasswordEmail(c, form.UserOrEmail)
+	return response.Success("Email sent")
+}
+
+func (hs *HTTPServer) sendResetPasswordEmail(c *contextmodel.ReqContext, userOrEmail string) {
+	userQuery := user.GetUserByLoginQuery{LoginOrEmail: userOrEmail}
 
 	usr, err := hs.userService.GetByLoginWithPassword(c.Req.Context(), &userQuery)
 	if err != nil {
 		c.Logger.Info("Requested password reset for user that was not found", "user", userQuery.LoginOrEmail, "error", err)
-		return response.Error(http.StatusOK, "Email sent", nil)
+		return
 	}
 
 	if usr.IsDisabled {
 		c.Logger.Info("Requested password reset for disabled user", "user", userQuery.LoginOrEmail)
-		return response.Error(http.StatusOK, "Email sent", nil)
+		return
 	}
 
 	getAuthQuery := login.GetAuthInfoQuery{UserId: usr.ID}
 	if authInfo, err := hs.authInfoService.GetAuthInfo(c.Req.Context(), &getAuthQuery); err == nil {
 		if hs.isProviderEnabled(c.Req.Context(), hs.Cfg, authInfo.AuthModule) {
 			c.Logger.Info("Requested password reset for external user", nil)
-			return response.Error(http.StatusOK, "Email sent", nil)
+			return
 		}
 	}
 
 	emailCmd := notifications.SendResetPasswordEmailCommand{User: usr}
 	if err := hs.NotificationService.SendResetPasswordEmail(c.Req.Context(), &emailCmd); err != nil {
-		return response.Error(http.StatusInternalServerError, "Failed to send email", err)
+		c.Logger.Error("Failed to send password reset email", "error", err)
 	}
-
-	return response.Success("Email sent")
 }
 
 func (hs *HTTPServer) ResetPassword(c *contextmodel.ReqContext) response.Response {

@@ -253,20 +253,27 @@ func (ns *NotificationService) ValidateResetPasswordCode(ctx context.Context, qu
 		return nil, ErrInvalidEmailCode
 	}
 
-	user, err := userByLogin(ctx, login)
+	// The login comes from the untrusted code, so an unknown login and a
+	// malformed code must fail exactly like a wrong code, otherwise the
+	// response reveals which accounts exist.
+	usr, err := userByLogin(ctx, login)
 	if err != nil {
+		if errors.Is(err, user.ErrUserNotFound) {
+			return nil, ErrInvalidEmailCode
+		}
 		return nil, err
 	}
 
-	validEmailCode, err := validateUserEmailCode(ns.Cfg, user, query.Code)
+	validEmailCode, err := validateUserEmailCode(ns.Cfg, usr, query.Code)
 	if err != nil {
-		return nil, err
+		ns.log.Debug("Failed to validate reset password code", "error", err)
+		return nil, ErrInvalidEmailCode
 	}
 	if !validEmailCode {
 		return nil, ErrInvalidEmailCode
 	}
 
-	return user, nil
+	return usr, nil
 }
 
 func (ns *NotificationService) SendVerificationEmail(ctx context.Context, cmd *SendVerifyEmailCommand) error {
