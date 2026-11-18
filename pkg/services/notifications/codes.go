@@ -53,21 +53,45 @@ func createTimeLimitCode(secretKey string, payload string, minutes int, startStr
 	return code, nil
 }
 
+// parseTimeLimitCode checks that code starts with a well-formed time limit code
+// and returns its start string and validity in minutes.
+func parseTimeLimitCode(code string) (string, int, error) {
+	if len(code) < timeLimitCodeLength {
+		return "", 0, fmt.Errorf("invalid time limit code: too short")
+	}
+
+	startStr := code[:timeLimitStartDateLength]
+	if _, err := time.ParseInLocation("200601021504", startStr, time.Local); err != nil {
+		return "", 0, fmt.Errorf("invalid time limit code: %v", err)
+	}
+
+	minutesStr := code[timeLimitStartDateLength : timeLimitStartDateLength+timeLimitMinutesLength]
+	minutes, err := strconv.Atoi(minutesStr)
+	if err != nil {
+		return "", 0, fmt.Errorf("invalid time limit code: %v", err)
+	}
+	if minutes <= 0 {
+		return "", 0, fmt.Errorf("invalid time limit code: non-positive validity")
+	}
+
+	if _, err := hex.DecodeString(code[timeLimitStartDateLength+timeLimitMinutesLength : timeLimitCodeLength]); err != nil {
+		return "", 0, fmt.Errorf("invalid time limit code: %v", err)
+	}
+
+	return startStr, minutes, nil
+}
+
 // verify time limit code
 func validateUserEmailCode(cfg *setting.Cfg, user *user.User, code string) (bool, error) {
 	if len(code) <= 18 {
 		return false, nil
 	}
 
-	code = code[:timeLimitCodeLength]
-
-	// split code
-	startStr := code[:timeLimitStartDateLength]
-	minutesStr := code[timeLimitStartDateLength : timeLimitStartDateLength+timeLimitMinutesLength]
-	minutes, err := strconv.Atoi(minutesStr)
+	startStr, minutes, err := parseTimeLimitCode(code)
 	if err != nil {
-		return false, fmt.Errorf("invalid time limit code: %v", err)
+		return false, err
 	}
+	code = code[:timeLimitCodeLength]
 
 	// right active code
 	payload := strconv.FormatInt(user.ID, 10) + user.Email + user.Login + string(user.Password) + user.Rands
@@ -75,7 +99,7 @@ func validateUserEmailCode(cfg *setting.Cfg, user *user.User, code string) (bool
 	if err != nil {
 		return false, err
 	}
-	if hmac.Equal([]byte(code), []byte(expectedCode)) && minutes > 0 {
+	if hmac.Equal([]byte(code), []byte(expectedCode)) {
 		// check time is expired or not
 		before, err := time.ParseInLocation("200601021504", startStr, time.Local)
 		if err != nil {
@@ -97,7 +121,10 @@ func getLoginForEmailCode(code string) string {
 
 	// use tail hex username query user
 	hexStr := code[timeLimitCodeLength:]
-	b, _ := hex.DecodeString(hexStr)
+	b, err := hex.DecodeString(hexStr)
+	if err != nil {
+		return ""
+	}
 	return string(b)
 }
 

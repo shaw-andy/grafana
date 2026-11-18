@@ -252,21 +252,27 @@ func (ns *NotificationService) ValidateResetPasswordCode(ctx context.Context, qu
 	if login == "" {
 		return nil, ErrInvalidEmailCode
 	}
-
-	user, err := userByLogin(ctx, login)
-	if err != nil {
-		return nil, err
-	}
-
-	validEmailCode, err := validateUserEmailCode(ns.Cfg, user, query.Code)
-	if err != nil {
-		return nil, err
-	}
-	if !validEmailCode {
+	if _, _, err := parseTimeLimitCode(query.Code); err != nil {
 		return nil, ErrInvalidEmailCode
 	}
 
-	return user, nil
+	usr, err := userByLogin(ctx, login)
+	if err != nil {
+		if errors.Is(err, user.ErrUserNotFound) {
+			// Callers must not be able to tell an unknown login from a bad
+			// signature, so do the same signature work and fail the same way.
+			_, _ = validateUserEmailCode(ns.Cfg, &user.User{}, query.Code)
+			return nil, ErrInvalidEmailCode
+		}
+		return nil, err
+	}
+
+	validEmailCode, err := validateUserEmailCode(ns.Cfg, usr, query.Code)
+	if err != nil || !validEmailCode {
+		return nil, ErrInvalidEmailCode
+	}
+
+	return usr, nil
 }
 
 func (ns *NotificationService) SendVerificationEmail(ctx context.Context, cmd *SendVerifyEmailCommand) error {

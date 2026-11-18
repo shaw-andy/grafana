@@ -86,7 +86,7 @@ func (hs *HTTPServer) ResetPassword(c *contextmodel.ReqContext) response.Respons
 
 	userResult, err := hs.NotificationService.ValidateResetPasswordCode(c.Req.Context(), &query, getUserByLogin)
 	if err != nil {
-		if errors.Is(err, notifications.ErrInvalidEmailCode) {
+		if errors.Is(err, notifications.ErrInvalidEmailCode) || errors.Is(err, user.ErrUserNotFound) {
 			return response.Error(http.StatusBadRequest, "Invalid or expired reset password code", nil)
 		}
 		return response.Error(http.StatusInternalServerError, "Unknown error validating email code", err)
