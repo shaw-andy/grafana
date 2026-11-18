@@ -1337,6 +1337,7 @@ func (b *DashboardsAPIBuilder) storageForVersion(
 			ResourceInfo:          *snapshots,
 			Service:               b.snapshotService,
 			Namespacer:            b.namespacer,
+			ExternalSnapshotURL:   b.snapshotOptions.ExternalSnapshotURL,
 			ExternalSnapshotToken: b.snapshotOptions.ExternalSnapshotToken,
 		}
 

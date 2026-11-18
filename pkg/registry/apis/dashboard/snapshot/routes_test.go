@@ -359,7 +359,7 @@ func TestCreateExternalSnapshot(t *testing.T) {
 				Key:       "ext-key",
 				DeleteKey: "ext-delete-key",
 				URL:       "https://external.example.com/snapshots/ext-key",
-				DeleteURL: "https://external.example.com/api/snapshots-delete/ext-delete-key",
+				DeleteURL: "http://" + r.Host + "/api/snapshots-delete/ext-delete-key",
 			})
 		}))
 		defer externalServer.Close()
@@ -619,7 +619,7 @@ func TestCreateExternalSnapshotLegacy(t *testing.T) {
 				"key":       "ext-key",
 				"deleteKey": "ext-delete-key",
 				"url":       "https://external.example.com/dashboard/snapshot/ext-key",
-				"deleteUrl": "https://external.example.com/api/snapshots-delete/ext-delete-key",
+				"deleteUrl": "http://" + r.Host + "/api/snapshots-delete/ext-delete-key",
 			})
 		}))
 		defer externalServer.Close()
@@ -731,7 +731,7 @@ func TestDeleteExternalSnapshotLegacy(t *testing.T) {
 		defer server.Close()
 
 		// URL is in K8s format — function must strip the path and rebuild as legacy.
-		err := deleteExternalSnapshotLegacy(server.URL + "/apis/dashboard.grafana.app/v0alpha1/namespaces/default/snapshots/delete/abc")
+		err := deleteExternalSnapshotLegacy(server.URL+"/apis/dashboard.grafana.app/v0alpha1/namespaces/default/snapshots/delete/abc", server.URL)
 		require.NoError(t, err)
 		require.NotNil(t, receivedReq)
 		assert.Equal(t, http.MethodGet, receivedReq.Method)
@@ -746,7 +746,7 @@ func TestDeleteExternalSnapshotLegacy(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := deleteExternalSnapshotLegacy(server.URL + "/api/snapshots-delete/xyz")
+		err := deleteExternalSnapshotLegacy(server.URL+"/api/snapshots-delete/xyz", server.URL)
 		require.NoError(t, err)
 		assert.Equal(t, "/api/snapshots-delete/xyz", receivedReq.URL.Path)
 	})
@@ -757,7 +757,7 @@ func TestDeleteExternalSnapshotLegacy(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := deleteExternalSnapshotLegacy(server.URL + "/api/snapshots-delete/k")
+		err := deleteExternalSnapshotLegacy(server.URL+"/api/snapshots-delete/k", server.URL)
 		require.Error(t, err)
 	})
 
@@ -767,7 +767,7 @@ func TestDeleteExternalSnapshotLegacy(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := deleteExternalSnapshotLegacy(server.URL + "/api/snapshots-delete/already-gone")
+		err := deleteExternalSnapshotLegacy(server.URL+"/api/snapshots-delete/already-gone", server.URL)
 		require.NoError(t, err)
 	})
 
@@ -778,7 +778,7 @@ func TestDeleteExternalSnapshotLegacy(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := deleteExternalSnapshotLegacy(server.URL + "/api/snapshots-delete/already-gone")
+		err := deleteExternalSnapshotLegacy(server.URL+"/api/snapshots-delete/already-gone", server.URL)
 		require.NoError(t, err)
 	})
 
@@ -789,7 +789,7 @@ func TestDeleteExternalSnapshotLegacy(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := deleteExternalSnapshotLegacy(server.URL + "/api/snapshots-delete/k")
+		err := deleteExternalSnapshotLegacy(server.URL+"/api/snapshots-delete/k", server.URL)
 		require.Error(t, err)
 	})
 }
@@ -897,7 +897,7 @@ func TestDeleteExternalSnapshot(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := deleteExternalSnapshot(server.URL+"/delete/mykey", "test-token")
+		err := deleteExternalSnapshot(server.URL+"/delete/mykey", "test-token", server.URL)
 		require.NoError(t, err)
 		assert.Equal(t, http.MethodDelete, receivedReq.Method)
 		assert.Equal(t, "Bearer test-token", receivedReq.Header.Get("Authorization"))
@@ -911,7 +911,7 @@ func TestDeleteExternalSnapshot(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := deleteExternalSnapshot(server.URL+"/delete/mykey", "")
+		err := deleteExternalSnapshot(server.URL+"/delete/mykey", "", server.URL)
 		require.NoError(t, err)
 		assert.Empty(t, receivedReq.Header.Get("Authorization"))
 	})
@@ -922,7 +922,7 @@ func TestDeleteExternalSnapshot(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := deleteExternalSnapshot(server.URL+"/delete/mykey", "bad-token")
+		err := deleteExternalSnapshot(server.URL+"/delete/mykey", "bad-token", server.URL)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "403")
 	})
@@ -933,7 +933,7 @@ func TestDeleteExternalSnapshot(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := deleteExternalSnapshot(server.URL+"/delete/mykey", "token")
+		err := deleteExternalSnapshot(server.URL+"/delete/mykey", "token", server.URL)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "500")
 	})
@@ -944,7 +944,7 @@ func TestDeleteExternalSnapshot(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := deleteExternalSnapshot(server.URL+"/delete/mykey", "token")
+		err := deleteExternalSnapshot(server.URL+"/delete/mykey", "token", server.URL)
 		require.NoError(t, err)
 	})
 }

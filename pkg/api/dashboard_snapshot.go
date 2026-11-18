@@ -190,7 +190,7 @@ func (hs *HTTPServer) DeleteDashboardSnapshotByDeleteKey(c *contextmodel.ReqCont
 		return response.Error(http.StatusNotFound, "Snapshot not found", nil)
 	}
 
-	err := dashboardsnapshots.DeleteWithKey(c.Req.Context(), key, hs.dashboardsnapshotsService)
+	err := dashboardsnapshots.DeleteWithKey(c.Req.Context(), key, hs.dashboardsnapshotsService, hs.Cfg.ExternalSnapshotUrl)
 	if err != nil {
 		if errors.Is(err, dashboardsnapshots.ErrBaseNotFound) {
 			return response.Error(http.StatusNotFound, "Snapshot not found", err)
@@ -263,7 +263,7 @@ func (hs *HTTPServer) DeleteDashboardSnapshot(c *contextmodel.ReqContext) respon
 	}
 
 	if queryResult.External {
-		err := dashboardsnapshots.DeleteExternalDashboardSnapshot(queryResult.ExternalDeleteURL)
+		err := dashboardsnapshots.DeleteExternalDashboardSnapshot(queryResult.ExternalDeleteURL, hs.Cfg.ExternalSnapshotUrl)
 		if err != nil {
 			return response.Error(http.StatusInternalServerError, "Failed to delete external dashboard", err)
 		}

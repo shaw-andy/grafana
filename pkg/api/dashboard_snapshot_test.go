@@ -145,6 +145,7 @@ func TestDashboardSnapshotAPIEndpoint_singleSnapshot(t *testing.T) {
 				})
 				d := setUpSnapshotTest(t, 0, ts.URL)
 				hs := buildHttpServer(d, true)
+				hs.Cfg.ExternalSnapshotUrl = ts.URL
 
 				sc.handlerFunc = hs.DeleteDashboardSnapshotByDeleteKey
 				sc.fakeReqWithParams("GET", sc.url, map[string]string{"deleteKey": "12345"}).exec()
@@ -174,6 +175,7 @@ func TestDashboardSnapshotAPIEndpoint_singleSnapshot(t *testing.T) {
 				dashSvc := dashboards.NewFakeDashboardService(t)
 				d := setUpSnapshotTest(t, testUserID, ts.URL)
 				hs := buildHttpServer(d, true)
+				hs.Cfg.ExternalSnapshotUrl = ts.URL
 				hs.DashboardService = dashSvc
 				sc.handlerFunc = hs.DeleteDashboardSnapshot
 				sc.fakeReqWithParams("DELETE", sc.url, map[string]string{"key": "12345"}).exec()
@@ -197,6 +199,7 @@ func TestDashboardSnapshotAPIEndpoint_singleSnapshot(t *testing.T) {
 				})
 				d := setUpSnapshotTest(t, testUserID, ts.URL)
 				hs := buildHttpServer(d, true)
+				hs.Cfg.ExternalSnapshotUrl = ts.URL
 				sc.handlerFunc = hs.DeleteDashboardSnapshot
 				sc.fakeReqWithParams("DELETE", sc.url, map[string]string{"key": "12345"}).exec()
 
@@ -212,6 +215,7 @@ func TestDashboardSnapshotAPIEndpoint_singleSnapshot(t *testing.T) {
 				})
 				d := setUpSnapshotTest(t, testUserID, ts.URL)
 				hs := buildHttpServer(d, true)
+				hs.Cfg.ExternalSnapshotUrl = ts.URL
 				sc.handlerFunc = hs.DeleteDashboardSnapshot
 				sc.fakeReqWithParams("DELETE", sc.url, map[string]string{"key": "12345"}).exec()
 

@@ -64,7 +64,7 @@ func setExternalSnapshotsK8SAPIPushToggle(t *testing.T, enabled bool) {
 func TestSnapshotLegacyStore_Delete_External(t *testing.T) {
 	const deleteKey = "abc123"
 
-	makeStore := func(t *testing.T, externalDeleteURL string) *SnapshotLegacyStore {
+	makeStore := func(t *testing.T, externalSnapshotURL, externalDeleteURL string) *SnapshotLegacyStore {
 		mockService := dashboardsnapshots.NewMockService(t)
 		mockService.On("GetDashboardSnapshot", mock.Anything, mock.Anything).
 			Return(&dashboardsnapshots.DashboardSnapshot{
@@ -81,6 +81,7 @@ func TestSnapshotLegacyStore_Delete_External(t *testing.T) {
 		return &SnapshotLegacyStore{
 			ResourceInfo:          dashV0.SnapshotResourceInfo,
 			Service:               mockService,
+			ExternalSnapshotURL:   externalSnapshotURL,
 			ExternalSnapshotToken: "test-token",
 		}
 	}
@@ -97,7 +98,7 @@ func TestSnapshotLegacyStore_Delete_External(t *testing.T) {
 
 		// Stored ExternalDeleteURL has the new k8s path; the legacy store should rebuild
 		// the URL from the domain + deleteKey rather than using it as-is.
-		store := makeStore(t, server.URL+"/apis/dashboard.grafana.app/v0alpha1/namespaces/default/snapshots/delete/"+deleteKey)
+		store := makeStore(t, server.URL, server.URL+"/apis/dashboard.grafana.app/v0alpha1/namespaces/default/snapshots/delete/"+deleteKey)
 
 		_, _, err := store.Delete(ctxForOrg(1), "snap-1", nil, &metav1.DeleteOptions{})
 		require.NoError(t, err)
@@ -117,7 +118,7 @@ func TestSnapshotLegacyStore_Delete_External(t *testing.T) {
 		}))
 		defer server.Close()
 
-		store := makeStore(t, server.URL+"/api/snapshots-delete/"+deleteKey)
+		store := makeStore(t, server.URL, server.URL+"/api/snapshots-delete/"+deleteKey)
 
 		_, _, err := store.Delete(ctxForOrg(1), "snap-1", nil, &metav1.DeleteOptions{})
 		require.NoError(t, err)
@@ -139,7 +140,7 @@ func TestSnapshotLegacyStore_Delete_External(t *testing.T) {
 
 		// Stored URL has a stale/wrong legacy path; with the toggle ON the store should
 		// extract just the domain and rebuild the new k8s path.
-		store := makeStore(t, server.URL+"/api/snapshots-delete/"+deleteKey)
+		store := makeStore(t, server.URL, server.URL+"/api/snapshots-delete/"+deleteKey)
 
 		_, _, err := store.Delete(ctxForOrg(1), "snap-1", nil, &metav1.DeleteOptions{})
 		require.NoError(t, err)
@@ -151,7 +152,7 @@ func TestSnapshotLegacyStore_Delete_External(t *testing.T) {
 	t.Run("returns error on invalid ExternalDeleteURL", func(t *testing.T) {
 		setExternalSnapshotsK8SAPIPushToggle(t, true)
 
-		store := makeStore(t, "not-a-url")
+		store := makeStore(t, "", "not-a-url")
 
 		_, _, err := store.Delete(ctxForOrg(1), "snap-1", nil, &metav1.DeleteOptions{})
 		require.Error(t, err)
