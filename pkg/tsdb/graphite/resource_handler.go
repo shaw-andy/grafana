@@ -98,7 +98,12 @@ func handleResourceReq[T any](handlerFn resourceHandler[T], s *Service) func(rw 
 	}
 }
 
+var errMissingRequestBody = errors.New("request body is required")
+
 func (s *Service) handleEvents(ctx context.Context, dsInfo *datasourceInfo, eventsRequestJson *GraphiteEventsRequest) ([]byte, int, error) {
+	if eventsRequestJson == nil {
+		return nil, http.StatusBadRequest, errMissingRequestBody
+	}
 	queryParams := map[string][]string{
 		"from":  {eventsRequestJson.From},
 		"until": {eventsRequestJson.Until},
@@ -132,6 +137,9 @@ func (s *Service) handleEvents(ctx context.Context, dsInfo *datasourceInfo, even
 }
 
 func (s *Service) handleMetricsFind(ctx context.Context, dsInfo *datasourceInfo, metricsFindRequestJson *GraphiteMetricsFindRequest) ([]byte, int, error) {
+	if metricsFindRequestJson == nil {
+		return nil, http.StatusBadRequest, errMissingRequestBody
+	}
 	if metricsFindRequestJson.Query == "" {
 		return nil, http.StatusBadRequest, fmt.Errorf("query is required")
 	}
@@ -172,6 +180,9 @@ func (s *Service) handleMetricsFind(ctx context.Context, dsInfo *datasourceInfo,
 }
 
 func (s *Service) handleMetricsExpand(ctx context.Context, dsInfo *datasourceInfo, metricsExpandRequestJson *GraphiteMetricsFindRequest) ([]byte, int, error) {
+	if metricsExpandRequestJson == nil {
+		return nil, http.StatusBadRequest, errMissingRequestBody
+	}
 	if metricsExpandRequestJson.Query == "" {
 		return nil, http.StatusBadRequest, fmt.Errorf("query is required")
 	}
@@ -215,6 +226,9 @@ func (s *Service) handleMetricsExpand(ctx context.Context, dsInfo *datasourceInf
 }
 
 func (s *Service) handleTagsAutocomplete(ctx context.Context, dsInfo *datasourceInfo, tagsAutocompleteRequestJson *GraphiteTagsRequest) ([]byte, int, error) {
+	if tagsAutocompleteRequestJson == nil {
+		return nil, http.StatusBadRequest, errMissingRequestBody
+	}
 	queryParams := map[string][]string{
 		"from":      {tagsAutocompleteRequestJson.From},
 		"until":     {tagsAutocompleteRequestJson.Until},
@@ -243,6 +257,9 @@ func (s *Service) handleTagsAutocomplete(ctx context.Context, dsInfo *datasource
 }
 
 func (s *Service) handleTagValuesAutocomplete(ctx context.Context, dsInfo *datasourceInfo, tagValuesAutocompleteRequestJson *GraphiteTagValuesRequest) ([]byte, int, error) {
+	if tagValuesAutocompleteRequestJson == nil {
+		return nil, http.StatusBadRequest, errMissingRequestBody
+	}
 	queryParams := map[string][]string{
 		"expr":        tagValuesAutocompleteRequestJson.Expr,
 		"tag":         {tagValuesAutocompleteRequestJson.Tag},
@@ -352,8 +369,11 @@ func doGraphiteRequest[T any](ctx context.Context, dsInfo *datasourceInfo, logge
 }
 
 func parseRequestBody[V any](requestBody []byte, logger log.Logger) (*V, error) {
+	if bytes.Equal(bytes.TrimSpace(requestBody), []byte("null")) {
+		return nil, errors.New("request body must not be null")
+	}
 	requestJson := new(V)
-	err := json.Unmarshal(requestBody, &requestJson)
+	err := json.Unmarshal(requestBody, requestJson)
 	if err != nil {
 		logger.Error("Failed to unmarshal request body to JSON", "error", err)
 		return nil, fmt.Errorf("unexpected error %v", err)
@@ -378,7 +398,7 @@ func parseResponse[V any](res *http.Response, isRaw bool, logger log.Logger, max
 	}
 
 	data := new(V)
-	err = json.Unmarshal(body, &data)
+	err = json.Unmarshal(body, data)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to unmarshal response: %v", err)
 	}
