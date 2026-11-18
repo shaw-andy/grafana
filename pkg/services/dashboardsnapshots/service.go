@@ -52,6 +52,10 @@ func CreateDashboardSnapshot(c *contextmodel.ReqContext, cfg snapshot.SnapshotSh
 		c.JsonApiErr(http.StatusForbidden, "External dashboard creation is disabled", nil)
 		return
 	}
+	if err := ValidateSnapshotKeys(&cmd); err != nil {
+		c.WriteErr(err)
+		return
+	}
 
 	uid := cmd.Dashboard.GetNestedString("uid")
 
@@ -124,6 +128,10 @@ func CreateDashboardSnapshot(c *contextmodel.ReqContext, cfg snapshot.SnapshotSh
 func CreateDashboardSnapshotPublic(c *contextmodel.ReqContext, cfg snapshot.SnapshotSharingOptions, cmd CreateDashboardSnapshotCommand, svc Service) {
 	if !cfg.SnapshotsEnabled {
 		c.JsonApiErr(http.StatusForbidden, "Dashboard Snapshots are disabled", nil)
+		return
+	}
+	if err := ValidateSnapshotKeys(&cmd); err != nil {
+		c.WriteErr(err)
 		return
 	}
 
