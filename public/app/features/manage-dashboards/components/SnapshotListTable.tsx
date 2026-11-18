@@ -18,7 +18,7 @@ export async function getSnapshots(opts?: SnapshotListOptions): Promise<Snapshot
   return {
     items: page.items.map((snapshot) => ({
       ...snapshot,
-      url: `${config.appUrl}dashboard/snapshot/${snapshot.key}`,
+      url: `${config.appUrl}dashboard/snapshot/${encodeURIComponent(snapshot.key)}`,
     })),
     continueToken: page.continueToken,
   };
