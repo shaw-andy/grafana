@@ -29,6 +29,7 @@ import icnDatasourceSvg from 'img/icn-datasource.svg';
 
 import { ExpressionQueryEditor } from './ExpressionQueryEditor';
 import { ExpressionDatasourceUID, type ExpressionQuery, ExpressionQueryType } from './types';
+import { interpolateExpressionQuery } from './utils/interpolateExpression';
 
 const SQL_DISPLAY_NAME_FIELD = '__display_name__';
 const SQL_VALUE_FIELD = '__value__';
@@ -97,11 +98,9 @@ export class ExpressionDatasourceApi extends DataSourceWithBackend<ExpressionQue
   }
 
   applyTemplateVariables(query: ExpressionQuery, scopedVars: ScopedVars) {
-    const templateSrv = getTemplateSrv();
     return {
       ...query,
-      expression: templateSrv.replace(query.expression, scopedVars),
-      window: templateSrv.replace(query.window, scopedVars),
+      ...interpolateExpressionQuery(query, getTemplateSrv(), scopedVars),
     };
   }
 
