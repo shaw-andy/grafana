@@ -25,14 +25,14 @@ func (s *ManagedStreamSubscriber) Type() string {
 }
 
 func (s *ManagedStreamSubscriber) Subscribe(ctx context.Context, vars Vars, _ []byte) (model.SubscribeReply, backend.SubscribeStreamStatus, error) {
+	u, err := identity.GetRequester(ctx)
+	if err != nil || !managedstream.CanRead(u) {
+		return model.SubscribeReply{}, backend.SubscribeStreamStatusPermissionDenied, nil
+	}
 	stream, err := s.managedStream.GetOrCreateStream(vars.NS, vars.Scope, vars.Stream)
 	if err != nil {
 		logger.Error("Error getting managed stream", "error", err)
 		return model.SubscribeReply{}, 0, err
-	}
-	u, err := identity.GetRequester(ctx)
-	if err != nil {
-		return model.SubscribeReply{}, backend.SubscribeStreamStatusPermissionDenied, nil
 	}
 	return stream.OnSubscribe(ctx, u, model.SubscribeEvent{
 		Channel: vars.Channel,

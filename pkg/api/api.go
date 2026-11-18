@@ -546,7 +546,7 @@ func (hs *HTTPServer) registerRoutes() {
 			liveRoute.Post("/push/:streamId", authorize(ac.EvalPermission(ac.ActionLivePush)), hs.LivePushGateway.Handle)
 
 			// List available streams and fields
-			liveRoute.Get("/list", routing.Wrap(hs.Live.HandleListHTTP))
+			liveRoute.Get("/list", authorize(ac.EvalPermission(ac.ActionLivePush)), routing.Wrap(hs.Live.HandleListHTTP))
 
 			// Some channels may have info
 			liveRoute.Get("/info/*", routing.Wrap(hs.Live.HandleInfoHTTP))

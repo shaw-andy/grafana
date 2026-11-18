@@ -747,6 +747,12 @@ func (g *GrafanaLive) handleOnSubscribe(clientContextWithSpan context.Context, c
 		return centrifuge.SubscribeReply{}, centrifuge.ErrorPermissionDenied
 	}
 
+	if addr, err := live.ParseChannel(channel); err == nil && addr.Scope == live.ScopeStream && !managedstream.CanRead(user) {
+		logger.Debug("Error subscribing: no permission to read managed stream", "user", client.UserID(), "client", client.ID(), "channel", e.Channel)
+		code, text := subscribeStatusToHTTPError(backend.SubscribeStreamStatusPermissionDenied)
+		return centrifuge.SubscribeReply{}, &centrifuge.Error{Code: uint32(code), Message: text}
+	}
+
 	var reply model.SubscribeReply
 	var status backend.SubscribeStreamStatus
 	var ruleFound bool
