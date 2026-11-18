@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -79,6 +80,9 @@ func NewSimulationEngine() (*SimulationEngine, error) {
 
 func (s *SimulationEngine) Lookup(info simulationState) (Simulation, error) {
 	hz := info.Key.TickHZ
+	if math.IsNaN(hz) || math.IsInf(hz, 0) {
+		return nil, fmt.Errorf("frequency must be a finite number")
+	}
 	if hz < (1 / 60.0) {
 		return nil, fmt.Errorf("frequency is too slow")
 	}
@@ -278,7 +282,11 @@ func (s *SimulationEngine) RunStream(ctx context.Context, req *backend.RunStream
 	}
 
 	frequency := 1.0 / sim.GetState().Key.TickHZ
-	ticker := time.NewTicker(time.Duration(frequency * float64(time.Second)))
+	interval := time.Duration(frequency * float64(time.Second))
+	if interval <= 0 {
+		return fmt.Errorf("invalid simulation tick interval: %s", interval)
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	mode := data.IncludeDataOnly
