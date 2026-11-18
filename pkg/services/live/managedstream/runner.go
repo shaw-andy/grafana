@@ -14,6 +14,7 @@ import (
 
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/live/model"
 	"github.com/grafana/grafana/pkg/services/live/orgchannel"
 )
@@ -241,8 +242,20 @@ func (s *Stream) GetHandlerForPath(_ string) (model.ChannelHandler, error) {
 	return s, nil
 }
 
+// CanRead reports whether u may read managed stream frames in its own organization.
+// Pushed frames are only visible to identities that are allowed to push them.
+func CanRead(u identity.Requester) bool {
+	if u == nil || u.IsNil() {
+		return false
+	}
+	return accesscontrol.EvalPermission(accesscontrol.ActionLivePush).Evaluate(u.GetPermissions())
+}
+
 func (s *Stream) OnSubscribe(ctx context.Context, u identity.Requester, e model.SubscribeEvent) (model.SubscribeReply, backend.SubscribeStreamStatus, error) {
 	reply := model.SubscribeReply{}
+	if !CanRead(u) {
+		return reply, backend.SubscribeStreamStatusPermissionDenied, nil
+	}
 	frameJSON, ok, err := s.frameCache.GetFrame(ctx, u.GetNamespace(), e.Channel)
 	if err != nil {
 		return reply, 0, err

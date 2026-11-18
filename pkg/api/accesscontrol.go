@@ -681,7 +681,7 @@ func FixedRoleRegistrations(viewersCanEdit, dsPermissionsEnforced bool) []ac.Rol
 		Role: ac.RoleDTO{
 			Name:        "fixed:live:writer",
 			DisplayName: "Writer",
-			Description: "Push metrics and events to Grafana Live streams (via /api/live/push).",
+			Description: "Push metrics and events to Grafana Live streams (via /api/live/push) and read pushed streams.",
 			Group:       "Live",
 			Permissions: []ac.Permission{
 				{Action: ac.ActionLivePush},
