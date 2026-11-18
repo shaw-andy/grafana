@@ -57,10 +57,10 @@ const legacyDashboardSnapshotSrv: DashboardSnapshotSrv = {
     return { items, continueToken: undefined };
   },
   getSharingOptions: () => getBackendSrv().get<SnapshotSharingOptions>('/api/snapshot/shared-options'),
-  deleteSnapshot: (key: string) => getBackendSrv().delete('/api/snapshots/' + key),
+  deleteSnapshot: (key: string) => getBackendSrv().delete('/api/snapshots/' + encodeURIComponent(key)),
   getSnapshot: async (key: string) => {
     try {
-      const dto = await getBackendSrv().get<DashboardDTO>('/api/snapshots/' + key);
+      const dto = await getBackendSrv().get<DashboardDTO>('/api/snapshots/' + encodeURIComponent(key));
       dto.meta.canShare = false;
       return dto;
     } catch (e) {
@@ -107,7 +107,7 @@ class K8sAPI implements DashboardSnapshotSrv {
   }
 
   async deleteSnapshot(uid: string) {
-    await dispatch(dashboardAPIv0alpha1.endpoints.deleteSnapshot.initiate({ name: uid })).unwrap();
+    await dispatch(dashboardAPIv0alpha1.endpoints.deleteSnapshot.initiate({ name: encodeURIComponent(uid) })).unwrap();
   }
 
   async getSharingOptions(): Promise<SnapshotSharingOptions> {
@@ -127,11 +127,12 @@ class K8sAPI implements DashboardSnapshotSrv {
     // For anonymous callers (`org-0`) the dashboard v0alpha1 baseAPI routes these
     // read-by-key endpoints to the `default` namespace, so the public snapshot view works
     // through RTK like every other method.
+    const name = encodeURIComponent(uid);
     const snapshotPromise = dispatch(
-      dashboardAPIv0alpha1.endpoints.getSnapshot.initiate({ name: uid }, { forceRefetch: true })
+      dashboardAPIv0alpha1.endpoints.getSnapshot.initiate({ name }, { forceRefetch: true })
     );
     const dashboardPromise = dispatch(
-      dashboardAPIv0alpha1.endpoints.getSnapshotDashboard.initiate({ name: uid }, { forceRefetch: true })
+      dashboardAPIv0alpha1.endpoints.getSnapshotDashboard.initiate({ name }, { forceRefetch: true })
     );
     try {
       const [snapshotResponse, dashboardResponse] = await Promise.all([

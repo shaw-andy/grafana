@@ -290,6 +290,11 @@ func GetRoutes(options dashv0.SnapshotSharingOptions, accessControl ac.AccessCon
 						return
 					}
 
+					if err := dashboardsnapshots.ValidateSnapshotKeys(&cmd); err != nil {
+						errhttp.Write(ctx, err, w)
+						return
+					}
+
 					if cmd.External && !options.ExternalEnabled {
 						wrap.JsonApiErr(http.StatusForbidden, "External dashboard creation is disabled", nil)
 						return
