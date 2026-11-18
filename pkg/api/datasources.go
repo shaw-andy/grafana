@@ -69,7 +69,7 @@ func (hs *HTTPServer) GetDataSources(c *contextmodel.ReqContext) response.Respon
 			User:      ds.User,
 			BasicAuth: ds.BasicAuth,
 			IsDefault: ds.IsDefault,
-			JsonData:  ds.JsonData,
+			JsonData:  jsonDataForResponse(c, ds),
 			ReadOnly:  ds.ReadOnly,
 		}
 
@@ -126,7 +126,7 @@ func (hs *HTTPServer) GetDataSourceById(c *contextmodel.ReqContext) response.Res
 		return response.Error(http.StatusInternalServerError, "Failed to query datasources", err)
 	}
 
-	dto := hs.convertModelToDtos(c.Req.Context(), dataSource)
+	dto := hs.convertModelToDtos(c, dataSource)
 
 	// Add accesscontrol metadata
 	dto.AccessControl = getAccessControlMetadata(c, datasources.ScopePrefix, dto.UID)
@@ -216,7 +216,7 @@ func (hs *HTTPServer) GetDataSourceByUID(c *contextmodel.ReqContext) response.Re
 		return response.Error(http.StatusInternalServerError, "Failed to query datasource", err)
 	}
 
-	dto := hs.convertModelToDtos(c.Req.Context(), ds)
+	dto := hs.convertModelToDtos(c, ds)
 
 	// Add accesscontrol metadata
 	dto.AccessControl = getAccessControlMetadata(c, datasources.ScopePrefix, dto.UID)
@@ -429,7 +429,7 @@ func (hs *HTTPServer) AddDataSource(c *contextmodel.ReqContext) response.Respons
 	// Required for cases when caller wants to immediately interact with the newly created object
 	hs.accesscontrolService.ClearUserPermissionCache(c.SignedInUser)
 
-	ds := hs.convertModelToDtos(c.Req.Context(), dataSource)
+	ds := hs.convertModelToDtos(c, dataSource)
 	return response.JSON(http.StatusOK, util.DynMap{
 		"message":    "Datasource added",
 		"id":         dataSource.ID,
@@ -568,7 +568,7 @@ func (hs *HTTPServer) updateDataSourceByID(c *contextmodel.ReqContext, ds *datas
 		return response.Error(http.StatusInternalServerError, "Failed to query datasource", err)
 	}
 
-	datasourceDTO := hs.convertModelToDtos(c.Req.Context(), dataSource)
+	datasourceDTO := hs.convertModelToDtos(c, dataSource)
 
 	hs.Live.HandleDatasourceUpdate(c.GetOrgID(), datasourceDTO.UID)
 
@@ -633,7 +633,7 @@ func (hs *HTTPServer) GetDataSourceByName(c *contextmodel.ReqContext) response.R
 		return response.Error(http.StatusInternalServerError, "Failed to query datasources", err)
 	}
 
-	dto := hs.convertModelToDtos(c.Req.Context(), dataSource)
+	dto := hs.convertModelToDtos(c, dataSource)
 	return response.JSON(http.StatusOK, &dto)
 }
 
@@ -743,7 +743,17 @@ func (hs *HTTPServer) CallDatasourceResourceWithUID(c *contextmodel.ReqContext) 
 	hs.callPluginResourceWithDataSource(c, plugin.ID, ds)
 }
 
-func (hs *HTTPServer) convertModelToDtos(ctx context.Context, ds *datasources.DataSource) dtos.DataSource {
+// jsonDataForResponse omits the label-based access rules unless the caller can administer
+// permissions on the datasource, since the rules of every team are stored in its jsonData.
+func jsonDataForResponse(c *contextmodel.ReqContext, ds *datasources.DataSource) *simplejson.Json {
+	if datasources.CanReadTeamHTTPHeaders(c.GetPermissions(), ds.UID) {
+		return ds.JsonData
+	}
+	return datasources.JSONDataWithoutTeamHTTPHeaders(ds.JsonData)
+}
+
+func (hs *HTTPServer) convertModelToDtos(c *contextmodel.ReqContext, ds *datasources.DataSource) dtos.DataSource {
+	ctx := c.Req.Context()
 	dto := dtos.DataSource{
 		Id:               ds.ID,
 		UID:              ds.UID,
@@ -758,7 +768,7 @@ func (hs *HTTPServer) convertModelToDtos(ctx context.Context, ds *datasources.Da
 		BasicAuthUser:    ds.BasicAuthUser,
 		WithCredentials:  ds.WithCredentials,
 		IsDefault:        ds.IsDefault,
-		JsonData:         ds.JsonData,
+		JsonData:         jsonDataForResponse(c, ds),
 		SecureJsonFields: map[string]bool{},
 		Version:          ds.Version,
 		ReadOnly:         ds.ReadOnly,

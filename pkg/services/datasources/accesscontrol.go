@@ -47,3 +47,9 @@ var (
 		accesscontrol.EvalPermission(ActionWrite),
 	)
 )
+
+// CanReadTeamHTTPHeaders reports whether permissions allow reading the label-based access rules of
+// every team, which are stored in the jsonData of the datasource with the given uid.
+func CanReadTeamHTTPHeaders(permissions map[string][]string, uid string) bool {
+	return accesscontrol.EvalPermission(ActionPermissionsWrite, ScopeProvider.GetResourceScopeUID(uid)).Evaluate(permissions)
+}

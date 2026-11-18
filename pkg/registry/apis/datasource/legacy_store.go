@@ -70,7 +70,11 @@ func (s *legacyStorage) List(ctx context.Context, options *internalversion.ListO
 			metricutil.ObserveWithExemplar(ctx, s.dsConfigHandlerRequestsDuration.WithLabelValues("legacyStorage.List"), time.Since(start).Seconds())
 		}()
 	}
-	return s.datasources.ListDataSources(ctx)
+	list, err := s.datasources.ListDataSources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return listWithoutTeamHTTPHeaders(ctx, list), nil
 }
 
 func (s *legacyStorage) Get(ctx context.Context, name string, options *metav1.GetOptions) (runtime.Object, error) {
@@ -81,7 +85,11 @@ func (s *legacyStorage) Get(ctx context.Context, name string, options *metav1.Ge
 		}()
 	}
 
-	return s.datasources.GetDataSource(ctx, name)
+	ds, err := s.datasources.GetDataSource(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return withoutTeamHTTPHeaders(ctx, ds), nil
 }
 
 // Create implements rest.Creater.
@@ -132,12 +140,12 @@ func (s *legacyStorage) Update(ctx context.Context, name string, objInfo rest.Up
 		}()
 	}
 
-	old, err := s.Get(ctx, name, &metav1.GetOptions{})
+	oldDS, err := s.datasources.GetDataSource(ctx, name)
 	if err != nil {
 		return nil, false, err
 	}
 
-	obj, err := objInfo.UpdatedObject(ctx, old)
+	obj, err := objInfo.UpdatedObject(ctx, oldDS)
 	if err != nil {
 		return nil, false, err
 	}
@@ -145,11 +153,6 @@ func (s *legacyStorage) Update(ctx context.Context, name string, objInfo rest.Up
 	ds, ok := obj.(*v0alpha1.DataSource)
 	if !ok {
 		return nil, false, fmt.Errorf("expected a datasource object")
-	}
-
-	oldDS, ok := old.(*v0alpha1.DataSource)
-	if !ok {
-		return nil, false, fmt.Errorf("expected a datasource object (old)")
 	}
 
 	// Expose any secure value changes to the dual writer

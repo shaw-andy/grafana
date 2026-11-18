@@ -294,7 +294,10 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 			Translations:              plugin.Translations,
 		}
 
-		dsDTO.JSONData = ds.JsonDataMap()
+		dsDTO.JSONData = map[string]any{}
+		if jsonData := datasources.JSONDataWithoutTeamHTTPHeaders(ds.JsonData); jsonData != nil {
+			dsDTO.JSONData = jsonData.MustMap(dsDTO.JSONData)
+		}
 
 		if ds.Access == datasources.DS_ACCESS_DIRECT {
 			if ds.BasicAuth {
@@ -351,7 +354,7 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 
 		if ds.Type == datasources.DS_PROMETHEUS || ds.Type == datasources.DS_AMAZON_PROMETHEUS || ds.Type == datasources.DS_AZURE_PROMETHEUS {
 			// add unproxied server URL for link to Prometheus web UI
-			ds.JsonData.Set("directUrl", ds.URL)
+			dsDTO.JSONData["directUrl"] = ds.URL
 		}
 
 		dataSources[ds.Name] = dsDTO
