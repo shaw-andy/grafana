@@ -175,6 +175,8 @@ func (b *APIBuilder) newProxy(proxyPath, namespace string, targetURL *url.URL, i
 		req.URL.Host = targetURL.Host
 		req.URL.Path = proxyPath
 		req.Header.Set("User-Agent", withStackTag(incomingUserAgent, namespace))
+		// The caller's cookies hold its Grafana session and must not reach the feature service.
+		req.Header.Del("Cookie")
 	}
 
 	proxy := proxyutil.NewReverseProxy(b.logger, director)
