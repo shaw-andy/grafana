@@ -2,6 +2,7 @@ package featuremgmt
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/grafana/grafana/pkg/infra/features"
 	"github.com/grafana/grafana/pkg/setting"
@@ -76,12 +77,23 @@ func createRemoteProvider(cfg *setting.Cfg) (openfeature.FeatureProvider, error)
 		userAgent = fmt.Sprintf("grafana ns/stacks-%s", cfg.StackID)
 	}
 
+	var rootCA string
+	if cfg.OpenFeature.TLSCACertPath != "" {
+		// nolint:gosec
+		pem, err := os.ReadFile(cfg.OpenFeature.TLSCACertPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read openfeature CA certificate: %w", err)
+		}
+		rootCA = string(pem)
+	}
+
 	// Create HTTP client
 	httpcli, err := features.CreateHTTPClientForProvider(
 		cfg.OpenFeature.ProviderType,
 		authConfig,
 		features.HTTPClientOptions{
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: cfg.OpenFeature.TLSInsecureSkipVerify,
+			RootCACertificate:  rootCA,
 			CacheTTL:           cfg.OpenFeature.CacheTTL,
 			UserAgent:          userAgent,
 		},

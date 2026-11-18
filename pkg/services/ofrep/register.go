@@ -82,7 +82,7 @@ func ProvideService(cfg *setting.Cfg, rr routing.RouteRegister) (*APIBuilder, er
 		}
 	}
 
-	b, err := NewAPIBuilder(cfg.OpenFeature.ProviderType, cfg.OpenFeature.URL, true, "", staticEvaluator)
+	b, err := NewAPIBuilder(cfg.OpenFeature.ProviderType, cfg.OpenFeature.URL, cfg.OpenFeature.TLSInsecureSkipVerify, cfg.OpenFeature.TLSCACertPath, staticEvaluator)
 	if err != nil {
 		return nil, err
 	}
@@ -155,13 +155,15 @@ func getCARoot(caFile string) (*x509.CertPool, error) {
 	if caFile == "" {
 		return nil, nil
 	}
-	// It is safe to ignore since caFile is passed as --internal.root-ca-file flag of apiserver
+	// It is safe to ignore since caFile comes from operator configuration or the --internal.root-ca-file flag of apiserver
 	// nolint:gosec
 	caCert, err := os.ReadFile(caFile)
 	if err != nil {
 		return nil, err
 	}
 	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
+	if !caCertPool.AppendCertsFromPEM(caCert) {
+		return nil, fmt.Errorf("no valid PEM certificates found in CA file %q", caFile)
+	}
 	return caCertPool, nil
 }
