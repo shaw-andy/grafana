@@ -27,6 +27,12 @@ type OpenFeatureSettings struct {
 	TargetingKey string
 	ContextAttrs map[string]string
 	CacheTTL     time.Duration
+	// TLSCACertPath is a PEM bundle used to verify the remote provider's certificate.
+	// When empty, the system roots are used.
+	TLSCACertPath string
+	// TLSInsecureSkipVerify disables verification of the remote provider's certificate.
+	// For testing only; never enable in production.
+	TLSInsecureSkipVerify bool
 }
 
 func (cfg *Cfg) readOpenFeatureSettings() error {
@@ -91,5 +97,7 @@ func (cfg *Cfg) readOpenFeatureSettings() error {
 	cfg.OpenFeature.ContextAttrs = attrs
 
 	cfg.OpenFeature.CacheTTL = config.Key("cache_ttl").MustDuration(time.Minute)
+	cfg.OpenFeature.TLSCACertPath = config.Key("tls_ca_cert_path").MustString("")
+	cfg.OpenFeature.TLSInsecureSkipVerify = config.Key("tls_insecure_skip_verify").MustBool(false)
 	return nil
 }
