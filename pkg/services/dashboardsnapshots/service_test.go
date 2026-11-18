@@ -102,7 +102,7 @@ func TestCreateDashboardSnapshot(t *testing.T) {
 				"key":       "external-key",
 				"deleteKey": "external-delete-key",
 				"url":       "https://external.example.com/dashboard/snapshot/external-key",
-				"deleteUrl": "https://external.example.com/api/snapshots-delete/external-delete-key",
+				"deleteUrl": "http://" + r.Host + "/api/snapshots-delete/external-delete-key",
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(response)
@@ -159,7 +159,7 @@ func TestCreateDashboardSnapshot(t *testing.T) {
 				"key":       "external-key",
 				"deleteKey": "external-delete-key",
 				"url":       "https://external.example.com/dashboard/snapshot/external-key",
-				"deleteUrl": "https://external.example.com/api/snapshots-delete/external-delete-key",
+				"deleteUrl": "http://" + r.Host + "/api/snapshots-delete/external-delete-key",
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(response)
@@ -619,7 +619,7 @@ func TestDeleteExternalDashboardSnapshot(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := DeleteExternalDashboardSnapshot(server.URL + "/api/snapshots-delete/abc123")
+		err := DeleteExternalDashboardSnapshot(server.URL+"/api/snapshots-delete/abc123", server.URL)
 		assert.NoError(t, err)
 	})
 
@@ -633,7 +633,7 @@ func TestDeleteExternalDashboardSnapshot(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := DeleteExternalDashboardSnapshot(server.URL + "/api/snapshots-delete/abc123")
+		err := DeleteExternalDashboardSnapshot(server.URL+"/api/snapshots-delete/abc123", server.URL)
 		assert.NoError(t, err)
 	})
 
@@ -643,7 +643,7 @@ func TestDeleteExternalDashboardSnapshot(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := DeleteExternalDashboardSnapshot(server.URL + "/api/snapshots-delete/abc123")
+		err := DeleteExternalDashboardSnapshot(server.URL+"/api/snapshots-delete/abc123", server.URL)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unexpected response when deleting external snapshot")
 		assert.Contains(t, err.Error(), "404")
@@ -659,7 +659,7 @@ func TestDeleteExternalDashboardSnapshot(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := DeleteExternalDashboardSnapshot(server.URL + "/api/snapshots-delete/abc123")
+		err := DeleteExternalDashboardSnapshot(server.URL+"/api/snapshots-delete/abc123", server.URL)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "500")
 	})
@@ -670,7 +670,7 @@ func TestDeleteExternalDashboardSnapshot(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := DeleteExternalDashboardSnapshot(server.URL + "/api/snapshots-delete/abc123")
+		err := DeleteExternalDashboardSnapshot(server.URL+"/api/snapshots-delete/abc123", server.URL)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, ErrExternalSnapshotAuthFailed)
 	})
@@ -681,7 +681,7 @@ func TestDeleteExternalDashboardSnapshot(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := DeleteExternalDashboardSnapshot(server.URL + "/api/snapshots-delete/abc123")
+		err := DeleteExternalDashboardSnapshot(server.URL+"/api/snapshots-delete/abc123", server.URL)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, ErrExternalSnapshotAuthFailed)
 	})
@@ -693,7 +693,7 @@ func TestDeleteExternalDashboardSnapshot(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := DeleteExternalDashboardSnapshot(server.URL + "/api/snapshots-delete/abc123")
+		err := DeleteExternalDashboardSnapshot(server.URL+"/api/snapshots-delete/abc123", server.URL)
 		assert.NoError(t, err)
 	})
 
@@ -707,7 +707,7 @@ func TestDeleteExternalDashboardSnapshot(t *testing.T) {
 
 		// New K8s-format stored URL — function should extract domain + deleteKey and
 		// rebuild as the legacy GET path.
-		err := DeleteExternalDashboardSnapshot(server.URL + "/apis/dashboard.grafana.app/v0alpha1/namespaces/default/snapshots/delete/abc123")
+		err := DeleteExternalDashboardSnapshot(server.URL+"/apis/dashboard.grafana.app/v0alpha1/namespaces/default/snapshots/delete/abc123", server.URL)
 		assert.NoError(t, err)
 		assert.Equal(t, "/api/snapshots-delete/abc123", receivedPath)
 	})
@@ -721,7 +721,7 @@ func TestDeleteExternalDashboardSnapshot(t *testing.T) {
 		defer server.Close()
 
 		// Legacy URL with extra path segments — should be passed through as-is.
-		err := DeleteExternalDashboardSnapshot(server.URL + "/some/prefix/api/snapshots-delete/abc123")
+		err := DeleteExternalDashboardSnapshot(server.URL+"/some/prefix/api/snapshots-delete/abc123", server.URL)
 		assert.NoError(t, err)
 		assert.Equal(t, "/some/prefix/api/snapshots-delete/abc123", receivedPath)
 	})

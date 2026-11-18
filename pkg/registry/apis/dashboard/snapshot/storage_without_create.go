@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -103,12 +102,12 @@ func (n *storageWrapper) Delete(ctx context.Context, name string, deleteValidati
 			deleteURL := strings.TrimRight(n.options.ExternalSnapshotURL, "/") +
 				"/apis/" + dashv0.GROUP + "/" + dashv0.VERSION + "/namespaces/default/" +
 				prefix + "/delete/" + *snap.Spec.DeleteKey
-			if err := deleteExternalSnapshot(deleteURL, n.options.ExternalSnapshotToken); err != nil {
+			if err := deleteExternalSnapshot(deleteURL, n.options.ExternalSnapshotToken, n.options.ExternalSnapshotURL); err != nil {
 				return nil, false, err
 			}
 		} else {
 			deleteURL := strings.TrimRight(n.options.ExternalSnapshotURL, "/") + "/api/snapshots-delete/" + *snap.Spec.DeleteKey
-			if err := deleteExternalSnapshotLegacy(deleteURL); err != nil {
+			if err := deleteExternalSnapshotLegacy(deleteURL, n.options.ExternalSnapshotURL); err != nil {
 				return nil, false, err
 			}
 		}
@@ -144,12 +143,18 @@ func stripSensitiveFieldsFromList(obj runtime.Object) runtime.Object {
 	return out
 }
 
-var deleteExternalHTTPClient = &http.Client{Timeout: 5 * time.Second}
+var deleteExternalHTTPClient = &http.Client{Timeout: 5 * time.Second, CheckRedirect: dashboardsnapshots.RefuseRedirects}
 
 // deleteExternalSnapshot sends a DELETE request to the external snapshot server's
-// delete/{deleteKey} K8s API endpoint to remove the snapshot.
-func deleteExternalSnapshot(externalDeleteURL string, token string) error {
-	req, err := http.NewRequest(http.MethodDelete, externalDeleteURL, nil)
+// delete/{deleteKey} K8s API endpoint to remove the snapshot. The request, and
+// the token with it, is only sent when externalDeleteURL points at one of
+// allowedServers (the configured external_snapshot_url).
+func deleteExternalSnapshot(externalDeleteURL string, token string, allowedServers ...string) error {
+	parsed, err := dashboardsnapshots.ParseExternalSnapshotURL(externalDeleteURL, allowedServers...)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodDelete, parsed.String(), nil)
 	if err != nil {
 		return err
 	}
@@ -184,14 +189,16 @@ func deleteExternalSnapshot(externalDeleteURL string, token string) error {
 // server's legacy /api/snapshots-delete/{deleteKey} endpoint. If the passed URL
 // is in the K8s path format (e.g. a snapshot was created when
 // externalSnapshotsK8SAPIPush was on and is now being deleted with it off),
-// the host is extracted and the URL is rebuilt in the legacy format.
-func deleteExternalSnapshotLegacy(externalURL string) error {
-	requestURL := externalURL
-	if !strings.Contains(externalURL, "/api/snapshots-delete/") {
-		parsed, err := url.Parse(externalURL)
-		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-			return fmt.Errorf("invalid external delete URL %q: %w", externalURL, err)
-		}
+// the host is extracted and the URL is rebuilt in the legacy format. The request
+// is only sent when externalURL points at one of allowedServers (the configured
+// external_snapshot_url).
+func deleteExternalSnapshotLegacy(externalURL string, allowedServers ...string) error {
+	parsed, err := dashboardsnapshots.ParseExternalSnapshotURL(externalURL, allowedServers...)
+	if err != nil {
+		return err
+	}
+	requestURL := parsed.String()
+	if !strings.Contains(parsed.Path, "/api/snapshots-delete/") {
 		deleteKey := path.Base(strings.TrimRight(parsed.Path, "/"))
 		if deleteKey == "" || deleteKey == "." || deleteKey == "/" {
 			return fmt.Errorf("could not extract delete key from URL %q", externalURL)

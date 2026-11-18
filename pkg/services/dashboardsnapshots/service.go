@@ -35,8 +35,16 @@ type Service interface {
 }
 
 var client = &http.Client{
-	Timeout:   time.Second * 5,
-	Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
+	Timeout:       time.Second * 5,
+	Transport:     &http.Transport{Proxy: http.ProxyFromEnvironment},
+	CheckRedirect: RefuseRedirects,
+}
+
+// RefuseRedirects is an http.Client CheckRedirect func for external snapshot
+// requests. Following a redirect would let the snapshot server send Grafana to
+// a host other than the configured external_snapshot_url.
+func RefuseRedirects(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
 }
 
 // CreateDashboardSnapshot creates a snapshot when running Grafana in regular mode.
@@ -163,19 +171,64 @@ var (
 	ErrExternalSnapshotFailed = errutil.BadGateway("dashboardsnapshots.externalFailed",
 		errutil.WithPublicMessage("External snapshot server returned an unexpected error."),
 	)
+	ErrExternalSnapshotUntrustedURL = errutil.BadGateway("dashboardsnapshots.externalUntrustedURL",
+		errutil.WithPublicMessage("External snapshot URL does not point at the configured external snapshot server."),
+	)
 )
 
-func DeleteExternalDashboardSnapshot(externalUrl string) error {
+// ParseExternalSnapshotURL parses a URL received from, or stored for, an external
+// snapshot server and returns it only when its scheme and host match one of the
+// configured external snapshot server URLs in allowedServers. With no
+// allowedServers every URL is refused. Callers must build their request from
+// the returned URL so the host that was checked is the host that is requested.
+func ParseExternalSnapshotURL(rawURL string, allowedServers ...string) (*url.URL, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Opaque != "" || u.User != nil || u.Host == "" || !isHTTPScheme(u.Scheme) {
+		return nil, ErrExternalSnapshotUntrustedURL.Errorf("invalid external snapshot URL")
+	}
+	for _, server := range allowedServers {
+		configured, err := url.Parse(server)
+		if err != nil || configured.Host == "" || !isHTTPScheme(configured.Scheme) {
+			continue
+		}
+		if strings.EqualFold(u.Scheme, configured.Scheme) &&
+			strings.EqualFold(u.Hostname(), configured.Hostname()) &&
+			effectivePort(u) == effectivePort(configured) {
+			return u, nil
+		}
+	}
+	return nil, ErrExternalSnapshotUntrustedURL.Errorf("external snapshot URL host %q is not the configured external snapshot server", u.Host)
+}
+
+func isHTTPScheme(scheme string) bool {
+	return strings.EqualFold(scheme, "http") || strings.EqualFold(scheme, "https")
+}
+
+func effectivePort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	if strings.EqualFold(u.Scheme, "https") {
+		return "443"
+	}
+	return "80"
+}
+
+// DeleteExternalDashboardSnapshot deletes a snapshot from the external snapshot
+// server. externalUrl is the delete URL stored at creation and is only requested
+// when it points at one of allowedServers (the configured external_snapshot_url).
+func DeleteExternalDashboardSnapshot(externalUrl string, allowedServers ...string) error {
+	parsed, err := ParseExternalSnapshotURL(externalUrl, allowedServers...)
+	if err != nil {
+		return err
+	}
+
 	// If the stored URL is in the new K8s path format (e.g. created when the
 	// kubernetesSnapshots toggle was on and now being deleted with it off), extract
-	// the domain + deleteKey and rebuild as the legacy GET endpoint that this function
+	// the deleteKey and rebuild as the legacy GET endpoint that this function
 	// targets. Legacy-format URLs are passed through untouched.
-	requestURL := externalUrl
-	if !strings.Contains(externalUrl, "/api/snapshots-delete/") {
-		parsed, err := url.Parse(externalUrl)
-		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-			return fmt.Errorf("invalid external delete URL %q: %w", externalUrl, err)
-		}
+	requestURL := parsed.String()
+	if !strings.Contains(parsed.Path, "/api/snapshots-delete/") {
 		deleteKey := path.Base(strings.TrimRight(parsed.Path, "/"))
 		if deleteKey == "" || deleteKey == "." || deleteKey == "/" {
 			return fmt.Errorf("could not extract delete key from URL %q", externalUrl)
@@ -271,10 +324,19 @@ func createExternalDashboardSnapshot(cmd CreateDashboardSnapshotCommand, externa
 		return nil, err
 	}
 
+	if createSnapshotResponse.DeleteUrl != "" {
+		if _, err := ParseExternalSnapshotURL(createSnapshotResponse.DeleteUrl, externalSnapshotUrl); err != nil {
+			return nil, err
+		}
+	}
+
 	return &createSnapshotResponse, nil
 }
 
-func DeleteWithKey(ctx context.Context, key string, svc Service) error {
+// DeleteWithKey deletes the snapshot with the given delete key. External
+// snapshots are first deleted on the external server, which must be one of
+// allowedServers (the configured external_snapshot_url).
+func DeleteWithKey(ctx context.Context, key string, svc Service, allowedServers ...string) error {
 	query := &GetDashboardSnapshotQuery{DeleteKey: key}
 	queryResult, err := svc.GetDashboardSnapshot(ctx, query)
 	if err != nil {
@@ -282,7 +344,7 @@ func DeleteWithKey(ctx context.Context, key string, svc Service) error {
 	}
 
 	if queryResult.External {
-		err := DeleteExternalDashboardSnapshot(queryResult.ExternalDeleteURL)
+		err := DeleteExternalDashboardSnapshot(queryResult.ExternalDeleteURL, allowedServers...)
 		if err != nil {
 			return err
 		}

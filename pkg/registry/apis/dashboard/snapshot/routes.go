@@ -39,7 +39,7 @@ import (
 	"github.com/grafana/grafana/pkg/web"
 )
 
-var externalHTTPClient = &http.Client{Timeout: 5 * time.Second}
+var externalHTTPClient = &http.Client{Timeout: 5 * time.Second, CheckRedirect: dashboardsnapshots.RefuseRedirects}
 
 // createExternalSnapshot sends a snapshot creation request to the external snapshot server's K8s API.
 func createExternalSnapshot(cmd *dashboardsnapshots.CreateDashboardSnapshotCommand, options dashv0.SnapshotSharingOptions) (*dashv0.DashboardCreateResponse, error) {
@@ -86,8 +86,22 @@ func createExternalSnapshot(cmd *dashboardsnapshots.CreateDashboardSnapshotComma
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode external snapshot response: %w", err)
 	}
+	if err := validateExternalDeleteURL(result.DeleteURL, options); err != nil {
+		return nil, err
+	}
 
 	return &result, nil
+}
+
+// validateExternalDeleteURL rejects a delete URL from the external snapshot
+// server that does not point at the configured external snapshot server, since
+// it is stored and requested from Grafana when the snapshot is deleted.
+func validateExternalDeleteURL(deleteURL string, options dashv0.SnapshotSharingOptions) error {
+	if deleteURL == "" {
+		return nil
+	}
+	_, err := dashboardsnapshots.ParseExternalSnapshotURL(deleteURL, options.ExternalSnapshotURL)
+	return err
 }
 
 // createExternalSnapshotLegacy sends a snapshot creation request to the external
@@ -139,6 +153,9 @@ func createExternalSnapshotLegacy(cmd *dashboardsnapshots.CreateDashboardSnapsho
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&legacy); err != nil {
 		return nil, fmt.Errorf("failed to decode external snapshot response: %w", err)
+	}
+	if err := validateExternalDeleteURL(legacy.DeleteURL, options); err != nil {
+		return nil, err
 	}
 
 	return &dashv0.DashboardCreateResponse{
