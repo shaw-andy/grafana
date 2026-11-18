@@ -83,7 +83,7 @@ func (hs *HTTPServer) getK8sDataSourceByUIDHandler() web.Handler {
 			return hs.handleK8sError(err)
 		}
 
-		dto := hs.convertModelToDtos(c.Req.Context(), legacyDS)
+		dto := hs.convertModelToDtos(c, legacyDS)
 
 		// TODO get access control from the new api endpoint too.
 		dto.AccessControl = getAccessControlMetadata(c, datasources.ScopePrefix, dto.UID)

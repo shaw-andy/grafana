@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"time"
 
 	"github.com/grafana/grafana/pkg/components/simplejson"
@@ -154,6 +155,25 @@ func GetTeamHTTPHeaders(jsonData *simplejson.Json) (*TeamHTTPHeaders, error) {
 	}
 
 	return teamHTTPHeaders, nil
+}
+
+// JSONDataWithoutTeamHTTPHeaders returns jsonData without the label-based access rules, for responses
+// sent to callers that may not administer those rules. The input is never modified: when the rules
+// are present a shallow copy is returned, because the datasource may be shared through the cache.
+func JSONDataWithoutTeamHTTPHeaders(jsonData *simplejson.Json) *simplejson.Json {
+	if jsonData == nil {
+		return nil
+	}
+	m, err := jsonData.Map()
+	if err != nil {
+		return jsonData
+	}
+	if _, ok := m["teamHttpHeaders"]; !ok {
+		return jsonData
+	}
+	filtered := maps.Clone(m)
+	delete(filtered, "teamHttpHeaders")
+	return simplejson.NewFromAny(filtered)
 }
 
 // ----------------------
