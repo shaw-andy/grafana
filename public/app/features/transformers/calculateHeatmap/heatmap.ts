@@ -602,10 +602,22 @@ function heatmap(xs: number[], ys: number[], opts?: HeatmapOpts) {
   let binX = opts?.xCeil ? (v: number) => incrRoundUp(v, xBinIncr) : (v: number) => incrRoundDn(v, xBinIncr);
   let binY = opts?.yCeil ? (v: number) => incrRoundUp(v, yBinIncr) : (v: number) => incrRoundDn(v, yBinIncr);
 
+  let yLog = yExp === 2 ? Math.log2 : Math.log10;
+
   if (yExp) {
-    yBinIncr = 1 / (opts?.ySize ?? 1); // sub-divides log exponents
-    let yLog = yExp === 2 ? Math.log2 : Math.log10;
+    let ySplit = opts?.ySize ?? 1;
+    yBinIncr = Number.isFinite(ySplit) && ySplit > 0 ? 1 / ySplit : 1; // sub-divides log exponents
     binY = opts?.yCeil ? (v: number) => incrRoundUp(yLog(v), yBinIncr) : (v: number) => incrRoundDn(yLog(v), yBinIncr);
+  }
+
+  if (countBins(minX, maxX, xBinIncr, binX) > MAX_BINS_PER_AXIS) {
+    xBinIncr = boundedIncr(maxX - minX, opts?.xTime ? niceTimeIncrs : niceLinearIncrs);
+  }
+
+  if (countBins(minY, maxY, yBinIncr, binY) > MAX_BINS_PER_AXIS) {
+    yBinIncr = yExp
+      ? boundedLogIncr(yLog(maxY) - yLog(minY))
+      : boundedIncr(maxY - minY, opts?.yTime ? niceTimeIncrs : niceLinearIncrs);
   }
 
   let minXBin = binX(minX);
@@ -635,6 +647,26 @@ function heatmap(xs: number[], ys: number[], opts?: HeatmapOpts) {
     y: ys2,
     count: counts,
   };
+}
+
+// The dense grid is xBinQty * yBinQty cells, and bucket sizes come from saved dashboard options,
+// so each axis is bounded before anything is allocated.
+const MAX_BINS_PER_AXIS = 500;
+
+function countBins(min: number, max: number, incr: number, bin: (v: number) => number) {
+  return Math.round((bin(max) - bin(min)) / incr) + 1;
+}
+
+// Binning [min, max] by incr yields at most range / incr + 2 bins, so any incr >= range / (MAX - 2) fits.
+function boundedIncr(range: number, niceIncrs: number[]) {
+  const minIncr = range / (MAX_BINS_PER_AXIS - 2);
+  return niceIncrs.find((incr) => incr >= minIncr) ?? minIncr;
+}
+
+// Log buckets stay whole subdivisions of an exponent, or whole exponents when the range is too wide.
+function boundedLogIncr(expRange: number) {
+  const split = Math.floor((MAX_BINS_PER_AXIS - 2) / expRange);
+  return split >= 1 ? 1 / split : Math.ceil(expRange / (MAX_BINS_PER_AXIS - 2));
 }
 
 function initBins(xQty: number, yQty: number, xMin: number, xIncr: number, yMin: number, yIncr: number, yExp?: number) {
