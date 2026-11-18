@@ -143,6 +143,38 @@ describe('getSnapshots', () => {
 
     expect(continueTokens).toEqual(['tok-page-2']);
   });
+
+  test.each([
+    ['slash segments', '../../logout'],
+    ['backslashes', '..\\..\\logout'],
+    ['percent encoded dot segments', '%2e%2e/%2e%2e/logout'],
+  ])('keeps a %s snapshot key inside the snapshot path', async (_label, key) => {
+    server.use(
+      http.get(LEGACY_URL, () =>
+        HttpResponse.json([
+          {
+            name: 'Quarterly review',
+            key,
+            external: false,
+            externalUrl: '',
+          },
+        ])
+      )
+    );
+
+    const result = await getSnapshots();
+    const href = result.items[0].url ?? '';
+    const resolved = new URL(href);
+
+    expect(result.items[0].name).toBe('Quarterly review');
+    expect(resolved.origin).toBe('http://snapshots.grafana.com');
+    const segments = resolved.pathname.split('/').filter(Boolean);
+    expect(segments).toHaveLength(3);
+    expect(segments[0]).toBe('dashboard');
+    expect(segments[1]).toBe('snapshot');
+    expect(segments[2]).not.toBe('');
+    expect(resolved.pathname).not.toBe('/logout');
+  });
 });
 
 describe('SnapshotListTable', () => {
@@ -151,6 +183,34 @@ describe('SnapshotListTable', () => {
     mockFeatureFlagClientGetBooleanValue.mockReturnValue(false);
     mockContextSrv.hasPermission.mockReturnValue(true);
     mockContextSrv.hasPermissionInMetadata.mockReturnValue(true);
+  });
+
+  test('name and view links for a parent-segment key stay on the snapshot path', async () => {
+    server.use(
+      http.get(LEGACY_URL, () =>
+        HttpResponse.json([
+          {
+            name: 'Quarterly review',
+            key: '../../logout',
+            external: false,
+            externalUrl: '',
+          },
+        ])
+      )
+    );
+
+    render(<SnapshotListTable />);
+
+    const nameLink = await screen.findByRole('link', { name: 'Quarterly review' });
+    const viewLink = await screen.findByRole('link', { name: 'View' });
+    for (const link of [nameLink, viewLink]) {
+      const resolved = new URL(link.getAttribute('href') ?? '', 'http://snapshots.grafana.com');
+      const segments = resolved.pathname.split('/').filter(Boolean);
+      expect(resolved.origin).toBe('http://snapshots.grafana.com');
+      expect(segments.slice(0, 2)).toEqual(['dashboard', 'snapshot']);
+      expect(segments).toHaveLength(3);
+      expect(resolved.pathname).not.toBe('/logout');
+    }
   });
 
   test('does not render Load More on the legacy path', async () => {
