@@ -22,6 +22,7 @@ import (
 	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/features"
 	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/kinds/dataquery"
 	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/models"
+	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/utils"
 )
 
 const (
@@ -85,6 +86,16 @@ func (ds *DataSource) executeLogActions(ctx context.Context, req *backend.QueryD
 
 		query := query
 		eg.Go(func() error {
+			// errgroup does not recover panics, and an unrecovered panic on this goroutine terminates the process.
+			defer func() {
+				if r := recover(); r != nil {
+					ds.logger.FromContext(ctx).Error("Execute log action panic", "error", r, "stack", utils.Stack(1))
+					resultChan <- backend.Responses{
+						query.RefID: backend.ErrorResponseWithErrorSource(fmt.Errorf("failed to execute log action with subtype: %s: internal error", logsQuery.Subtype)),
+					}
+				}
+			}()
+
 			dataframe, err := ds.executeLogAction(ectx, logsQuery, query)
 			if err != nil {
 				resultChan <- backend.Responses{
@@ -123,6 +134,12 @@ func (ds *DataSource) executeLogActions(ctx context.Context, req *backend.QueryD
 }
 
 func (ds *DataSource) executeLogAction(ctx context.Context, logsQuery models.LogsQuery, query backend.DataQuery) (*data.Frame, error) {
+	switch logsQuery.Subtype {
+	case "StartQuery", "StopQuery", "GetQueryResults", "GetLogEvents":
+	default:
+		return nil, backend.DownstreamError(fmt.Errorf("unsupported log action subtype: %q", logsQuery.Subtype))
+	}
+
 	region := ds.Settings.Region
 	if logsQuery.Region != "" {
 		region = logsQuery.Region
