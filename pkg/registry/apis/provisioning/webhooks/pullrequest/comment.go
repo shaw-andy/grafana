@@ -132,11 +132,11 @@ func (c *commenter) generateComment(_ context.Context, info changeInfo) (string,
 
 const commentTemplateUnsupportedFork = "ℹ️ **Pull request preview skipped**\n\n" + unsupportedForkMessage
 
-const commentTemplateSingleDashboard = `{{define "title"}}{{if .SourceURL}}[**{{.SafeTitle}}**]({{.SourceURL}}){{else}}**{{.SafeTitle}}**{{end}}{{end -}}
+const commentTemplateSingleDashboard = `{{define "title"}}{{if .SourceURL}}[**{{.SafeTitle}}**]({{.SafeSourceURL}}){{else}}**{{.SafeTitle}}**{{end}}{{end -}}
 📊 Grafana detected dashboard changes in this pull request.
 {{- if and .GrafanaScreenshotURL .PreviewScreenshotURL}}
 
-### Side by Side Comparison of {{.Parsed.Info.Path}}
+### Side by Side Comparison of {{.SafeFilePath}}
 | Before | After |
 |----------|---------|
 | ![Before]({{.GrafanaScreenshotURL}}) | ![Preview]({{.PreviewScreenshotURL}}) |
@@ -146,7 +146,7 @@ const commentTemplateSingleDashboard = `{{define "title"}}{{if .SourceURL}}[**{{
 ![Original]({{.GrafanaScreenshotURL}})
 {{- else if .PreviewScreenshotURL}}
 
-### Preview of {{.Parsed.Info.Path}}
+### Preview of {{.SafeFilePath}}
 ![Preview]({{.PreviewScreenshotURL}})
 {{- end -}}
 {{- if and .GrafanaURL .PreviewURL}}
@@ -160,7 +160,7 @@ const commentTemplateSingleDashboard = `{{define "title"}}{{if .SourceURL}}[**{{
 {{template "title" .}} — [preview changes]({{.PreviewURL}})
 {{- end}}{{ if .Error}}
 
-> ⚠️ **Validation failed:** {{.TruncatedError}}
+> ⚠️ **Validation failed:** {{.SafeError}}
 {{- end}}
 `
 
@@ -176,7 +176,7 @@ const commentTemplateTable = `📋 Grafana detected **{{.TotalChanges}}** resour
 | Action | Kind | Resource | File | Preview | Status |
 |--------|------|----------|------|---------|--------|
 {{- range .DisplayedChanges}}
-| {{.ActionLabel}} | {{.Kind}} | {{.ExistingLink}} | {{ if .SourceURL}}[source]({{.SourceURL}}){{ else }}{{.SafeFilePath}}{{ end }} | {{ if .PreviewURL}}[preview]({{.PreviewURL}}){{ end }} | {{.StatusIcon}} |
+| {{.ActionLabel}} | {{.Kind}} | {{.ExistingLink}} | {{ if .SourceURL}}[source]({{.SafeSourceURL}}){{ else }}{{.SafeFilePath}}{{ end }} | {{ if .PreviewURL}}[preview]({{.PreviewURL}}){{ end }} | {{.StatusIcon}} |
 {{- end -}}
 {{- if eq (len .ErrorIndexes) 0}}
 
@@ -190,7 +190,7 @@ const commentTemplateValidationErrors = `
 | File | Error |
 |------|-------|
 {{- range .ValidationIssues}}
-| ` + "`{{.Change.Path}}`" + ` | {{.TruncatedError}} |
+| {{.SafeFilePathCode}} | {{.SafeErrorCell}} |
 {{- end}}
 {{- if gt .HiddenErrorCount 0}}
 
@@ -276,31 +276,108 @@ func (f *fileChangeInfo) SafeTitle() string {
 	return escapeMarkdown(f.Title)
 }
 
-// SafeFilePath returns the change's file path escaped for a Markdown table cell.
-// It is used as the File column fallback when no source URL is available (e.g.
-// non-GitHub backends) so reviewers can still identify the file.
+// SafeFilePath returns the change's file path escaped for Markdown text, such
+// as a table cell or heading. It is used as the File column fallback when no
+// source URL is available (e.g. non-GitHub backends) so reviewers can still
+// identify the file.
 func (f *fileChangeInfo) SafeFilePath() string {
+	return escapeMarkdown(f.filePath())
+}
+
+// SafeFilePathCode returns the change's file path as an inline code span for a
+// Markdown table cell.
+func (f *fileChangeInfo) SafeFilePathCode() string {
+	return escapeTableCell(markdownCode(flattenLines(f.filePath())))
+}
+
+func (f *fileChangeInfo) filePath() string {
 	path := f.Change.Path
 	if path == "" && f.Parsed != nil && f.Parsed.Info != nil {
 		path = f.Parsed.Info.Path
 	}
-	return escapeMarkdown(path)
+	return path
 }
 
-// escapeMarkdown neutralizes characters that would break a Markdown table cell
-// or link text (pipes and brackets) and flattens newlines, so titles coming
-// from resource files render verbatim in the PR comment.
-func escapeMarkdown(s string) string {
-	return markdownEscaper.Replace(s)
+// SafeSourceURL returns SourceURL percent-encoded so it can be used as a
+// Markdown link destination inside a table cell. The URL can carry
+// attacker-chosen text such as the pull request branch name, which may contain
+// characters like ')' or '|' that would otherwise end the link or the cell.
+func (f *fileChangeInfo) SafeSourceURL() string {
+	return linkDestinationEscaper.Replace(f.SourceURL)
 }
 
-var markdownEscaper = strings.NewReplacer(
-	"\r", "",
-	"\n", " ",
-	"|", "\\|",
-	"[", "\\[",
-	"]", "\\]",
+var linkDestinationEscaper = strings.NewReplacer(
+	"\r", "%0D",
+	"\n", "%0A",
+	" ", "%20",
+	"\"", "%22",
+	"(", "%28",
+	")", "%29",
+	"<", "%3C",
+	">", "%3E",
+	"\\", "%5C",
+	"`", "%60",
+	"|", "%7C",
 )
+
+// escapeMarkdown backslash-escapes every ASCII punctuation character and
+// flattens newlines, so titles and paths coming from resource files render
+// verbatim in the PR comment. Escaping all punctuation, not only brackets and
+// pipes, also stops raw HTML, emphasis and GitHub's URL and www autolinks.
+func escapeMarkdown(s string) string {
+	s = flattenLines(s)
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if isASCIIPunct(c) {
+			b.WriteByte('\\')
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+func isASCIIPunct(c byte) bool {
+	return (c >= '!' && c <= '/') || (c >= ':' && c <= '@') || (c >= '[' && c <= '`') || (c >= '{' && c <= '~')
+}
+
+func flattenLines(s string) string {
+	return lineFlattener.Replace(s)
+}
+
+var lineFlattener = strings.NewReplacer("\r", "", "\n", " ")
+
+// markdownCode wraps s in an inline code span. Nothing inside a code span is
+// rendered as a link, image, HTML or mention, so untrusted text such as API
+// errors (which may quote attacker-chosen resource names) is shown verbatim.
+// The fence is at least three backticks and longer than the longest backtick
+// run in s, so s cannot close the span early. s must not contain line breaks,
+// and the result must not start a line, where it would open a fenced block.
+func markdownCode(s string) string {
+	longest, run := 2, 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	fence := strings.Repeat("`", longest+1)
+	if strings.HasPrefix(s, "`") || strings.HasSuffix(s, "`") || (strings.HasPrefix(s, " ") && strings.HasSuffix(s, " ")) {
+		// The renderer strips one space from each side when both are present.
+		return fence + " " + s + " " + fence
+	}
+	return fence + s + fence
+}
+
+// escapeTableCell escapes pipes so a value stays inside its GFM table cell.
+// GFM removes the backslash before a pipe even inside a code span, and keeps
+// any pipe preceded by a backslash in the cell, so this is safe for code spans.
+func escapeTableCell(s string) string {
+	return strings.ReplaceAll(s, "|", "\\|")
+}
 
 func (f *fileChangeInfo) StatusIcon() string {
 	if f.Error != "" {
@@ -309,12 +386,19 @@ func (f *fileChangeInfo) StatusIcon() string {
 	return "✅"
 }
 
-// TruncatedError returns a sanitized, length-limited error suitable for a
-// pullrequest comment.
-func (f *fileChangeInfo) TruncatedError() string {
-	msg := strings.ReplaceAll(f.Error, "\n", " ")
-	msg = strings.ReplaceAll(msg, "\r", "")
-	msg = strings.ReplaceAll(msg, "|", "\\|")
+// SafeError returns the error as a length-limited inline code span.
+func (f *fileChangeInfo) SafeError() string {
+	return markdownCode(f.truncatedError())
+}
+
+// SafeErrorCell returns the error as a length-limited inline code span for a
+// Markdown table cell.
+func (f *fileChangeInfo) SafeErrorCell() string {
+	return escapeTableCell(markdownCode(f.truncatedError()))
+}
+
+func (f *fileChangeInfo) truncatedError() string {
+	msg := flattenLines(f.Error)
 	if len(msg) > maxErrorLength {
 		return msg[:maxErrorLength] + "…"
 	}

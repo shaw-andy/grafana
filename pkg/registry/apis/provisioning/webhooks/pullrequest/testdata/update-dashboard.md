@@ -1,6 +1,6 @@
 📊 Grafana detected dashboard changes in this pull request.
 
-### Side by Side Comparison of file.json
+### Side by Side Comparison of file\.json
 | Before | After |
 |----------|---------|
 | ![Before](https://cdn2.thecatapi.com/images/99c.jpg) | ![Preview](https://cdn2.thecatapi.com/images/99c.jpg) |
