@@ -209,7 +209,10 @@ func (p *assetProvider) Module(pi pluginassets.PluginInfo) (string, error) {
 func (p *assetProvider) AssetPath(pi pluginassets.PluginInfo, assetPath ...string) (string, error) {
 	if !p.cdnAssets {
 		// frontend will prepend `public/` instead
-		return path.Join("plugins", pi.JsonData.ID, path.Join(assetPath...)), nil
+		return pluginassets.JoinAssetPath("plugins", pi.JsonData.ID, assetPath...)
+	}
+	if err := pluginassets.ValidateAssetPath(assetPath...); err != nil {
+		return "", err
 	}
 	absPath := filepath.Join(pi.FS.Base(), filepath.Join(assetPath...))
 	rel, err := filepath.Rel(p.staticRootPath, absPath)
