@@ -24,5 +24,5 @@ func (s *LocalProvider) Module(plugin PluginInfo) (string, error) {
 }
 
 func (s *LocalProvider) AssetPath(plugin PluginInfo, assetPath ...string) (string, error) {
-	return path.Join("public/plugins", plugin.JsonData.ID, path.Join(assetPath...)), nil
+	return JoinAssetPath("public/plugins", plugin.JsonData.ID, assetPath...)
 }

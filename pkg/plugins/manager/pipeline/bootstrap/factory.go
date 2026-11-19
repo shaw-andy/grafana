@@ -93,19 +93,30 @@ func setImages(p *plugins.Plugin, assetProvider pluginassets.Provider, info plug
 			*dst = defaultLogoPath(p.Type)
 			continue
 		}
+		if err = pluginassets.ValidateAssetPath(*dst); err != nil {
+			p.Logger().Warn("Ignoring logo outside the plugin directory", "path", *dst, "error", err)
+			*dst = defaultLogoPath(p.Type)
+			continue
+		}
 
 		*dst, err = assetProvider.AssetPath(info, *dst)
 		if err != nil {
 			return fmt.Errorf("logo: %w", err)
 		}
 	}
-	for i := 0; i < len(p.Info.Screenshots); i++ {
-		screenshot := &p.Info.Screenshots[i]
+	screenshots := p.Info.Screenshots[:0]
+	for i, screenshot := range p.Info.Screenshots {
+		if err = pluginassets.ValidateAssetPath(screenshot.Path); err != nil {
+			p.Logger().Warn("Ignoring screenshot outside the plugin directory", "path", screenshot.Path, "error", err)
+			continue
+		}
 		screenshot.Path, err = assetProvider.AssetPath(info, screenshot.Path)
 		if err != nil {
 			return fmt.Errorf("screenshot %d relative url: %w", i, err)
 		}
+		screenshots = append(screenshots, screenshot)
 	}
+	p.Info.Screenshots = screenshots
 	return nil
 }
 
@@ -132,6 +143,9 @@ func getTranslations(assetProvider pluginassets.Provider, n pluginassets.PluginI
 	// loop through all the languages specified in the plugin.json and add them to the list
 	translations := map[string]string{}
 	for _, language := range n.JsonData.Languages {
+		if pluginassets.ValidateAssetPath(language) != nil {
+			continue
+		}
 		file := fmt.Sprintf("%s.json", n.JsonData.ID)
 		translations[language], err = url.JoinPath(pathToTranslations, language, file)
 		if err != nil {
