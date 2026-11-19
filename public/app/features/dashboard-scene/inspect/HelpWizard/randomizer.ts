@@ -13,10 +13,10 @@ export function newLetterRandomizer(): (v: string) => string {
     }
     const r = [...v]
       .map((c) => {
-        if (c.toLowerCase() && c !== c.toUpperCase()) {
+        if (c !== c.toUpperCase()) {
           return lower.charAt(Math.floor(Math.random() * charactersLength));
         }
-        if (c.toUpperCase() && c !== c.toUpperCase()) {
+        if (c !== c.toLowerCase()) {
           return upper.charAt(Math.floor(Math.random() * charactersLength));
         }
         return c;
@@ -33,6 +33,21 @@ export interface Randomize {
   values?: boolean;
 }
 
+// Dataplane logs frames carry per-row labels as objects in a field with this name and type
+const LOGS_LABELS_FIELD_NAME = 'labels';
+
+function isLabels(v: unknown): v is Labels {
+  return v != null && typeof v === 'object' && !Array.isArray(v);
+}
+
+function randomizeLabels(labels: Labels, rand: (v: string) => string): Labels {
+  const result: Labels = {};
+  for (const [key, value] of Object.entries(labels)) {
+    result[rand(key)] = rand(String(value));
+  }
+  return result;
+}
+
 export function randomizeData(data: DataFrameJSON[], opts: Randomize): DataFrameJSON[] {
   if (!(opts.labels || opts.names || opts.values)) {
     return data;
@@ -44,15 +59,14 @@ export function randomizeData(data: DataFrameJSON[], opts: Randomize): DataFrame
     let { schema, data } = s;
     if (schema && data) {
       if (opts.labels) {
-        for (const f of schema.fields) {
+        schema.fields.forEach((f, idx) => {
           if (f.labels) {
-            const labels: Labels = {};
-            for (const [key, value] of Object.entries(f.labels)) {
-              labels[key] = rand(value);
-            }
-            f.labels = labels;
+            f.labels = randomizeLabels(f.labels, rand);
           }
-        }
+          if (f.type === FieldType.other && f.name === LOGS_LABELS_FIELD_NAME && data?.values[idx]) {
+            data.values[idx] = data.values[idx].map((v) => (isLabels(v) ? randomizeLabels(v, rand) : v));
+          }
+        });
       }
       if (opts.names) {
         for (const f of schema.fields) {
