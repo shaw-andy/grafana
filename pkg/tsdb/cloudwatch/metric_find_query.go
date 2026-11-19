@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,7 +25,7 @@ import (
 type suggestData struct {
 	Text  string `json:"text"`
 	Value string `json:"value"`
-	Label string `json:"label,omitempty"`
+	Label string `json:"label"`
 }
 
 func parseMultiSelectValue(input string) []string {
@@ -55,6 +56,9 @@ func (ds *DataSource) handleGetEbsVolumeIds(ctx context.Context, parameters url.
 	for _, reservation := range instances.Reservations {
 		for _, instance := range reservation.Instances {
 			for _, mapping := range instance.BlockDeviceMappings {
+				if mapping.Ebs == nil || mapping.Ebs.VolumeId == nil {
+					continue
+				}
 				result = append(result, suggestData{Text: *mapping.Ebs.VolumeId, Value: *mapping.Ebs.VolumeId, Label: *mapping.Ebs.VolumeId})
 			}
 		}
@@ -65,11 +69,14 @@ func (ds *DataSource) handleGetEbsVolumeIds(ctx context.Context, parameters url.
 
 func (ds *DataSource) handleGetEc2InstanceAttribute(ctx context.Context, parameters url.Values) ([]suggestData, error) {
 	region := parameters.Get("region")
-	attributeName := parameters.Get("attributeName")
+	attribute, err := parseInstanceAttribute(parameters.Get("attributeName"))
+	if err != nil {
+		return nil, err
+	}
 	filterJson := parameters.Get("filters")
 
 	filterMap := map[string]any{}
-	err := json.Unmarshal([]byte(filterJson), &filterMap)
+	err = json.Unmarshal([]byte(filterJson), &filterMap)
 	if err != nil {
 		return nil, fmt.Errorf("error unmarshaling filter: %v", err)
 	}
@@ -99,7 +106,7 @@ func (ds *DataSource) handleGetEc2InstanceAttribute(ctx context.Context, paramet
 	dupCheck := make(map[string]bool)
 	for _, reservation := range instances.Reservations {
 		for _, instance := range reservation.Instances {
-			data, found, err := getInstanceAttributeValue(attributeName, instance)
+			data, found, err := getInstanceAttributeValue(attribute, instance)
 			if err != nil {
 				return nil, err
 			}
@@ -122,57 +129,125 @@ func (ds *DataSource) handleGetEc2InstanceAttribute(ctx context.Context, paramet
 	return result, nil
 }
 
-func getInstanceAttributeValue(attributeName string, instance ec2types.Instance) (value string, found bool, err error) {
-	tags := make(map[string]string)
-	for _, tag := range instance.Tags {
-		tags[*tag.Key] = *tag.Value
+// ec2InstanceAttributePaths maps every attribute name a query may ask for to the
+// field index path in ec2types.Instance. It is built from the type, not from
+// returned instances, so unexported or embedded fields (such as the SDK's
+// noSmithyDocumentSerde) can never be selected.
+var ec2InstanceAttributePaths = buildInstanceAttributePaths(reflect.TypeFor[ec2types.Instance]())
+
+func buildInstanceAttributePaths(root reflect.Type) map[string][]int {
+	timeType := reflect.TypeFor[time.Time]()
+	paths := make(map[string][]int)
+	seen := map[reflect.Type]bool{root: true}
+
+	var walk func(t reflect.Type, prefix string, index []int)
+	walk = func(t reflect.Type, prefix string, index []int) {
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+			if !field.IsExported() || field.Anonymous {
+				continue
+			}
+			name := prefix + field.Name
+			fieldIndex := append(slices.Clone(index), i)
+			if isSupportedInstanceAttributeType(field.Type) {
+				paths[name] = fieldIndex
+				continue
+			}
+			nested := field.Type
+			if nested.Kind() == reflect.Pointer {
+				nested = nested.Elem()
+			}
+			if nested.Kind() != reflect.Struct || nested == timeType || seen[nested] {
+				continue
+			}
+			seen[nested] = true
+			walk(nested, name+".", fieldIndex)
+			delete(seen, nested)
+		}
+	}
+	walk(root, "", nil)
+	return paths
+}
+
+func isSupportedInstanceAttributeType(t reflect.Type) bool {
+	if t.Kind() == reflect.String {
+		return true
+	}
+	if t.Kind() != reflect.Pointer {
+		return false
+	}
+	switch t.Elem().Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return true
+	}
+	return t == reflect.TypeFor[*string]() || t == reflect.TypeFor[*time.Time]() || t == reflect.TypeFor[*bool]()
+}
+
+type instanceAttribute struct {
+	isTag      bool
+	tagName    string
+	fieldIndex []int
+}
+
+func parseInstanceAttribute(attributeName string) (instanceAttribute, error) {
+	if tagName, ok := strings.CutPrefix(attributeName, "Tags."); ok {
+		return instanceAttribute{isTag: true, tagName: tagName}, nil
+	}
+	fieldIndex, ok := ec2InstanceAttributePaths[attributeName]
+	if !ok {
+		return instanceAttribute{}, errors.New("invalid attribute path")
+	}
+	return instanceAttribute{fieldIndex: fieldIndex}, nil
+}
+
+func getInstanceAttributeValue(attribute instanceAttribute, instance ec2types.Instance) (value string, found bool, err error) {
+	if attribute.isTag {
+		tags := make(map[string]string)
+		for _, tag := range instance.Tags {
+			if tag.Key == nil || tag.Value == nil {
+				continue
+			}
+			tags[*tag.Key] = *tag.Value
+		}
+		return tags[attribute.tagName], true, nil
 	}
 
-	var data string
-	if strings.Index(attributeName, "Tags.") == 0 {
-		tagName := attributeName[5:]
-		data = tags[tagName]
-	} else {
-		attributePath := strings.Split(attributeName, ".")
-		v := reflect.ValueOf(instance)
-		for _, key := range attributePath {
-			if v.Kind() == reflect.Pointer {
-				if v.IsNil() {
-					return "", false, nil
-				}
-				v = v.Elem()
-			}
-			if v.Kind() != reflect.Struct {
-				return "", false, errors.New("invalid attribute path")
-			}
-			v = v.FieldByName(key)
-			if !v.IsValid() {
-				return "", false, errors.New("invalid attribute path")
-			}
-		}
-
-		if v.Kind() == reflect.Pointer && v.IsNil() {
-			return "", false, nil
-		}
-		if v.Kind() == reflect.String {
-			if v.String() == "" {
+	v := reflect.ValueOf(instance)
+	for _, i := range attribute.fieldIndex {
+		if v.Kind() == reflect.Pointer {
+			if v.IsNil() {
 				return "", false, nil
 			}
-			data = v.String()
-		} else if attr, ok := v.Interface().(*string); ok {
-			data = *attr
-		} else if attr, ok := v.Interface().(*time.Time); ok {
-			data = attr.String()
-		} else if _, ok := v.Interface().(*bool); ok {
-			data = fmt.Sprint(v.Elem().Bool())
-		} else if v.Kind() == reflect.Pointer && v.Elem().CanInt() {
-			data = fmt.Sprint(v.Elem().Int())
-		} else {
-			return "", false, errors.New("cannot parse attribute")
+			v = v.Elem()
 		}
+		v = v.Field(i)
 	}
 
-	return data, true, nil
+	if !v.CanInterface() {
+		return "", false, errors.New("invalid attribute path")
+	}
+	if v.Kind() == reflect.Pointer && v.IsNil() {
+		return "", false, nil
+	}
+	if v.Kind() == reflect.String {
+		if v.String() == "" {
+			return "", false, nil
+		}
+		return v.String(), true, nil
+	}
+
+	switch attr := v.Interface().(type) {
+	case *string:
+		return *attr, true, nil
+	case *time.Time:
+		return attr.String(), true, nil
+	case *bool:
+		return fmt.Sprint(*attr), true, nil
+	}
+	if v.Kind() == reflect.Pointer && v.Elem().CanInt() {
+		return fmt.Sprint(v.Elem().Int()), true, nil
+	}
+	return "", false, errors.New("cannot parse attribute")
 }
 
 func (ds *DataSource) handleGetResourceArns(ctx context.Context, parameters url.Values) ([]suggestData, error) {
@@ -211,6 +286,9 @@ func (ds *DataSource) handleGetResourceArns(ctx context.Context, parameters url.
 
 	result := make([]suggestData, 0)
 	for _, resource := range resources.ResourceTagMappingList {
+		if resource.ResourceARN == nil {
+			continue
+		}
 		data := *resource.ResourceARN
 		result = append(result, suggestData{Text: data, Value: data, Label: data})
 	}
@@ -294,6 +372,9 @@ func (ds *DataSource) handleGetLogGroups(ctx context.Context, parameters url.Val
 	}
 	result := make([]suggestData, 0)
 	for _, logGroup := range response.LogGroups {
+		if logGroup.LogGroupName == nil {
+			continue
+		}
 		logGroupName := *logGroup.LogGroupName
 		result = append(result, suggestData{Text: logGroupName, Value: logGroupName, Label: logGroupName})
 	}
