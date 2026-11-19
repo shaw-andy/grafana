@@ -4,6 +4,7 @@ shorturl: {
 	kind:       "ShortURL"
 	pluralName: "ShortURLs"
 	validation: operations: ["CREATE", "UPDATE"]
+	mutation: operations: ["CREATE"]
 	schema: {
 		spec: {
 			// The original path to where the short url is linking too e.g. https://localhost:3000/eer8i1kictngga/new-dashboard-with-lib-panel

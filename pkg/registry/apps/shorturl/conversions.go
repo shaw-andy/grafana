@@ -41,12 +41,11 @@ func convertToK8sResource(v *shorturls.ShortUrl, namespacer request.NamespaceMap
 	return p
 }
 
+// LegacyCreateCommandToUnstructured leaves the name unset: the API server
+// assigns it, and cmd.UID is ignored.
 func LegacyCreateCommandToUnstructured(cmd dtos.CreateShortURLCmd) unstructured.Unstructured {
 	obj := unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"name": cmd.UID,
-			},
 			"spec": map[string]interface{}{
 				"path": cmd.Path,
 			},

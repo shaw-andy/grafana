@@ -47,6 +47,11 @@ var appManifestData = app.ManifestData{
 								app.AdmissionOperationUpdate,
 							},
 						},
+						Mutation: &app.MutationCapability{
+							Operations: []app.AdmissionOperation{
+								app.AdmissionOperationCreate,
+							},
+						},
 					},
 					Schema: &versionSchemaShortURLv1beta1,
 					Routes: map[string]spec3.PathProps{

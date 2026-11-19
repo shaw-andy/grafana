@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	shorturlapp "github.com/grafana/grafana/apps/shorturl/pkg/app"
 	"github.com/grafana/grafana/pkg/api/dtos"
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/infra/db"
@@ -48,7 +49,7 @@ func (s ShortURLService) CreateShortURL(ctx context.Context, user identity.Reque
 
 	uid := cmd.UID
 	if uid == "" {
-		uid = util.GenerateShortUID()
+		uid = shorturlapp.NewName()
 	} else {
 		// Ensure the UID is valid
 		if !util.IsValidShortUID(uid) {

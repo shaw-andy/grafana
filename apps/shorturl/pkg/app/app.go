@@ -71,6 +71,9 @@ func New(cfg app.Config) (app.App, error) {
 						return validateRelativePath(shortURL.Spec.Path)
 					},
 				},
+				Mutator: &simple.Mutator{
+					MutateFunc: mutateShortURL,
+				},
 				CustomRoutes: simple.AppCustomRouteHandlers{
 					simple.AppCustomRoute{
 						Method: "GET",
