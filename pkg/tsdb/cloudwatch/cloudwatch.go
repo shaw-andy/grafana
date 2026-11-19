@@ -24,11 +24,14 @@ import (
 	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/clients"
 	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/kinds/dataquery"
 	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/models"
+	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/models/resources"
 	"github.com/patrickmn/go-cache"
 )
 
 const (
 	tagValueCacheExpiration = time.Hour * 24
+	accountsCacheExpiration = time.Minute * 5
+	accountsCacheMaxRegions = 64
 
 	// headerFromExpression is used by datasources to identify expression queries
 	headerFromExpression = "X-Grafana-From-Expr"
@@ -59,6 +62,60 @@ type DataSource struct {
 	tagValueCache          *cache.Cache
 	resourceHandler        backend.CallResourceHandler
 	monitoringAccountCache sync.Map
+	accountsCacheMu        sync.Mutex
+	accountsCache          map[string]cachedAccounts
+}
+
+type cachedAccounts struct {
+	accounts  []resources.ResourceResponse[resources.Account]
+	expiresAt time.Time
+}
+
+// getAccounts caches successful lookups per region because every lookup walks
+// the OAM sink and its attached links.
+func (ds *DataSource) getAccounts(ctx context.Context, region string) ([]resources.ResourceResponse[resources.Account], error) {
+	ds.accountsCacheMu.Lock()
+	cached, ok := ds.accountsCache[region]
+	ds.accountsCacheMu.Unlock()
+	if ok && time.Now().Before(cached.expiresAt) {
+		return cached.accounts, nil
+	}
+
+	service, err := ds.GetAccountsService(ctx, region)
+	if err != nil {
+		return nil, err
+	}
+
+	accounts, err := service.GetAccountsForCurrentUserOrRole(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	ds.storeAccounts(region, accounts)
+	return accounts, nil
+}
+
+// storeAccounts keeps at most accountsCacheMaxRegions entries because the
+// region is taken from the request.
+func (ds *DataSource) storeAccounts(region string, accounts []resources.ResourceResponse[resources.Account]) {
+	ds.accountsCacheMu.Lock()
+	defer ds.accountsCacheMu.Unlock()
+
+	now := time.Now()
+	if ds.accountsCache == nil {
+		ds.accountsCache = make(map[string]cachedAccounts)
+	}
+	if _, exists := ds.accountsCache[region]; !exists && len(ds.accountsCache) >= accountsCacheMaxRegions {
+		for key, entry := range ds.accountsCache {
+			if !now.Before(entry.expiresAt) {
+				delete(ds.accountsCache, key)
+			}
+		}
+		if len(ds.accountsCache) >= accountsCacheMaxRegions {
+			return
+		}
+	}
+	ds.accountsCache[region] = cachedAccounts{accounts: accounts, expiresAt: now.Add(accountsCacheExpiration)}
 }
 
 func (ds *DataSource) newAWSConfig(ctx context.Context, region string) (aws.Config, error) {
@@ -291,12 +348,7 @@ func (ds *DataSource) isMonitoringAccount(ctx context.Context, region string) (b
 		return cached, nil
 	}
 
-	client, err := ds.GetAccountsService(ctx, region)
-	if err != nil {
-		return false, err
-	}
-
-	accounts, err := client.GetAccountsForCurrentUserOrRole(ctx)
+	accounts, err := ds.getAccounts(ctx, region)
 	if err != nil {
 		return false, err
 	}

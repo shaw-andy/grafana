@@ -21,6 +21,10 @@ import (
 	resourcegroupstaggingapitypes "github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi/types"
 )
 
+// resourceLookupPageLimit bounds how many pages a single EC2 or resource
+// tagging lookup reads.
+const resourceLookupPageLimit = 100
+
 type suggestData struct {
 	Text  string `json:"text"`
 	Value string `json:"value"`
@@ -230,8 +234,10 @@ func (ds *DataSource) ec2DescribeInstances(ctx context.Context, region string, f
 	}
 
 	resp := &ec2.DescribeInstancesOutput{}
-	pager := ec2.NewDescribeInstancesPaginator(client, params)
-	for pager.HasMorePages() {
+	pager := ec2.NewDescribeInstancesPaginator(client, params, func(o *ec2.DescribeInstancesPaginatorOptions) {
+		o.StopOnDuplicateToken = true
+	})
+	for pages := 0; pager.HasMorePages() && pages < resourceLookupPageLimit; pages++ {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
 			return resp, fmt.Errorf("describe instances pager failed: %w", err)
@@ -254,8 +260,10 @@ func (ds *DataSource) resourceGroupsGetResources(ctx context.Context, region str
 	}
 
 	var resp resourcegroupstaggingapi.GetResourcesOutput
-	paginator := resourcegroupstaggingapi.NewGetResourcesPaginator(client, params)
-	for paginator.HasMorePages() {
+	paginator := resourcegroupstaggingapi.NewGetResourcesPaginator(client, params, func(o *resourcegroupstaggingapi.GetResourcesPaginatorOptions) {
+		o.StopOnDuplicateToken = true
+	})
+	for pages := 0; paginator.HasMorePages() && pages < resourceLookupPageLimit; pages++ {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("get resource groups paginator failed: %w", err)

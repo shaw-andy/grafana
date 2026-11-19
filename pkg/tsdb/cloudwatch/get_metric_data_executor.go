@@ -2,6 +2,7 @@ package cloudwatch
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -13,12 +14,19 @@ import (
 	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/utils"
 )
 
+// getMetricDataPageLimit bounds how many GetMetricData requests a single batch
+// makes. Each page holds up to 100,800 data points.
+const getMetricDataPageLimit = 20
+
 func (ds *DataSource) executeRequest(ctx context.Context, client models.CWClient,
 	metricDataInput *cloudwatch.GetMetricDataInput) ([]*cloudwatch.GetMetricDataOutput, error) {
 	mdo := make([]*cloudwatch.GetMetricDataOutput, 0)
 
 	nextToken := ""
-	for {
+	for page := 1; ; page++ {
+		if err := ctx.Err(); err != nil {
+			return mdo, err
+		}
 		if nextToken != "" {
 			metricDataInput.NextToken = aws.String(nextToken)
 		}
@@ -36,6 +44,9 @@ func (ds *DataSource) executeRequest(ctx context.Context, client models.CWClient
 		utils.QueriesTotalCounter.WithLabelValues(utils.GetMetricDataLabel).Add(float64(len(metricDataInput.MetricDataQueries)))
 		if resp.NextToken == nil || *resp.NextToken == "" {
 			break
+		}
+		if page >= getMetricDataPageLimit {
+			return mdo, backend.DownstreamError(fmt.Errorf("GetMetricData returned more than %d pages of results, reduce the time range or the number of queries", getMetricDataPageLimit))
 		}
 		nextToken = *resp.NextToken
 	}

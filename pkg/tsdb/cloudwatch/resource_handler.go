@@ -259,12 +259,7 @@ func (ds *DataSource) AccountsHandler(ctx context.Context, parameters url.Values
 		return nil, models.NewHttpError("error in AccountsHandler", http.StatusBadRequest, fmt.Errorf("region is required"))
 	}
 
-	service, err := ds.GetAccountsService(ctx, region)
-	if err != nil {
-		return nil, models.NewHttpError("error in AccountsHandler", http.StatusInternalServerError, err)
-	}
-
-	accounts, err := service.GetAccountsForCurrentUserOrRole(ctx)
+	accounts, err := ds.getAccounts(ctx, region)
 	if err != nil {
 		msg := "error getting accounts for current user or role"
 		switch {

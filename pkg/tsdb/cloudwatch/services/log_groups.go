@@ -10,6 +10,10 @@ import (
 	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/models/resources"
 )
 
+// logGroupsListAllPageLimit bounds how many DescribeLogGroups requests a single
+// ListAllLogGroups lookup makes.
+const logGroupsListAllPageLimit = 20
+
 type LogGroupsService struct {
 	logGroupsAPI          models.CloudWatchLogsAPIProvider
 	isCrossAccountEnabled bool
@@ -42,7 +46,10 @@ func (s *LogGroupsService) GetLogGroups(ctx context.Context, req resources.LogGr
 
 	result := []resources.ResourceResponse[resources.LogGroup]{}
 
-	for {
+	for page := 1; ; page++ {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		response, err := s.logGroupsAPI.DescribeLogGroups(ctx, input)
 		if err != nil || response == nil {
 			return nil, nil, err
@@ -58,7 +65,12 @@ func (s *LogGroupsService) GetLogGroups(ctx context.Context, req resources.LogGr
 			})
 		}
 
-		if !req.ListAllLogGroups || response.NextToken == nil {
+		if !hasNextPage(response.NextToken) {
+			return result, nil, nil
+		}
+		// Past the page limit the remaining token is handed back so the caller
+		// can continue with a new, separately bounded request.
+		if !req.ListAllLogGroups || page >= logGroupsListAllPageLimit {
 			return result, response.NextToken, nil
 		}
 		input.NextToken = response.NextToken

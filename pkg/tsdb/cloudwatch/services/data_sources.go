@@ -13,6 +13,10 @@ import (
 	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/models/resources"
 )
 
+// dataSourcesPageLimit bounds how many ListAggregateLogGroupSummaries pages a
+// single lookup reads.
+const dataSourcesPageLimit = 100
+
 type DataSourcesService struct {
 	logsAPI               models.CloudWatchLogsAPIProvider
 	isCrossAccountEnabled bool
@@ -31,12 +35,14 @@ func (s *DataSourcesService) GetDataSources(ctx context.Context, req resources.D
 		input.IncludeLinkedAccounts = aws.Bool(true)
 	}
 
-	paginator := cloudwatchlogs.NewListAggregateLogGroupSummariesPaginator(s.logsAPI, input)
+	paginator := cloudwatchlogs.NewListAggregateLogGroupSummariesPaginator(s.logsAPI, input, func(o *cloudwatchlogs.ListAggregateLogGroupSummariesPaginatorOptions) {
+		o.StopOnDuplicateToken = true
+	})
 	results := make([]resources.ResourceResponse[resources.LogDataSource], 0)
 	seen := make(map[string]struct{})
 	pattern := strings.ToLower(strings.TrimSpace(aws.ToString(req.Pattern)))
 
-	for paginator.HasMorePages() {
+	for pages := 0; paginator.HasMorePages() && pages < dataSourcesPageLimit; pages++ {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
 			return nil, err
