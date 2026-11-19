@@ -36,13 +36,13 @@ func newTestDatasource(opts ...func(*DataSource)) *DataSource {
 }
 
 func Test_accounts_route(t *testing.T) {
-	ds := newTestDatasource()
 	origNewAccountsService := services.NewAccountsService
 	t.Cleanup(func() {
 		services.NewAccountsService = origNewAccountsService
 	})
 
 	t.Run("successfully returns array of accounts json", func(t *testing.T) {
+		ds := newTestDatasource()
 		mockAccountsService := mocks.AccountsServiceMock{}
 		mockAccountsService.On("GetAccountsForCurrentUserOrRole").Return([]resources.ResourceResponse[resources.Account]{{
 			Value: resources.Account{
@@ -66,6 +66,7 @@ func Test_accounts_route(t *testing.T) {
 	})
 
 	t.Run("rejects POST method", func(t *testing.T) {
+		ds := newTestDatasource()
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest("POST", "/accounts?region=us-east-1", nil)
 		handler := http.HandlerFunc(ds.resourceRequestMiddleware(ds.AccountsHandler))
@@ -74,6 +75,7 @@ func Test_accounts_route(t *testing.T) {
 	})
 
 	t.Run("requires region query value", func(t *testing.T) {
+		ds := newTestDatasource()
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/accounts", nil)
 		handler := http.HandlerFunc(ds.resourceRequestMiddleware(ds.AccountsHandler))
@@ -82,6 +84,7 @@ func Test_accounts_route(t *testing.T) {
 	})
 
 	t.Run("returns 403 when accounts service returns ErrAccessDeniedException", func(t *testing.T) {
+		ds := newTestDatasource()
 		mockAccountsService := mocks.AccountsServiceMock{}
 		mockAccountsService.On("GetAccountsForCurrentUserOrRole").Return([]resources.ResourceResponse[resources.Account](nil),
 			fmt.Errorf("%w: %s", services.ErrAccessDeniedException, "some AWS message"))
@@ -101,6 +104,7 @@ func Test_accounts_route(t *testing.T) {
 	})
 
 	t.Run("returns 500 when accounts service returns unknown error", func(t *testing.T) {
+		ds := newTestDatasource()
 		mockAccountsService := mocks.AccountsServiceMock{}
 		mockAccountsService.On("GetAccountsForCurrentUserOrRole").Return([]resources.ResourceResponse[resources.Account](nil), fmt.Errorf("some error"))
 		services.NewAccountsService = func(_ models.OAMAPIProvider) models.AccountsProvider {

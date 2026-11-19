@@ -61,7 +61,7 @@ func TestHandleGetAccounts(t *testing.T) {
 				{Name: aws.String("Account 1"), Arn: aws.String("arn:aws:logs:us-east-1:123456789012:log-group:my-log-group1")},
 				{Name: aws.String("Account 2"), Arn: aws.String("arn:aws:logs:us-east-1:123456789012:log-group:my-log-group2")},
 			},
-			NextToken: new(string),
+			NextToken: aws.String("next"),
 		}, nil).Once()
 		fakeOAMClient.On("ListSinks", mock.Anything).Return(&oam.ListSinksOutput{
 			Items: []oamtypes.ListSinksItem{
@@ -75,7 +75,7 @@ func TestHandleGetAccounts(t *testing.T) {
 		resp, err := accounts.GetAccountsForCurrentUserOrRole(context.Background())
 
 		assert.NoError(t, err)
-		fakeOAMClient.AssertNumberOfCalls(t, "ListSinks", 2)
+		fakeOAMClient.AssertNumberOfCalls(t, "ListSinks", 1)
 		require.Len(t, resp, 1)
 		assert.True(t, resp[0].Value.IsMonitoringAccount)
 		assert.Equal(t, "Account 1", resp[0].Value.Label)
@@ -102,7 +102,7 @@ func TestHandleGetAccounts(t *testing.T) {
 				{Label: aws.String("Account 10"), LinkArn: aws.String("arn:aws:logs:us-east-1:123456789013:log-group:my-log-group10")},
 				{Label: aws.String("Account 11"), LinkArn: aws.String("arn:aws:logs:us-east-1:123456789014:log-group:my-log-group11")},
 			},
-			NextToken: new(string),
+			NextToken: aws.String("next"),
 		}, nil).Once()
 		fakeOAMClient.On("ListAttachedLinks", mock.Anything).Return(&oam.ListAttachedLinksOutput{
 			Items: []oamtypes.ListAttachedLinksItem{
@@ -115,7 +115,7 @@ func TestHandleGetAccounts(t *testing.T) {
 		resp, err := accounts.GetAccountsForCurrentUserOrRole(context.Background())
 
 		assert.NoError(t, err)
-		fakeOAMClient.AssertNumberOfCalls(t, "ListSinks", 2)
+		fakeOAMClient.AssertNumberOfCalls(t, "ListSinks", 1)
 		fakeOAMClient.AssertNumberOfCalls(t, "ListAttachedLinks", 2)
 		expectedAccounts := []resources.ResourceResponse[resources.Account]{
 			{Value: resources.Account{Id: "123456789012", Label: "Account 1", Arn: "arn:aws:logs:us-east-1:123456789012:log-group:my-log-group1", IsMonitoringAccount: true}},
@@ -147,6 +147,7 @@ func TestHandleGetAccounts(t *testing.T) {
 
 		fakeOAMClient.AssertCalled(t, "ListAttachedLinks", &oam.ListAttachedLinksInput{
 			SinkIdentifier: aws.String("arn:aws:logs:us-east-1:123456789012:log-group:my-log-group1"),
+			MaxResults:     aws.Int32(999),
 		})
 	})
 
