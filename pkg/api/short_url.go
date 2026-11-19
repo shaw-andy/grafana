@@ -145,6 +145,11 @@ func (sk8s *shortURLK8sHandler) getKubernetesRedirectFromShortURL(c *contextmode
 		Do(c.Req.Context())
 
 	if err = result.Error(); err != nil {
+		if k8serrors.IsTooManyRequests(err) {
+			c.Logger.Warn("Short URL redirection refused: too many lookups of unknown short URLs", "uid", uid)
+			c.JsonApiErr(http.StatusTooManyRequests, "Too many short URL lookups, try again later", nil)
+			return
+		}
 		// Only emit a 308 when the 404 is from our API group. errors.IsNotFound
 		// matches any 404 from the apiserver, including infrastructure problems
 		// (CRD not registered, wrong API path) — those surface with
@@ -226,7 +231,6 @@ func (sk8s *shortURLK8sHandler) createKubernetesShortURLsHandler(c *contextmodel
 
 	c.Logger.Debug("Creating short URL", "path", cmd.Path)
 	obj := shorturl.LegacyCreateCommandToUnstructured(cmd)
-	obj.SetGenerateName("s") // becomes a prefix
 
 	out, err := client.Create(c.Req.Context(), &obj, v1.CreateOptions{})
 	if err != nil {

@@ -77,6 +77,13 @@ func TestGetKubernetesRedirectFromShortURL(t *testing.T) {
 			wantLocation: appURL,
 		},
 		{
+			name:         "too many lookups is returned as 429 without a redirect",
+			uid:          validUID,
+			statusCode:   http.StatusTooManyRequests,
+			responseBody: mustMarshal(t, metav1.Status{Status: metav1.StatusFailure, Reason: metav1.StatusReasonTooManyRequests, Code: http.StatusTooManyRequests}),
+			wantStatus:   http.StatusTooManyRequests,
+		},
+		{
 			name:         "server error redirects to AppURL with 307",
 			uid:          validUID,
 			statusCode:   http.StatusInternalServerError,

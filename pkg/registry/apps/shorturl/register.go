@@ -6,6 +6,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
+	"k8s.io/apiserver/pkg/registry/generic"
 	"k8s.io/apiserver/pkg/registry/rest"
 	restclient "k8s.io/client-go/rest"
 
@@ -30,8 +31,9 @@ var (
 
 type ShortURLAppInstaller struct {
 	appsdkapiserver.AppInstaller
-	service    shorturls.Service
-	namespacer request.NamespaceMapper
+	service       shorturls.Service
+	namespacer    request.NamespaceMapper
+	lookupLimiter *lookupLimiter
 }
 
 func RegisterAppInstaller(
@@ -39,8 +41,9 @@ func RegisterAppInstaller(
 	service shorturls.Service,
 ) (*ShortURLAppInstaller, error) {
 	installer := &ShortURLAppInstaller{
-		service:    service,
-		namespacer: request.GetNamespaceMapper(cfg),
+		service:       service,
+		namespacer:    request.GetNamespaceMapper(cfg),
+		lookupLimiter: newLookupLimiter(),
 	}
 	specificConfig := &shorturlapp.Config{
 		AppURL: cfg.AppURL,
@@ -58,6 +61,10 @@ func RegisterAppInstaller(
 	}
 	installer.AppInstaller = i
 	return installer, nil
+}
+
+func (s *ShortURLAppInstaller) InstallAPIs(server appsdkapiserver.GenericAPIServer, optsGetter generic.RESTOptionsGetter) error {
+	return s.AppInstaller.InstallAPIs(server, &lookupLimitedOptionsGetter{inner: optsGetter, limiter: s.lookupLimiter})
 }
 
 func (a *ShortURLAppInstaller) GetAuthorizer() authorizer.Authorizer {
