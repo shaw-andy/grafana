@@ -201,9 +201,8 @@ func logPanelDiagnosticsBundle(logger log.Logger, o panelDiagnosticsOutcome) {
 // error (400), matching QueryMetricsV2's per-refId handling. Returns nil when nothing failed, so
 // the caller proceeds to assemble the bundle.
 func (hs *HTTPServer) diagnosticsNoCaptureError(queryErr, respErr error) response.Response {
-	// Errors are surfaced verbatim -- redaction is intentionally deferred for this experimental
-	// feature (see the harcapture package doc). A top-level error keeps its typed status via
-	// handleQueryMetricsError; a per-refId failure is a client error (400).
+	// A top-level error keeps its typed status via handleQueryMetricsError; a per-refId failure is a
+	// client error (400).
 	if queryErr != nil {
 		return hs.handleQueryMetricsError(queryErr)
 	}
