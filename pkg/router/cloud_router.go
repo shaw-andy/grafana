@@ -71,11 +71,12 @@ func ProvideCloudRoutesLoaderFactory(cfg *setting.Cfg, deps PluginDependencies) 
 	}
 
 	// plugins_url is a third, independently-gated source: the plugin-manifests
-	// operator it points at needs no CAP token (it's an unauthenticated
-	// in-cluster HTTP endpoint, unlike the two aggregate targets and the
-	// appmanifest apiserver), so it must not be folded into the
-	// aggregateTargetConfigs loop below or the cap_token/token_exchange_url
-	// gate that follows.
+	// operator it points at needs no CAP token (unlike the two aggregate
+	// targets and the appmanifest apiserver), so it must not be folded into
+	// the aggregateTargetConfigs loop below or the cap_token/token_exchange_url
+	// gate that follows. It is fetched over verified HTTPS, and the plugin
+	// hosts it lists are dialed over gRPC TLS verified against the same roots
+	// (plugins_ca_file, or the system pool when unset).
 	var pluginsTarget *pluginManifestsTarget
 	if pluginsURL := section.Key("plugins_url").MustString(""); pluginsURL != "" {
 		patterns, err := compileGroupPatterns(splitGroupPatterns(section.Key("plugins_group_regex").MustString("")))
@@ -86,8 +87,14 @@ func ProvideCloudRoutesLoaderFactory(cfg *setting.Cfg, deps PluginDependencies) 
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", cloudRouterSection, err)
 		}
-		pluginsTarget, err = newPluginManifestsTarget(pluginsURL,
-			patterns, &http.Client{Timeout: defaultAggregateDiscoveryTimeout}, deps, auth)
+		tlsCfg, err := buildAggregateTLSConfig(section.Key("plugins_ca_file").MustString(""), false)
+		if err != nil {
+			return nil, fmt.Errorf("%s: plugins: %w", cloudRouterSection, err)
+		}
+		pluginsTarget, err = newPluginManifestsTarget(pluginsURL, patterns, &http.Client{
+			Timeout:   defaultAggregateDiscoveryTimeout,
+			Transport: newAggregateBaseTransport(tlsCfg),
+		}, deps, auth)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", cloudRouterSection, err)
 		}

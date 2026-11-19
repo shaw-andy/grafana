@@ -2,13 +2,20 @@ package router
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -60,7 +68,7 @@ const pluginManifestsFixture = `{
 }`
 
 func TestFetchPluginManifests_DecodesDeploymentsEnvelope(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(pluginManifestsFixture))
 	}))
 	defer srv.Close()
@@ -82,7 +90,7 @@ func TestFetchPluginManifests_DecodesDeploymentsEnvelope(t *testing.T) {
 }
 
 func TestPluginManifestsTarget_PollsFiltersAndSkipsEntriesWithoutManifest(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(pluginManifestsFixture))
 	}))
 	defer srv.Close()
@@ -228,7 +236,7 @@ func TestPluginDeploymentBackendLoadErrors(t *testing.T) {
 }
 
 func TestPluginManifestsTarget_GroupRegexNarrowsToMatchingGroups(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(pluginManifestsFixture))
 	}))
 	defer srv.Close()
@@ -244,7 +252,7 @@ func TestPluginManifestsTarget_GroupRegexNarrowsToMatchingGroups(t *testing.T) {
 }
 
 func TestPluginManifestsTarget_SignalsDirtyOnlyOnKeySetChange(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(pluginManifestsFixture))
 	}))
 	defer srv.Close()
@@ -273,7 +281,7 @@ func TestPluginManifestsTarget_SignalsDirtyOnlyOnKeySetChange(t *testing.T) {
 }
 
 func TestPluginManifestsTarget_FailedPollLeavesLastKnownGoodSnapshot(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer srv.Close()
@@ -302,7 +310,7 @@ func TestNewPluginManifestsTarget_RejectsNonAbsoluteURL(t *testing.T) {
 
 func TestPluginManifestsTargetReloadsOnHostChange(t *testing.T) {
 	body := pluginManifestsFixture
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(body))
 	}))
 	defer srv.Close()
@@ -323,7 +331,7 @@ func TestPluginManifestsTargetReloadsOnHostChange(t *testing.T) {
 
 func TestPluginManifestsTargetRemoteClient(t *testing.T) {
 	body := pluginManifestsFixture
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
@@ -334,7 +342,7 @@ func TestPluginManifestsTargetRemoteClient(t *testing.T) {
 	for range 2 {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
-		server := grpc.NewServer()
+		server := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{Certificates: srv.TLS.Certificates})))
 		backend := &manifestTestPluginServer{calls: make(chan string, 3)}
 		pluginv3.RegisterAdmissionServiceServer(server, backend)
 		pluginv3.RegisterConversionServiceServer(server, backend)
@@ -408,6 +416,99 @@ func TestPluginManifestsTargetRemoteClient(t *testing.T) {
 	require.ErrorContains(t, err, "closed")
 }
 
+func TestNewPluginManifestsTarget_RejectsPlaintextURL(t *testing.T) {
+	_, err := newPluginManifestsTarget("http://plugins.example.invalid/plugins", nil, http.DefaultClient, PluginDependencies{}, nil)
+	require.ErrorContains(t, err, "must use https")
+}
+
+func TestFetchPluginManifests_RejectsRedirectToPlaintext(t *testing.T) {
+	var plaintextHits atomic.Int32
+	plaintext := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		plaintextHits.Add(1)
+		_, _ = w.Write([]byte(pluginManifestsFixture))
+	}))
+	defer plaintext.Close()
+	srv := httptest.NewTLSServer(http.RedirectHandler(plaintext.URL, http.StatusFound))
+	defer srv.Close()
+
+	_, err := fetchPluginManifests(t.Context(), srv.Client(), srv.URL)
+	require.ErrorContains(t, err, "not served over https")
+	require.Equal(t, int32(1), plaintextHits.Load())
+}
+
+func TestPluginManifestsTargetRequiresVerifiedTLSToPluginHost(t *testing.T) {
+	body := pluginManifestsFixture
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	target, err := newPluginManifestsTarget(srv.URL, nil, srv.Client(), PluginDependencies{}, nil)
+	require.NoError(t, err)
+	t.Cleanup(target.closeConnections)
+
+	for name, opts := range map[string][]grpc.ServerOption{
+		"plaintext":     nil,
+		"untrusted tls": {grpc.Creds(credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{selfSignedLoopbackCert(t)}}))},
+	} {
+		t.Run(name, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			require.NoError(t, err)
+			server := grpc.NewServer(opts...)
+			backend := &manifestTestPluginServer{calls: make(chan string, 1)}
+			pluginv3.RegisterAdmissionServiceServer(server, backend)
+			go func() { _ = server.Serve(listener) }()
+			t.Cleanup(server.Stop)
+
+			body = strings.ReplaceAll(pluginManifestsFixture, "grafana-appsdktest-app-operator.grafana-router-plugins.svc.cluster.local.:50051", listener.Addr().String())
+			target.poll(t.Context(), make(chan struct{}, 1))
+			require.Len(t, target.Backends(), 1)
+			plugin := target.Backends()[0].(*pluginDeploymentBackend).Backend.(*PluginBackend)
+			_, client, err := plugin.client(t.Context(), plugin.plugin.JSONData.ID)
+			require.NoError(t, err)
+
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			defer cancel()
+			_, err = client.AdmissionReview(ctx, &pluginv3.AdmissionReviewRequest{})
+			require.Error(t, err)
+			require.Empty(t, backend.calls)
+		})
+	}
+}
+
+func selfSignedLoopbackCert(t *testing.T) tls.Certificate {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	require.NoError(t, err)
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+}
+
+func TestPluginHostTLSConfig(t *testing.T) {
+	cfg := pluginHostTLSConfig(nil)
+	require.False(t, cfg.InsecureSkipVerify)
+	require.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
+
+	roots := x509.NewCertPool()
+	cfg = pluginHostTLSConfig(&http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		RootCAs:            roots,
+		ServerName:         "plugins.example.invalid",
+		InsecureSkipVerify: true, // #nosec G402 -- verifies the derived config drops it
+	}}})
+	require.Same(t, roots, cfg.RootCAs)
+	require.Empty(t, cfg.ServerName)
+	require.False(t, cfg.InsecureSkipVerify)
+	require.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
+}
+
 func TestPluginManifestsTargetWithoutBackendClient(t *testing.T) {
 	target := &pluginManifestsTarget{}
 	clientV2, clientV3, err := target.pluginClients("")
@@ -467,7 +568,7 @@ func TestPluginManifestsTargetServesKindsWithoutBackendClient(t *testing.T) {
 	entry.Definition.Manifest.Versions[0].Kinds = []app.ManifestVersionKind{{
 		Kind: "Thing", Plural: "things", Scope: "Namespaced", FolderScoped: &folderScoped,
 	}}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, json.NewEncoder(w).Encode(deployment))
 	}))
 	defer srv.Close()
