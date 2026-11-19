@@ -55,7 +55,12 @@ func (ds *DataSource) handleGetEbsVolumeIds(ctx context.Context, parameters url.
 	for _, reservation := range instances.Reservations {
 		for _, instance := range reservation.Instances {
 			for _, mapping := range instance.BlockDeviceMappings {
-				result = append(result, suggestData{Text: *mapping.Ebs.VolumeId, Value: *mapping.Ebs.VolumeId, Label: *mapping.Ebs.VolumeId})
+				// Instance store volumes have no Ebs object.
+				if mapping.Ebs == nil || mapping.Ebs.VolumeId == nil {
+					continue
+				}
+				volumeId := *mapping.Ebs.VolumeId
+				result = append(result, suggestData{Text: volumeId, Value: volumeId, Label: volumeId})
 			}
 		}
 	}
@@ -125,7 +130,10 @@ func (ds *DataSource) handleGetEc2InstanceAttribute(ctx context.Context, paramet
 func getInstanceAttributeValue(attributeName string, instance ec2types.Instance) (value string, found bool, err error) {
 	tags := make(map[string]string)
 	for _, tag := range instance.Tags {
-		tags[*tag.Key] = *tag.Value
+		if tag.Key == nil {
+			continue
+		}
+		tags[*tag.Key] = aws.ToString(tag.Value)
 	}
 
 	var data string
