@@ -14,6 +14,8 @@ import { findField } from 'app/features/dimensions/utils';
 import { fieldExtractors } from './fieldExtractors';
 import { type ExtractFieldsOptions, FieldExtractorID, type JSONPath } from './types';
 
+export const MAX_EXTRACTED_FIELDS = 100;
+
 export const extractFieldsTransformer: SynchronousDataTransformerInfo<ExtractFieldsOptions> = {
   id: DataTransformerID.extractFields,
   name: 'Extract fields',
@@ -53,6 +55,8 @@ export function addExtractedFields(frame: DataFrame, options: ExtractFieldsOptio
   const names: string[] = []; // keep order
   const values = new Map<string, unknown[]>();
   const parse = ext.getParser(options);
+  const filteredPaths = (options.jsonPaths ?? []).filter((path: JSONPath) => path.path).slice(0, MAX_EXTRACTED_FIELDS);
+  let droppedKeys = false;
 
   for (let i = 0; i < count; i++) {
     let obj = source.values[i];
@@ -69,24 +73,24 @@ export function addExtractedFields(frame: DataFrame, options: ExtractFieldsOptio
       continue;
     }
 
-    if (options.format === FieldExtractorID.JSON && options.jsonPaths && options.jsonPaths?.length > 0) {
+    if (options.format === FieldExtractorID.JSON && filteredPaths.length > 0) {
       const newObj: { [k: string]: unknown } = {};
-      // filter out empty paths
-      const filteredPaths = options.jsonPaths.filter((path: JSONPath) => path.path);
-
-      if (filteredPaths.length > 0) {
-        filteredPaths.forEach((path: JSONPath) => {
-          const key = path.alias && path.alias.length > 0 ? path.alias : path.path;
-          newObj[key] = get(obj, path.path) ?? 'Not Found';
-        });
-
-        obj = newObj;
-      }
+      filteredPaths.forEach((path: JSONPath) => {
+        const key = path.alias && path.alias.length > 0 ? path.alias : path.path;
+        newObj[key] = get(obj, path.path) ?? 'Not Found';
+      });
+      obj = newObj;
     }
 
     for (const [key, val] of Object.entries(obj)) {
       let buffer = values.get(key);
       if (buffer == null) {
+        // Every new key costs an array of frame length, so a value with many keys must not
+        // be able to grow the output without bound.
+        if (names.length >= MAX_EXTRACTED_FIELDS) {
+          droppedKeys = true;
+          continue;
+        }
         buffer = new Array(count).fill(undefined);
         values.set(key, buffer);
         names.push(key);
@@ -136,6 +140,23 @@ export function addExtractedFields(frame: DataFrame, options: ExtractFieldsOptio
 
   if (!options.replace) {
     fields.unshift(...frame.fields);
+  }
+
+  if (droppedKeys) {
+    return {
+      ...frame,
+      fields,
+      meta: {
+        ...frame.meta,
+        notices: [
+          ...(frame.meta?.notices ?? []),
+          {
+            severity: 'warning',
+            text: `Extract fields kept the first ${MAX_EXTRACTED_FIELDS} keys and dropped the rest`,
+          },
+        ],
+      },
+    };
   }
 
   return {
