@@ -78,8 +78,8 @@ type diagnosticsJob struct {
 	archive     []byte
 
 	// createdByOrgID/createdByUID scope status/download to the identity that started the run. Jobs
-	// may hold verbatim captured HTTP traffic (see the harcapture package doc), so this is enforced
-	// even though the routes themselves are already gated admin-only.
+	// hold captured HTTP traffic whose redaction cannot be exhaustive (see the harcapture package
+	// doc), so this is enforced even though the routes themselves are already gated admin-only.
 	createdByOrgID int64
 	createdByUID   string
 }
@@ -87,7 +87,7 @@ type diagnosticsJob struct {
 // jobOwnedBy reports whether requester is the identity that created j. An empty UID on either side
 // never matches: admin-gated callers always carry a real UID, so this guards against a fail-open
 // where two identities with an empty UID in the same org would collide into one "owner" and could
-// read each other's job (which may hold verbatim captured HTTP traffic).
+// read each other's job (which holds captured HTTP traffic).
 func jobOwnedBy(j *diagnosticsJob, requester identity.Requester) bool {
 	uid := requester.GetUID()
 	if uid == "" || j.createdByUID == "" {

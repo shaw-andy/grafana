@@ -274,8 +274,8 @@ func TestHasCapturedHAR(t *testing.T) {
 
 func TestCollectHAR_malformedExternalFrame_benign(t *testing.T) {
 	// A frame carries a non-empty but unparseable "har" payload and there's no in-process buffer.
-	// Redaction is deferred, so the frame is merged verbatim: mergeHAR skips the unparseable document
-	// and, with no other entries, returns (nil, nil) — a benign empty bundle, not an error.
+	// mergeHAR skips the unparseable document and, with no other entries, returns (nil, nil) — a
+	// benign empty bundle, not an error.
 	f := data.NewFrame("")
 	f.Meta = &data.FrameMeta{Custom: map[string]interface{}{"har": "not valid har"}}
 	resp := &backend.QueryDataResponse{Responses: backend.Responses{"__har__": backend.DataResponse{Frames: data.Frames{f}}}}
@@ -285,10 +285,10 @@ func TestCollectHAR_malformedExternalFrame_benign(t *testing.T) {
 	require.Nil(t, out)
 }
 
-func TestCollectHAR_ExternalFramesVerbatim_andNilFrame(t *testing.T) {
-	// A frame with a secret in a request header. Redaction is intentionally deferred, so it must be
-	// merged VERBATIM (the secret is preserved, not stripped) — same policy as in-process capture.
-	frameHAR := `{"log":{"entries":[{"request":{"headers":[{"name":"Authorization","value":"Bearer FRAMESECRET"}],"queryString":[],"cookies":[],"url":"http://x/y"},"response":{"headers":[],"cookies":[]}}]}}`
+func TestCollectHAR_ExternalFramesRedacted_andNilFrame(t *testing.T) {
+	// An external plugin's frame is serialized outside Grafana, so its sensitive header must be
+	// redacted on merge -- same policy as in-process capture.
+	frameHAR := `{"log":{"entries":[{"request":{"headers":[{"name":"Authorization","value":"Bearer FRAMESECRET"},{"name":"Accept","value":"application/json"}],"queryString":[],"cookies":[],"url":"http://x/y"},"response":{"headers":[],"cookies":[]}}]}}`
 	withHAR := data.NewFrame("")
 	withHAR.Meta = &data.FrameMeta{Custom: map[string]interface{}{"har": frameHAR}}
 
@@ -310,7 +310,9 @@ func TestCollectHAR_ExternalFramesVerbatim_andNilFrame(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(out, &env))
 	require.Len(t, env.Log.Entries, 1)
-	require.Contains(t, string(out), "FRAMESECRET", "external-plugin frame is merged verbatim (redaction deferred)")
+	require.NotContains(t, string(out), "FRAMESECRET", "external-plugin Authorization header is redacted")
+	require.Contains(t, string(out), harcapture.RedactedValue)
+	require.Contains(t, string(out), "application/json", "non-sensitive headers are kept")
 
 	_, ok := resp.Responses["__har__"]
 	require.False(t, ok, "__har__ synthetic response is consumed, not returned to the client")

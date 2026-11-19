@@ -1,13 +1,13 @@
 // Package harcapture records datasource HTTP request/response pairs in memory and serializes them
 // to HAR 1.2 for the on-demand diagnostics bundle.
 //
-// REDACTION IS INTENTIONALLY NOT PERFORMED (yet). Captured entries — request/response headers
-// (Authorization, cookies, API keys, …), query parameters, URLs, and bodies — are recorded
-// VERBATIM. This is a deliberate, temporary scope decision for the experimental, admin-only,
-// on-prem, feature-flagged diagnostics endpoint: the download drawer warns the operator that the
-// bundle may contain sensitive data and to review it before sharing, so responsible use is on the
-// operator. Automatic redaction is a planned follow-up; until it lands, treat every generated
-// bundle as containing live credentials.
+// Entries are redacted as they are recorded, so the buffer never holds the credentials Grafana
+// attaches to datasource requests: sensitive request/response headers (Authorization, Cookie,
+// Proxy-Authorization, and any name containing token, secret, key, password, ...), all cookie
+// values, URL userinfo, sensitive query parameters, sensitive form/JSON body fields, and credentials
+// embedded in transport error text. See redact.go for the rules and for RedactHAREntry, which applies
+// them to HAR produced outside this package. Redaction is name-based and cannot be exhaustive, so
+// bundles should still be reviewed before they are shared.
 package harcapture
 
 import (
@@ -43,6 +43,16 @@ type contextKey struct{}
 type Buffer struct {
 	mu      sync.Mutex
 	entries []*har.Entry
+	secrets SecretSet
+}
+
+// AddSecrets registers credential values, such as a datasource's decrypted secure settings, that are
+// replaced wherever they appear in entries added afterwards. This covers credentials sent under a
+// header or parameter name that name-based redaction does not recognize. Thread-safe.
+func (b *Buffer) AddSecrets(values ...string) {
+	b.mu.Lock()
+	b.secrets = b.secrets.With(values...)
+	b.mu.Unlock()
 }
 
 // WithCapture returns a child context carrying a new Buffer and the buffer itself.
@@ -63,6 +73,7 @@ func FromContext(ctx context.Context) *Buffer {
 func (b *Buffer) AddEntry(req *http.Request, resp *http.Response, rtErr error, started time.Time, elapsed time.Duration) {
 	e := buildEntry(req, resp, rtErr, started, elapsed)
 	b.mu.Lock()
+	b.secrets.scrubEntry(e)
 	b.entries = append(b.entries, e)
 	b.mu.Unlock()
 }
@@ -93,8 +104,7 @@ func (b *Buffer) ToHAR() ([]byte, error) {
 	return json.Marshal(doc)
 }
 
-// buildEntry builds a HAR entry from a request/response pair. Values are captured verbatim -- see the
-// package doc: redaction is intentionally deferred.
+// buildEntry builds a redacted HAR entry from a request/response pair (see the package doc).
 func buildEntry(req *http.Request, resp *http.Response, rtErr error, started time.Time, elapsed time.Duration) *har.Entry {
 	reqHeaders := toNameValues(req.Header)
 	queryString := queryPairs(req.URL.Query())
@@ -117,7 +127,10 @@ func buildEntry(req *http.Request, resp *http.Response, rtErr error, started tim
 				// marker. base64 preserves the bytes (vs string() corrupting invalid UTF-8 to U+FFFD),
 				// but a replay tool can't tell it's base64. Accepted: datasource request bodies are
 				// text in practice, and body handling overall is a redaction/limits follow-up (#1281).
-				text, _ := encodeBody(body)
+				text, encoding := encodeBody(body)
+				if encoding == "" {
+					text = redactBody(text, req.Header.Get("Content-Type"))
+				}
 				pd = &har.PostData{
 					MimeType: req.Header.Get("Content-Type"),
 					Text:     text,
@@ -137,7 +150,7 @@ func buildEntry(req *http.Request, resp *http.Response, rtErr error, started tim
 		harResp.HTTPVersion = resp.Proto
 		harResp.Headers = toNameValues(resp.Header)
 		harResp.Cookies = toCookies(resp.Cookies())
-		harResp.RedirectURL = resp.Header.Get("Location")
+		harResp.RedirectURL = RedactURL(resp.Header.Get("Location"))
 		if resp.Body != nil {
 			// Drain then Close the original transport body so its connection is returned to the idle
 			// pool (per the net/http contract), then hand the caller a fresh reader over the bytes.
@@ -152,6 +165,9 @@ func buildEntry(req *http.Request, resp *http.Response, rtErr error, started tim
 			}
 			harResp.BodySize = int64(len(body))
 			text, encoding := encodeBody(body)
+			if encoding == "" {
+				text = redactBody(text, resp.Header.Get("Content-Type"))
+			}
 			harResp.Content = &har.Content{
 				Size:     int64(len(body)),
 				MimeType: resp.Header.Get("Content-Type"),
@@ -163,7 +179,7 @@ func buildEntry(req *http.Request, resp *http.Response, rtErr error, started tim
 
 	var comment string
 	if rtErr != nil {
-		comment = "transport error: " + rtErr.Error()
+		comment = "transport error: " + RedactText(rtErr.Error())
 	}
 
 	waitMs := float64(elapsed.Milliseconds())
@@ -172,7 +188,7 @@ func buildEntry(req *http.Request, resp *http.Response, rtErr error, started tim
 		Time:            waitMs,
 		Request: &har.Request{
 			Method:      req.Method,
-			URL:         req.URL.String(),
+			URL:         RedactURL(req.URL.String()),
 			HTTPVersion: req.Proto,
 			Headers:     reqHeaders,
 			QueryString: queryString,
@@ -190,6 +206,7 @@ func buildEntry(req *http.Request, resp *http.Response, rtErr error, started tim
 
 // toNameValues flattens an http.Header into HAR name/value pairs, emitting one pair per value so
 // repeated headers (e.g. multiple Set-Cookie) are preserved, in sorted order for deterministic output.
+// Values are redacted by RedactHeaderValue.
 func toNameValues(h http.Header) []*har.NameValuePair {
 	names := make([]string, 0, len(h))
 	for name := range h {
@@ -200,13 +217,14 @@ func toNameValues(h http.Header) []*har.NameValuePair {
 	result := make([]*har.NameValuePair, 0, len(h))
 	for _, name := range names {
 		for _, v := range h[name] {
-			result = append(result, &har.NameValuePair{Name: name, Value: v})
+			result = append(result, &har.NameValuePair{Name: name, Value: RedactHeaderValue(name, v)})
 		}
 	}
 	return result
 }
 
 // queryPairs flattens URL query values into HAR name/value pairs, sorted for deterministic output.
+// Values of sensitive parameters are redacted.
 func queryPairs(query map[string][]string) []*har.NameValuePair {
 	names := make([]string, 0, len(query))
 	for name := range query {
@@ -216,7 +234,13 @@ func queryPairs(query map[string][]string) []*har.NameValuePair {
 
 	result := make([]*har.NameValuePair, 0, len(query))
 	for _, name := range names {
+		redact := IsSensitiveName(name)
 		for _, v := range query[name] {
+			if redact {
+				v = RedactedValue
+			} else {
+				v = RedactText(v)
+			}
 			result = append(result, &har.NameValuePair{Name: name, Value: v})
 		}
 	}
@@ -224,11 +248,12 @@ func queryPairs(query map[string][]string) []*har.NameValuePair {
 }
 
 // toCookies converts parsed HTTP cookies into HAR cookie entries (name/value), matching the SDK
-// e2e HAR storage output so captured traffic stays replayable by the E2E fixture proxy.
+// e2e HAR storage output so captured traffic stays replayable by the E2E fixture proxy. Values are
+// always redacted: a cookie's name says little about whether its value is a session credential.
 func toCookies(cookies []*http.Cookie) []*har.Cookie {
 	result := make([]*har.Cookie, 0, len(cookies))
 	for _, c := range cookies {
-		result = append(result, &har.Cookie{Name: c.Name, Value: c.Value})
+		result = append(result, &har.Cookie{Name: c.Name, Value: RedactedValue})
 	}
 	return result
 }
