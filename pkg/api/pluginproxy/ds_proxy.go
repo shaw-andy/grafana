@@ -319,7 +319,9 @@ func dsInfo(ds *datasourcesV0.DataSource, decryptedValues map[string]string) DSI
 	}
 
 	return DSInfo{
-		ID: meta.GetDeprecatedInternalID(), // nolint:staticcheck
+		Namespace: ds.Namespace,
+		UID:       ds.Name,
+		ID:        meta.GetDeprecatedInternalID(), // nolint:staticcheck
 
 		URL:                     ds.Spec.URL(),
 		Updated:                 updated,
