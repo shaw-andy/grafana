@@ -997,19 +997,14 @@ func RedactedValue(key, value string) string {
 		"CLIENT_SECRET",
 		"ENTERPRISE_LICENSE",
 		"API_DB_PASS",
-		"^TOKEN$",
-		"ID_FORWARDING_TOKEN$",
-		"AUTHENTICATION_TOKEN$",
-		"AUTH_TOKEN$",
-		"RENDERER_TOKEN$",
-		"API_TOKEN$",
-		"WEBHOOK_TOKEN$",
-		"INSTALL_TOKEN$",
-		"PROXY_TOKEN$",
 	} {
 		if match, err := regexp.MatchString(pattern, uppercased); match && err == nil {
 			return RedactedPassword
 		}
+	}
+
+	if strings.HasSuffix(uppercased, "TOKEN") && !isNonSecretTokenFlag(uppercased) {
+		return RedactedPassword
 	}
 
 	for _, exception := range []string{
@@ -1027,6 +1022,23 @@ func RedactedValue(key, value string) string {
 	}
 
 	return value
+}
+
+// Keys ending in TOKEN are redacted unless they are one of these boolean flags.
+// The key may be a bare ini key, an env name, or a dotted command-line property.
+func isNonSecretTokenFlag(uppercasedKey string) bool {
+	for _, flag := range []string{
+		"ENABLE_LOGIN_TOKEN",
+		"USE_REFRESH_TOKEN",
+		"VALIDATE_ID_TOKEN",
+	} {
+		if uppercasedKey == flag ||
+			strings.HasSuffix(uppercasedKey, "_"+flag) ||
+			strings.HasSuffix(uppercasedKey, "."+flag) {
+			return true
+		}
+	}
+	return false
 }
 
 func RedactedURL(value string) (string, error) {
@@ -1292,7 +1304,7 @@ func (cfg *Cfg) applyCommandLineProperties(file *ini.File) {
 			keyString := sectionName + key.Name()
 			value, exists := cfg.commandLineProps[keyString]
 			if exists {
-				cfg.appliedCommandLineProperties = append(cfg.appliedCommandLineProperties, fmt.Sprintf("%s=%s", keyString, value))
+				cfg.appliedCommandLineProperties = append(cfg.appliedCommandLineProperties, fmt.Sprintf("%s=%s", keyString, RedactedValue(keyString, value)))
 				key.SetValue(value)
 			}
 		}
