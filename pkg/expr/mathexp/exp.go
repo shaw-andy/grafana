@@ -1,6 +1,8 @@
 package mathexp
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -35,6 +37,7 @@ type State struct {
 	// returns an error instead of proceeding. A value of 0 disables the limit.
 	MemoryLimit int64
 
+	ctx    context.Context
 	tracer tracing.Tracer
 }
 
@@ -64,6 +67,14 @@ type ExecuteOption func(*State)
 func WithMemoryLimit(limit int64) ExecuteOption {
 	return func(s *State) {
 		s.MemoryLimit = limit
+	}
+}
+
+// WithContext sets the context that binary operations check for cancellation
+// while matching and combining series.
+func WithContext(ctx context.Context) ExecuteOption {
+	return func(s *State) {
+		s.ctx = ctx
 	}
 }
 
@@ -222,11 +233,29 @@ type Union struct {
 // union creates Union objects based on the Labels attached to each Series or Number
 // within a collection of Series or Numbers. The Unions are used with binary
 // operations. The labels of the Union will the taken from result with a greater
-// number of tags.
-func (e *State) union(aResults, bResults Results, biNode *parse.BinaryNode) []*Union {
+// number of tags. When the State has a MemoryLimit, the estimated output size
+// is checked before any Union is built.
+func (e *State) union(aResults, bResults Results, biNode *parse.BinaryNode) ([]*Union, error) {
 	unions := []*Union{}
-	appendUnions := func(u *Union) {
-		unions = append(unions, u)
+
+	aValueLen := len(aResults.Values)
+	bValueLen := len(bResults.Values)
+	if aValueLen == 0 || bValueLen == 0 {
+		return unions, nil
+	}
+
+	match, err := matchLabels(e.context(), aResults, bResults)
+	if err != nil {
+		if errors.Is(err, errLabelMatchTooExpensive) {
+			return nil, e.labelMatchError(aResults, bResults, biNode)
+		}
+		return nil, err
+	}
+
+	if e.MemoryLimit > 0 {
+		if err := e.checkBinaryMemoryLimit(match, biNode); err != nil {
+			return nil, err
+		}
 	}
 
 	aVar := biNode.Args[0].String()
@@ -259,72 +288,60 @@ func (e *State) union(aResults, bResults Results, biNode *parse.BinaryNode) []*U
 		check(bVar, bMatched, &bResults)
 	}
 
-	aValueLen := len(aResults.Values)
-	bValueLen := len(bResults.Values)
-	if aValueLen == 0 || bValueLen == 0 {
-		return unions
-	}
-
-	if aValueLen == 1 || bValueLen == 1 {
-		aNoData := aResults.Values[0].Type() == parse.TypeNoData
-		bNoData := bResults.Values[0].Type() == parse.TypeNoData
-		if aNoData || bNoData {
-			appendUnions(&Union{
-				Labels: nil,
-				A:      aResults.Values[0],
-				B:      bResults.Values[0],
-			})
-			collectDrops()
-			return unions
-		}
-	}
-
-	for iA, a := range aResults.Values {
-		for iB, b := range bResults.Values {
-			var labels data.Labels
-			aLabels := a.GetLabels()
-			bLabels := b.GetLabels()
-			switch {
-			case aLabels.Equals(bLabels) || len(aLabels) == 0 || len(bLabels) == 0:
-				l := aLabels
-				if len(aLabels) == 0 {
-					l = bLabels
-				}
-				labels = l
-			case len(aLabels) == len(bLabels):
-				continue // invalid union, drop for now
-			case aLabels.Contains(bLabels):
-				labels = aLabels
-			case bLabels.Contains(aLabels):
-				labels = bLabels
-			default:
-				continue
-			}
-			u := &Union{
-				Labels: labels,
-				A:      a,
-				B:      b,
-			}
-			appendUnions(u)
-			aMatched[iA] = true
-			bMatched[iB] = true
-		}
-	}
-
-	if len(unions) == 0 && len(aResults.Values) == 1 && len(bResults.Values) == 1 {
-		// In the case of only 1 thing on each side of the operator, we combine them
-		// and strip the tags.
+	if match.single {
+		// A lone NoData combines with the first value of the other side. In the
+		// case of only 1 thing on each side of the operator and no matching
+		// labels, we combine them and strip the tags.
 		// This isn't ideal for understanding behavior, but will make more stuff work when
 		// combining different datasources without munging.
 		// This choice is highly questionable in the long term.
-		appendUnions(&Union{
+		unions = append(unions, &Union{
 			A: aResults.Values[0],
 			B: bResults.Values[0],
 		})
+		collectDrops()
+		return unions, nil
+	}
+
+	unions = make([]*Union, 0, match.pairs)
+	err = match.each(e.context(), func(iA, iB int) bool {
+		a, b := aResults.Values[iA], bResults.Values[iB]
+		unions = append(unions, &Union{
+			Labels: unionLabels(a.GetLabels(), b.GetLabels()),
+			A:      a,
+			B:      b,
+		})
+		aMatched[iA] = true
+		bMatched[iB] = true
+		return true
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	collectDrops()
-	return unions
+	return unions, nil
+}
+
+func (e *State) labelMatchError(aResults, bResults Results, node *parse.BinaryNode) error {
+	aVar := node.Args[0].String()
+	bVar := node.Args[1].String()
+	return fmt.Errorf(
+		"expression %q attempted to combine %d series from %s with %d series from %s, "+
+			"but their label names vary too much to match them. "+
+			"Check that the queries for %s and %s return series with the same label names",
+		node.String(),
+		len(aResults.Values), aVar,
+		len(bResults.Values), bVar,
+		aVar, bVar,
+	)
+}
+
+func (e *State) context() context.Context {
+	if e.ctx == nil {
+		return context.Background()
+	}
+	return e.ctx
 }
 
 const (
@@ -368,9 +385,9 @@ func seriesLen(v Value) int {
 	return 0
 }
 
-// estimateBinaryMemory replays the label matching logic from union() to count
-// the exact number of unions and accumulate a per-pair memory estimate, without
-// allocating Union structs or output frames.
+// estimateBinaryMemory counts the exact number of unions union() produces and
+// accumulates a per-pair memory estimate, without allocating Union structs or
+// output frames.
 //
 // For each matching pair, the estimate accounts for the actual types and sizes
 // of both values (Series length, label bytes). The only remaining
@@ -378,12 +395,27 @@ func seriesLen(v Value) int {
 // of the timestamp intersection, which is not knowable without scanning
 // datapoints.
 func estimateBinaryMemory(aResults, bResults Results) binaryMemoryEstimate {
-	est := binaryMemoryEstimate{
-		aCount: len(aResults.Values),
-		bCount: len(bResults.Values),
+	match, err := matchLabels(context.Background(), aResults, bResults)
+	if err != nil {
+		return binaryMemoryEstimate{aCount: len(aResults.Values), bCount: len(bResults.Values)}
 	}
-	if est.aCount == 0 || est.bCount == 0 {
-		return est
+	est, _ := match.estimate(context.Background(), 0)
+	return est
+}
+
+// estimate accumulates the per-pair memory cost of the matched pairs. With a
+// positive limit it stops as soon as the running total exceeds it, so the
+// returned bytes are then a lower bound.
+func (m *labelMatch) estimate(ctx context.Context, limit int64) (binaryMemoryEstimate, error) {
+	est := binaryMemoryEstimate{aCount: len(m.a), bCount: len(m.b)}
+	if m.pairs == 0 {
+		return est, nil
+	}
+	// Every pair costs at least frameOverhead.
+	if limit > 0 && m.pairs > limit/frameOverhead {
+		est.unions = int(min(m.pairs, math.MaxInt))
+		est.bytes = m.pairs * frameOverhead
+		return est, nil
 	}
 
 	addPair := func(a, b Value) {
@@ -408,46 +440,21 @@ func estimateBinaryMemory(aResults, bResults Results) binaryMemoryEstimate {
 		est.bytes += pairCost
 	}
 
-	if est.aCount == 1 || est.bCount == 1 {
-		aNoData := aResults.Values[0].Type() == parse.TypeNoData
-		bNoData := bResults.Values[0].Type() == parse.TypeNoData
-		if aNoData || bNoData {
-			addPair(aResults.Values[0], bResults.Values[0])
-			return est
-		}
-	}
-
-	for _, a := range aResults.Values {
-		for _, b := range bResults.Values {
-			aLabels := a.GetLabels()
-			bLabels := b.GetLabels()
-			switch {
-			case aLabels.Equals(bLabels) || len(aLabels) == 0 || len(bLabels) == 0:
-				addPair(a, b)
-			case len(aLabels) == len(bLabels):
-				// skip: invalid union
-			case aLabels.Contains(bLabels):
-				addPair(a, b)
-			case bLabels.Contains(aLabels):
-				addPair(a, b)
-			}
-		}
-	}
-
-	// Mirror the fallback in union(): if nothing matched and both sides have
-	// exactly one value, they get combined anyway.
-	if est.unions == 0 && est.aCount == 1 && est.bCount == 1 {
-		addPair(aResults.Values[0], bResults.Values[0])
-	}
-
-	return est
+	err := m.each(ctx, func(ia, ib int) bool {
+		addPair(m.a[ia], m.b[ib])
+		return limit <= 0 || est.bytes <= limit
+	})
+	return est, err
 }
 
-// checkBinaryMemoryLimit estimates the output cost of a binary operation by
-// replaying the label matching logic and computing per-pair costs. Returns a
-// descriptive error if the estimate exceeds the configured memory limit.
-func (e *State) checkBinaryMemoryLimit(ar, br Results, node *parse.BinaryNode) error {
-	est := estimateBinaryMemory(ar, br)
+// checkBinaryMemoryLimit estimates the output cost of the matched pairs of a
+// binary operation. Returns a descriptive error if the estimate exceeds the
+// configured memory limit.
+func (e *State) checkBinaryMemoryLimit(match *labelMatch, node *parse.BinaryNode) error {
+	est, err := match.estimate(e.context(), e.MemoryLimit)
+	if err != nil {
+		return err
+	}
 
 	if est.bytes <= e.MemoryLimit {
 		return nil
@@ -458,14 +465,14 @@ func (e *State) checkBinaryMemoryLimit(ar, br Results, node *parse.BinaryNode) e
 
 	return fmt.Errorf(
 		"expression %q attempted to combine %d series from %s with %d series from %s, "+
-			"producing %d series pairs (estimated memory: %s, limit: %s). "+
+			"producing %d series pairs (estimated memory: at least %s, limit: %s). "+
 			"This usually means the label sets returned by your queries are no longer compatible. "+
 			"When labels match, this expression would produce ~%d pairs. "+
 			"Check that the queries for %s and %s return series with the same label names and values",
 		node.String(),
 		est.aCount, aVar,
 		est.bCount, bVar,
-		est.unions,
+		match.pairs,
 		formatBytes(est.bytes),
 		formatBytes(e.MemoryLimit),
 		max(est.aCount, est.bCount),
@@ -498,14 +505,21 @@ func (e *State) walkBinary(node *parse.BinaryNode) (Results, error) {
 		return res, err
 	}
 
-	if e.MemoryLimit > 0 {
-		if err := e.checkBinaryMemoryLimit(ar, br, node); err != nil {
-			return res, err
-		}
+	ctx := e.context()
+	if err := ctx.Err(); err != nil {
+		return res, err
 	}
 
-	unions := e.union(ar, br, node)
-	for _, uni := range unions {
+	unions, err := e.union(ar, br, node)
+	if err != nil {
+		return res, err
+	}
+	for i, uni := range unions {
+		if i%ctxCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return res, err
+			}
+		}
 		var value Value
 		switch at := uni.A.(type) {
 		case Scalar:
