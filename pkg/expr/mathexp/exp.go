@@ -303,7 +303,6 @@ func (e *State) union(aResults, bResults Results, biNode *parse.BinaryNode) ([]*
 		return unions, nil
 	}
 
-	unions = make([]*Union, 0, match.pairs)
 	err = match.each(e.context(), func(iA, iB int) bool {
 		a, b := aResults.Values[iA], bResults.Values[iB]
 		unions = append(unions, &Union{
