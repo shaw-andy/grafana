@@ -53,29 +53,31 @@ describe('extract fields key cap', () => {
     expect(allocations).toBe(maxExtractedKeys);
   });
 
-  it('caps a JSON array and a JSON string, whose indexes are keys', async () => {
+  it('caps a JSON array, whose indexes are keys', async () => {
     const arrayPayload = JSON.stringify(Array.from({ length: overflowKeyCount }, (_, index) => `v${index}`));
-    const stringPayload = JSON.stringify('x'.repeat(overflowKeyCount));
-
-    const arrayResult = await runExtract(
+    const { frames, allocations } = await runExtract(
       { source: 'line', format: FieldExtractorID.JSON, replace: true },
       frameWithLine([arrayPayload, null, null, null, null])
     );
-    const stringResult = await runExtract(
+
+    expect(extractedNames(frames[0])).toEqual(indexNames(maxExtractedKeys));
+    expect(fieldValues(frames[0], '0')).toEqual(['v0', undefined, undefined, undefined, undefined]);
+    expect(fieldValues(frames[0], '99')).toEqual(['v99', undefined, undefined, undefined, undefined]);
+    expect(frames[0].fields.find((field) => field.name === '100')).toBeUndefined();
+    expect(allocations).toBe(maxExtractedKeys);
+  });
+
+  it('caps a JSON string, whose character indexes are keys', async () => {
+    const stringPayload = JSON.stringify('x'.repeat(overflowKeyCount));
+    const { frames, allocations } = await runExtract(
       { source: 'line', format: FieldExtractorID.JSON, replace: true },
       frameWithLine([stringPayload, null, null, null, null])
     );
 
-    expect(extractedNames(arrayResult.frames[0])).toEqual(indexNames(maxExtractedKeys));
-    expect(fieldValues(arrayResult.frames[0], '0')).toEqual(['v0', undefined, undefined, undefined, undefined]);
-    expect(fieldValues(arrayResult.frames[0], '99')).toEqual(['v99', undefined, undefined, undefined, undefined]);
-    expect(arrayResult.frames[0].fields.find((field) => field.name === '100')).toBeUndefined();
-    expect(arrayResult.allocations).toBe(maxExtractedKeys);
-
-    expect(extractedNames(stringResult.frames[0])).toEqual(indexNames(maxExtractedKeys));
-    expect(fieldValues(stringResult.frames[0], '0')).toEqual(['x', undefined, undefined, undefined, undefined]);
-    expect(stringResult.frames[0].fields.find((field) => field.name === '100')).toBeUndefined();
-    expect(stringResult.allocations).toBe(maxExtractedKeys);
+    expect(extractedNames(frames[0])).toEqual(indexNames(maxExtractedKeys));
+    expect(fieldValues(frames[0], '0')).toEqual(['x', undefined, undefined, undefined, undefined]);
+    expect(frames[0].fields.find((field) => field.name === '100')).toBeUndefined();
+    expect(allocations).toBe(maxExtractedKeys);
   });
 
   it('caps JSON paths before allocating a values array per path', async () => {
@@ -145,24 +147,27 @@ describe('extract fields key cap', () => {
     expect(allocations).toBe(maxExtractedKeys);
   });
 
-  it('caps auto mode for JSON and for key-value text', async () => {
-    const jsonResult = await runExtract(
+  it('caps auto mode when the value is JSON', async () => {
+    const { frames, allocations } = await runExtract(
       { source: 'line', format: FieldExtractorID.Auto, replace: true },
       frameWithLine([jsonObject(overflowKeyCount), null, null, null, null])
     );
-    const keyValueResult = await runExtract(
+
+    expect(extractedNames(frames[0])).toEqual(keptKeyNames());
+    expect(frames[0].fields.find((field) => field.name === 'k100')).toBeUndefined();
+    expect(allocations).toBe(maxExtractedKeys);
+  });
+
+  it('caps auto mode when the value is key-value text', async () => {
+    const { frames, allocations } = await runExtract(
       { source: 'line', replace: true },
       frameWithLine([keyValueText(overflowKeyCount), null, null, null, null])
     );
 
-    expect(extractedNames(jsonResult.frames[0])).toEqual(keptKeyNames());
-    expect(jsonResult.frames[0].fields.find((field) => field.name === 'k100')).toBeUndefined();
-    expect(jsonResult.allocations).toBe(maxExtractedKeys);
-
-    expect(extractedNames(keyValueResult.frames[0])).toEqual(keptKeyNames());
-    expect(fieldValues(keyValueResult.frames[0], 'k099')).toEqual(['v99', undefined, undefined, undefined, undefined]);
-    expect(keyValueResult.frames[0].fields.find((field) => field.name === 'k100')).toBeUndefined();
-    expect(keyValueResult.allocations).toBe(maxExtractedKeys);
+    expect(extractedNames(frames[0])).toEqual(keptKeyNames());
+    expect(fieldValues(frames[0], 'k099')).toEqual(['v99', undefined, undefined, undefined, undefined]);
+    expect(frames[0].fields.find((field) => field.name === 'k100')).toBeUndefined();
+    expect(allocations).toBe(maxExtractedKeys);
   });
 
   it('caps an object value that is already parsed', async () => {
