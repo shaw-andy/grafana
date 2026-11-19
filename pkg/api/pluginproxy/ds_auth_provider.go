@@ -13,6 +13,8 @@ import (
 )
 
 type DSInfo struct {
+	Namespace               string
+	UID                     string
 	ID                      int64
 	Updated                 time.Time
 	URL                     string
