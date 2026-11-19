@@ -295,7 +295,8 @@ func Test_union(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeNode := &parse.BinaryNode{Args: [2]parse.Node{&parse.VarNode{}, &parse.VarNode{}}}
-			unions := (&State{}).union(tt.aResults, tt.bResults, fakeNode)
+			unions, err := (&State{}).union(tt.aResults, tt.bResults, fakeNode)
+			assert.NoError(t, err)
 			tt.unionsAre(t, tt.unions, unions)
 		})
 	}

@@ -78,7 +78,7 @@ func (gm *MathCommand) Execute(ctx context.Context, _ time.Time, vars mathexp.Va
 	_, span := tracer.Start(ctx, "SSE.ExecuteMath")
 	span.SetAttributes(attribute.String("expression", gm.RawExpression))
 	defer span.End()
-	return gm.Expression.Execute(gm.refID, vars, tracer, mathexp.WithMemoryLimit(gm.memoryLimit))
+	return gm.Expression.Execute(gm.refID, vars, tracer, mathexp.WithMemoryLimit(gm.memoryLimit), mathexp.WithContext(ctx))
 }
 
 func (gm *MathCommand) Type() string {
