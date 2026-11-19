@@ -3,9 +3,13 @@ package clientmiddleware
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -15,6 +19,10 @@ import (
 )
 
 const harCaptureHeader = "X-Grafana-HAR-Capture"
+
+// harResponseRefIDPrefix is the refId prefix of the synthetic responses in which externalized plugins
+// return their captured traffic.
+const harResponseRefIDPrefix = "__har__"
 
 // NewHTTPCaptureMiddleware creates a backend.HandlerMiddleware that captures HTTP traffic
 // for QueryData calls when a harcapture.Buffer is present in the context.
@@ -34,6 +42,9 @@ func (m *HTTPCaptureMiddleware) QueryData(ctx context.Context, req *backend.Quer
 		return m.BaseHandler.QueryData(ctx, req)
 	}
 
+	secrets := datasourceSecrets(req.PluginContext)
+	buf.AddSecrets(secrets...)
+
 	// Signal external gRPC plugins via request header.
 	if req.Headers == nil {
 		req.Headers = map[string]string{}
@@ -42,7 +53,15 @@ func (m *HTTPCaptureMiddleware) QueryData(ctx context.Context, req *backend.Quer
 
 	ctx = sdkhttpclient.WithContextualMiddleware(ctx, captureMiddleware(buf))
 
-	return m.BaseHandler.QueryData(ctx, req)
+	resp, err := m.BaseHandler.QueryData(ctx, req)
+	secretSet := harcapture.SecretSet{}.With(secrets...)
+	scrubCapturedResponse(resp, secretSet)
+	if err != nil {
+		if msg := err.Error(); secretSet.Scrub(msg) != msg {
+			err = errors.New(secretSet.Scrub(msg))
+		}
+	}
+	return resp, err
 }
 
 func (m *HTTPCaptureMiddleware) QueryChunkedData(ctx context.Context, req *backend.QueryChunkedDataRequest, w backend.ChunkedDataWriter) error {
@@ -50,6 +69,8 @@ func (m *HTTPCaptureMiddleware) QueryChunkedData(ctx context.Context, req *backe
 	if buf == nil {
 		return m.BaseHandler.QueryChunkedData(ctx, req, w)
 	}
+
+	buf.AddSecrets(datasourceSecrets(req.PluginContext)...)
 
 	// Signal external gRPC plugins via request header.
 	if req.Headers == nil {
@@ -60,6 +81,70 @@ func (m *HTTPCaptureMiddleware) QueryChunkedData(ctx context.Context, req *backe
 	ctx = sdkhttpclient.WithContextualMiddleware(ctx, captureMiddleware(buf))
 
 	return m.BaseHandler.QueryChunkedData(ctx, req, w)
+}
+
+// datasourceSecrets returns the credential values Grafana can attach to the datasource's requests:
+// every decrypted secure setting (basic-auth password, custom header values, tokens, ...), the
+// basic-auth header value built from them, and a password embedded in the datasource URL.
+func datasourceSecrets(pCtx backend.PluginContext) []string {
+	settings := pCtx.DataSourceInstanceSettings
+	if settings == nil {
+		return nil
+	}
+	values := make([]string, 0, len(settings.DecryptedSecureJSONData)+3)
+	for _, v := range settings.DecryptedSecureJSONData {
+		values = append(values, v)
+	}
+	if pw := settings.DecryptedSecureJSONData["basicAuthPassword"]; pw != "" {
+		values = append(values, base64.StdEncoding.EncodeToString([]byte(settings.BasicAuthUser+":"+pw)))
+	}
+	if pw := settings.DecryptedSecureJSONData["password"]; pw != "" && settings.User != "" {
+		values = append(values, base64.StdEncoding.EncodeToString([]byte(settings.User+":"+pw)))
+	}
+	if u, err := url.Parse(settings.URL); err == nil && u.User != nil {
+		if pw, ok := u.User.Password(); ok && pw != "" {
+			values = append(values, pw, base64.StdEncoding.EncodeToString([]byte(u.User.Username()+":"+pw)))
+		}
+	}
+	return values
+}
+
+// scrubCapturedResponse removes the datasource's credentials from what an externalized plugin
+// returned alongside its capture: the serialized HAR and the stashed query error in its __har__
+// frames, and per-refId error text. The plugin serialized these itself, so its redaction cannot be
+// relied on.
+func scrubCapturedResponse(resp *backend.QueryDataResponse, secrets harcapture.SecretSet) {
+	if resp == nil || secrets.Empty() {
+		return
+	}
+	for refID, r := range resp.Responses {
+		changed := false
+		if r.Error != nil {
+			if msg := r.Error.Error(); secrets.Scrub(msg) != msg {
+				r.Error = errors.New(secrets.Scrub(msg))
+				changed = true
+			}
+		}
+		if strings.HasPrefix(refID, harResponseRefIDPrefix) {
+			for _, frame := range r.Frames {
+				if frame == nil || frame.Meta == nil {
+					continue
+				}
+				custom, ok := frame.Meta.Custom.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				for _, key := range []string{"har", "queryError"} {
+					if s, ok := custom[key].(string); ok {
+						custom[key] = secrets.Scrub(s)
+					}
+				}
+			}
+		}
+		if changed {
+			resp.Responses[refID] = r
+		}
+	}
 }
 
 // captureMiddleware returns an HTTP client middleware that records every outgoing
