@@ -350,7 +350,7 @@ func TestProvideCloudRoutesLoaderFactory_TargetsGetOwnHTTPClients(t *testing.T) 
 
 // TestProvideCloudRoutesLoaderFactory_PluginsURLAloneActivatesWithoutCapToken
 // pins plugins_url's independence from the appmanifest/aggregate auth gate:
-// its operator is an unauthenticated in-cluster endpoint, so it must not
+// its operator does not authenticate clients, so it must not
 // require cap_token/token_exchange_url the way the other two sources do.
 func TestProvideCloudRoutesLoaderFactory_PluginsURLAloneActivatesWithoutCapToken(t *testing.T) {
 	cfg := cfgWithCloudRouterSection(t, map[string]string{
@@ -381,6 +381,25 @@ func TestProvideCloudRoutesLoaderFactory_PluginsURLRejectsNonAbsoluteURL(t *test
 	require.ErrorContains(t, err, "must be absolute")
 }
 
+func TestProvideCloudRoutesLoaderFactory_PluginsURLRequiresTLS(t *testing.T) {
+	for name, tc := range map[string]struct {
+		settings map[string]string
+		err      string
+	}{
+		"plaintext url":   {map[string]string{"plugins_url": "http://plugins.invalid/plugins"}, "must use https"},
+		"missing ca file": {map[string]string{"plugins_url": "https://plugins.invalid/plugins", "plugins_ca_file": filepath.Join(t.TempDir(), "missing.pem")}, "reading ca_file"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := cfgWithCloudRouterSection(t, tc.settings)
+			cfg.ExtJWTAuth.JWKSUrl = "https://jwks.invalid/keys"
+			cfg.ExtJWTAuth.Audiences = []string{"grafana"}
+
+			_, err := ProvideCloudRoutesLoaderFactory(cfg, PluginDependencies{})
+			require.ErrorContains(t, err, tc.err)
+		})
+	}
+}
+
 // TestCloudLoader_AllThreeSourcesCombineInLoad exercises plugins_url as a
 // third source alongside an aggregate target, confirming Load() combines
 // backends from both rather than treating them as mutually exclusive (the
@@ -393,10 +412,12 @@ func TestCloudLoader_AllThreeSourcesCombineInLoad(t *testing.T) {
 	}))
 	defer aggregateUpstream.Close()
 
-	pluginsUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	pluginsUpstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(pluginManifestsFixture))
 	}))
 	defer pluginsUpstream.Close()
+	pluginsCAFile := filepath.Join(t.TempDir(), "plugins-ca.pem")
+	require.NoError(t, os.WriteFile(pluginsCAFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: pluginsUpstream.Certificate().Raw}), 0o600))
 
 	tokenExchange := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -410,6 +431,7 @@ func TestCloudLoader_AllThreeSourcesCombineInLoad(t *testing.T) {
 		"baas_apiserver.url":      aggregateUpstream.URL,
 		"baas_apiserver.audience": "baas",
 		"plugins_url":             pluginsUpstream.URL,
+		"plugins_ca_file":         pluginsCAFile,
 	})
 	cfg.ExtJWTAuth.JWKSUrl = "https://jwks.invalid/keys"
 	cfg.ExtJWTAuth.Audiences = []string{"grafana"}

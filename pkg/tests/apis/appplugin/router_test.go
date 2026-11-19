@@ -6,10 +6,13 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -94,6 +97,10 @@ func TestIntegrationPluginsOverRouter(t *testing.T) {
 	})
 	manifests := httptest.NewServer(mux)
 	t.Cleanup(manifests.Close)
+	pluginManifests := httptest.NewTLSServer(mux)
+	t.Cleanup(pluginManifests.Close)
+	pluginsCAFile := filepath.Join(t.TempDir(), "plugins-ca.pem")
+	require.NoError(t, os.WriteFile(pluginsCAFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: pluginManifests.Certificate().Raw}), 0o600))
 
 	t.Setenv("GF_ENVIRONMENT_STACK_ID", "1234")
 	helper := apis.NewK8sTestHelper(t, testinfra.GrafanaOpts{DisableAnonymous: true})
@@ -129,7 +136,8 @@ func TestIntegrationPluginsOverRouter(t *testing.T) {
 	cfg := setting.NewCfg()
 	cfg.ExtJWTAuth.JWKSUrl = manifests.URL + "/jwks"
 	cfg.ExtJWTAuth.Audiences = []string{audience}
-	cfg.SectionWithEnvOverrides("cloud_router").Key("plugins_url").SetValue(manifests.URL + "/plugins")
+	cfg.SectionWithEnvOverrides("cloud_router").Key("plugins_url").SetValue(pluginManifests.URL + "/plugins")
+	cfg.SectionWithEnvOverrides("cloud_router").Key("plugins_ca_file").SetValue(pluginsCAFile)
 	loader, err := router.ProvideRoutesLoader(cfg, router.PluginLoaderDependencies{
 		PluginDependencies: router.PluginDependencies{Cfg: cfg, Unified: helper.GetEnv().ResourceClient,
 			RESTConfigProvider: router.NewLoopbackRestConfigProvider(routerHandler)},

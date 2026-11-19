@@ -388,7 +388,13 @@ loop shape (same constants, same `run`/`poll` split, same last-known-good-on-fai
 consistency, but its wire format and backend are unrelated:
 
 - It polls `plugins_url` directly (the configured value is the full endpoint, e.g.
-  `http://host:10001/plugins` — not a base to join `/apis` onto like the aggregate targets).
+  `https://host:10001/plugins` — not a base to join `/apis` onto like the aggregate targets).
+- **TLS is mandatory on both hops.** `plugins_url` must be `https` (rejected at construction
+  otherwise), and a response that did not arrive over TLS (e.g. after a redirect to `http`) is
+  rejected. Each `host` is dialed with gRPC TLS credentials derived from the `plugins_url` client's
+  TLS config (`pluginHostTLSConfig`), so `plugins_ca_file` verifies both the operator and every
+  plugin host, each against its own name. Plugin routes forward the caller's identity token and
+  admission decides what is stored, so there is no plaintext or skip-verify option — don't add one.
 - The response decodes straight into `definition.PluginDeployments` — the
   `{"key","plugins":[{"definition":{"jsonData","manifest"},"host"}]}` envelope that type already
   describes, confirmed against a live plugin-manifests operator deployment.
@@ -399,7 +405,7 @@ consistency, but its wire format and backend are unrelated:
 - `pluginManifestBackend.Load`/`ServeHTTP` are a placeholder that echoes the manifest entry —
   routing real traffic to `entry.Host` (the plugin's gRPC backend) is the "Backend Mode: Plugin" work
   the Path model section above marks TBD, not implemented by adding this third discovery source.
-- No CAP token / audience: `plugins_url` is an unauthenticated in-cluster endpoint, unlike the
+- No CAP token / audience: `plugins_url` does not require client authentication, unlike the
   appmanifest apiserver and the two aggregate targets. `ProvideCloudRoutesLoaderFactory` gates
   `cap_token`/`token_exchange_url` on those two sources only — `plugins_url` alone must activate the
   loader without either set.
@@ -427,13 +433,14 @@ section's existence. Keys:
 | `cloud_app_platform_apiserver.url` | no          | Base URL of the Cloud App Platform apiserver. If unset, CAP group discovery is skipped. |
 | `cloud_app_platform_apiserver.audience` | yes, if `cloud_app_platform_apiserver.url` is set | OIDC audience string for this target. |
 | `cloud_app_platform_apiserver.group_regex` | no | Comma-separated glob patterns to filter CAP-discovered groups; same semantics as baas_apiserver. |
-| `plugins_url`         | no                    | Full URL of a plugin-manifests operator's `/plugins` endpoint (e.g. `http://host:10001/plugins`). If set, the router polls it as a third, independent source — see "`plugins_url`: a third, differently-shaped source" above. |
+| `plugins_url`         | no                    | Full URL of a plugin-manifests operator's `/plugins` endpoint (e.g. `https://host:10001/plugins`). Must be `https`. If set, the router polls it as a third, independent source — see "`plugins_url`: a third, differently-shaped source" above. |
+| `plugins_ca_file`     | no                    | CA bundle file used to verify `plugins_url`'s TLS cert **and** the gRPC TLS cert of every plugin host it lists. Unset → system roots. |
 | `plugins_group_regex` | no                    | Comma-separated glob patterns to filter plugin-discovered groups by their manifest's `group`; same semantics as `baas_apiserver.group_regex`. |
 
 Any combination of `appmanifest_apiserver_url`, `baas_apiserver.url`, `cloud_app_platform_apiserver.url`, and
 `plugins_url` may be set independently. `cap_token` and `token_exchange_url` are required only if **any** of
 `appmanifest_apiserver_url`/`baas_apiserver.url`/`cloud_app_platform_apiserver.url` is set — `plugins_url` alone never
-requires them (its operator is unauthenticated and in-cluster). Aggregate targets, the AppManifest loader, and
+requires them (its operator does not authenticate clients; the router authenticates it via TLS). Aggregate targets, the AppManifest loader, and
 `plugins_url` all activate independently of one another.
 
 **Every `*.url` value must be absolute** (scheme + host). `url.Parse` accepts `""` and relative

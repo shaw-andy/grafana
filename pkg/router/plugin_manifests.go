@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -18,7 +19,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	pluginv3 "github.com/grafana/grafana-app-sdk/plugin/genproto/grafana/plugin/v3"
@@ -42,6 +43,9 @@ type pluginManifestsTarget struct {
 	authn    authn.TokenAuthenticator
 
 	cooldown *cooldown
+
+	// tlsConfig verifies plugin hosts with the same trust roots as url.
+	tlsConfig *tls.Config
 
 	snapshot atomic.Pointer[[]Backend]
 	lastKeys atomic.Pointer[map[string]struct{}]
@@ -69,14 +73,20 @@ func newPluginManifestsTarget(
 	if parsed.Scheme == "" || parsed.Host == "" {
 		return nil, fmt.Errorf("router: plugins_url must be absolute (scheme and host required): url=%q", rawURL)
 	}
+	// The response names the hosts that receive caller identity tokens and
+	// decide admission, so it must come from an authenticated server.
+	if parsed.Scheme != "https" {
+		return nil, fmt.Errorf("router: plugins_url must use https: url=%q", rawURL)
+	}
 
 	t := &pluginManifestsTarget{
-		deps:     deps,
-		url:      rawURL,
-		client:   client,
-		patterns: patterns,
-		authn:    authn,
-		cooldown: newCooldown(defaultAggregatePollInterval, defaultAggregateMinBackoff, defaultAggregateMaxBackoff),
+		deps:      deps,
+		url:       rawURL,
+		client:    client,
+		patterns:  patterns,
+		authn:     authn,
+		cooldown:  newCooldown(defaultAggregatePollInterval, defaultAggregateMinBackoff, defaultAggregateMaxBackoff),
+		tlsConfig: pluginHostTLSConfig(client),
 	}
 	empty := []Backend{}
 	t.snapshot.Store(&empty)
@@ -189,9 +199,12 @@ func (t *pluginManifestsTarget) pluginClients(host string) (plugins.Client, v3.C
 	}
 	conn := t.connections[host]
 	if conn == nil {
-		// Plugin deployments expose plaintext gRPC on the internal cluster network.
+		tlsConfig := t.tlsConfig
+		if tlsConfig == nil {
+			tlsConfig = pluginHostTLSConfig(nil)
+		}
 		var err error
-		conn, err = grpc.NewClient(host, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err = grpc.NewClient(host, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 		if err != nil {
 			return nil, nil, fmt.Errorf("router: creating plugin client for %q: %w", host, err)
 		}
@@ -225,6 +238,26 @@ func (t *pluginManifestsTarget) closeConnections() {
 	t.connections = nil
 }
 
+// pluginHostTLSConfig derives the TLS config for plugin host connections from
+// the plugins_url client, so a private CA configured for the operator also
+// verifies the plugin hosts it lists. Certificate verification is always on,
+// and ServerName is left empty so each connection verifies its own host.
+func pluginHostTLSConfig(client *http.Client) *tls.Config {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if client != nil {
+		if transport, ok := client.Transport.(*http.Transport); ok && transport.TLSClientConfig != nil {
+			cfg = transport.TLSClientConfig.Clone()
+		}
+	}
+	cfg.ServerName = ""
+	cfg.NextProtos = nil
+	cfg.InsecureSkipVerify = false
+	if cfg.MinVersion < tls.VersionTLS12 {
+		cfg.MinVersion = tls.VersionTLS12
+	}
+	return cfg
+}
+
 // fetchPluginManifests fetches and decodes the plugin-manifests operator's
 // GET /plugins response into definition.PluginDeployments -- the
 // {"key","plugins":[{"definition":{"jsonData","manifest"},"host"}]} envelope
@@ -241,6 +274,9 @@ func fetchPluginManifests(ctx context.Context, client *http.Client, rawURL strin
 		return nil, fmt.Errorf("router: plugin manifests request to %s failed: %w", rawURL, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.Request == nil || resp.Request.URL.Scheme != "https" || resp.TLS == nil {
+		return nil, fmt.Errorf("router: plugin manifests request to %s was not served over https", rawURL)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("router: plugin manifests request to %s returned status %d", rawURL, resp.StatusCode)
 	}
