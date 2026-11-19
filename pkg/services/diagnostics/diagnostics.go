@@ -158,7 +158,7 @@ func (b *Bundler) Build(resp *backend.QueryDataResponse, harBuffer *harcapture.B
 		}
 	}
 	if queryDataErr != nil {
-		files["querydata-error.txt"] = []byte(queryDataErr.Error() + "\n")
+		files["querydata-error.txt"] = []byte(harcapture.RedactText(queryDataErr.Error()) + "\n")
 	}
 
 	har, err := collectHAR(resp, harBuffer)
@@ -186,9 +186,8 @@ func (b *Bundler) Build(resp *backend.QueryDataResponse, harBuffer *harcapture.B
 	}
 
 	if queryErr != nil {
-		// Recorded verbatim -- redaction is intentionally deferred for this experimental feature
-		// (see the harcapture package doc); the error text can embed a request URL with credentials.
-		files["query-error.txt"] = []byte(queryErr.Error() + "\n")
+		// The error text can embed a request URL with credentials.
+		files["query-error.txt"] = []byte(harcapture.RedactText(queryErr.Error()) + "\n")
 	}
 
 	return buildTarGz(files)
@@ -266,7 +265,7 @@ func marshalQueryDataArtifactWithLimit(request json.RawMessage, resp *backend.Qu
 			out, fallbackErr := fitQueryDataArtifact(queryDataArtifact{
 				Version:         queryDataArtifactVersion,
 				ResponseSummary: summarizeQueryDataResponse(resp),
-				ResponseError:   truncateDiagnosticString(err.Error(), min(1024, maxBytes/4)),
+				ResponseError:   truncateDiagnosticString(harcapture.RedactText(err.Error()), min(1024, maxBytes/4)),
 				ResponseOmitted: true,
 			}, request, maxBytes)
 			if fallbackErr != nil {
@@ -358,7 +357,7 @@ func summarizeQueryDataResponse(resp *backend.QueryDataResponse) map[string]quer
 			ErrorSource: response.ErrorSource,
 		}
 		if response.Error != nil {
-			summary.Error = truncateDiagnosticString(response.Error.Error(), 1024)
+			summary.Error = truncateDiagnosticString(harcapture.RedactText(response.Error.Error()), 1024)
 		}
 		for _, frame := range response.Frames {
 			if frame == nil {
@@ -443,8 +442,8 @@ type manifestPanelEntry struct {
 // BuildDashboard assembles a whole-dashboard .tar.gz: a shared dashboard.json and manifest.json plus
 // per-panel panels/<id>-<slug>/{panel.json, querydata.json, traffic.har, query-error.txt}.
 //
-// Like Build, captured traffic and error text are recorded VERBATIM -- redaction is intentionally
-// deferred (see the harcapture package doc) -- and server logs are omitted (not request-scoped).
+// Like Build, captured traffic and error text are redacted (see the harcapture package doc) and server
+// logs are omitted (not request-scoped).
 func (b *Bundler) BuildDashboard(dashboardJSON json.RawMessage, panels []DashboardPanel) ([]byte, error) {
 	manifest := dashboardManifest{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
@@ -516,22 +515,22 @@ func (b *Bundler) BuildDashboard(dashboardJSON json.RawMessage, panels []Dashboa
 		}
 		// Joined with "; " rather than errors.Join's newline so the manifest keeps one readable line per
 		// panel instead of embedded \n escapes.
-		entry.QueryDataError = strings.Join(queryDataErrs, "; ")
+		entry.QueryDataError = harcapture.RedactText(strings.Join(queryDataErrs, "; "))
 
 		// A single panel's capture that fails to serialize must not sink the whole multi-panel bundle:
 		// record it against this panel in the manifest and keep everything else (dashboard.json, the
 		// other panels' traffic, manifest). Only this panel loses its traffic.har.
 		har, err := collectHAR(p.Resp, p.HARBuffer)
 		if err != nil {
-			entry.CaptureError = err.Error()
+			entry.CaptureError = harcapture.RedactText(err.Error())
 		} else if len(har) > 0 {
 			files[dir+"/traffic.har"] = har
 			entry.HARBytes = len(har)
 		}
 
 		if p.QueryErr != nil {
-			entry.Error = p.QueryErr.Error()
-			files[dir+"/query-error.txt"] = []byte(p.QueryErr.Error() + "\n")
+			entry.Error = harcapture.RedactText(p.QueryErr.Error())
+			files[dir+"/query-error.txt"] = []byte(entry.Error + "\n")
 		} else {
 			manifest.PanelsRun++
 		}
@@ -658,15 +657,21 @@ func isHARResponse(refID string) bool {
 	return strings.HasPrefix(refID, harResponseRefIDPrefix)
 }
 
+// queryDataResponseWithoutCaptureFrames returns the copy of resp that querydata.json encodes: capture
+// frames removed and per-refId error text redacted, since it is the same text as query-error.txt.
 func queryDataResponseWithoutCaptureFrames(resp *backend.QueryDataResponse) *backend.QueryDataResponse {
 	filtered := backend.NewQueryDataResponse()
 	if resp == nil {
 		return filtered
 	}
 	for refID, dataResponse := range resp.Responses {
-		if !isHARResponse(refID) {
-			filtered.Responses[refID] = dataResponse
+		if isHARResponse(refID) {
+			continue
 		}
+		if dataResponse.Error != nil {
+			dataResponse.Error = errors.New(harcapture.RedactText(dataResponse.Error.Error()))
+		}
+		filtered.Responses[refID] = dataResponse
 	}
 	return filtered
 }
@@ -882,7 +887,7 @@ func collectHAR(resp *backend.QueryDataResponse, harBuffer *harcapture.Buffer) (
 	}
 
 	// Common case: only the in-process buffer captured traffic (core plugins). Its ToHAR output is
-	// already a complete HAR 1.2 document, so return it directly rather than re-parsing and
+	// already a complete, redacted HAR 1.2 document, so return it directly rather than re-parsing and
 	// re-marshaling every captured request/response through mergeHAR.
 	if len(frameDocs) == 0 {
 		return bufferDoc, nil
@@ -914,9 +919,11 @@ func isParseableHAR(harStr string) bool {
 }
 
 // mergeHAR combines multiple HAR 1.2 documents into a single one by concatenating their
-// log.entries. Documents that fail to parse are skipped. Returns (nil, nil) when there are no
-// entries (a benign "no captured traffic" -- e.g. a valid but empty external frame), and a non-nil
-// error only when the merged result can't be marshaled.
+// log.entries. Documents that fail to parse are skipped. Every entry is passed through
+// harcapture.RedactHAREntry, because externalized plugins serialize their capture themselves and
+// their redaction cannot be relied on; an entry that cannot be redacted is dropped rather than copied.
+// Returns (nil, nil) when there are no entries (a benign "no captured traffic" -- e.g. a valid but
+// empty external frame), and a non-nil error only when the merged result can't be marshaled.
 func mergeHAR(docs [][]byte) ([]byte, error) {
 	entries := make([]json.RawMessage, 0)
 	var creator json.RawMessage
@@ -925,7 +932,13 @@ func mergeHAR(docs [][]byte) ([]byte, error) {
 		if err := json.Unmarshal(d, &env); err != nil {
 			continue
 		}
-		entries = append(entries, env.Log.Entries...)
+		for _, raw := range env.Log.Entries {
+			redacted, err := harcapture.RedactHAREntry(raw)
+			if err != nil {
+				continue
+			}
+			entries = append(entries, redacted)
+		}
 		if creator == nil && len(env.Log.Creator) > 0 {
 			creator = env.Log.Creator
 		}
