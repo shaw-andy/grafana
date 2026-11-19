@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -414,19 +415,19 @@ func (r *gitRepository) Read(ctx context.Context, filePath, ref string) (out *re
 		}, nil
 	}
 
-	blob, err := r.client.GetBlobByPath(ctx, commit.Tree, finalPath)
+	blob, err := r.readBlob(ctx, commit.Tree, finalPath, r.maxBytes.Load())
 	if err != nil {
+		var tooLarge *blobTooLargeError
+		if errors.As(err, &tooLarge) {
+			return nil, apierrors.NewRequestEntityTooLargeError(
+				fmt.Sprintf("file %q is %d bytes; max allowed is %d bytes", filePath, tooLarge.size, tooLarge.max),
+			)
+		}
 		if errors.Is(err, nanogit.ErrObjectNotFound) {
 			return nil, repository.ErrFileNotFound
 		}
 
 		return nil, fmt.Errorf("read blob: %w", mapNanogitError(err))
-	}
-
-	if max := r.maxBytes.Load(); max > 0 && int64(len(blob.Content)) > max {
-		return nil, apierrors.NewRequestEntityTooLargeError(
-			fmt.Sprintf("file %q is %d bytes; max allowed is %d bytes", filePath, len(blob.Content), max),
-		)
 	}
 
 	return &repository.FileInfo{
@@ -435,6 +436,45 @@ func (r *gitRepository) Read(ctx context.Context, filePath, ref string) (out *re
 		Data: blob.Content,
 		Hash: blob.Hash.String(),
 	}, nil
+}
+
+// readBlob returns the blob at blobPath. When maxBytes is positive the blob is
+// refused from its packfile header, before its content is transferred, if it
+// is larger than maxBytes.
+func (r *gitRepository) readBlob(ctx context.Context, rootTree hash.Hash, blobPath string, maxBytes int64) (*nanogit.Blob, error) {
+	if maxBytes <= 0 {
+		return r.client.GetBlobByPath(ctx, rootTree, blobPath)
+	}
+
+	up, ok := r.client.(uploadPacker)
+	if !ok {
+		return nil, errors.New("git client does not support size-limited blob reads")
+	}
+
+	dir, name := path.Split(blobPath)
+	if name == "" {
+		return nil, errors.New("invalid path: ends with slash")
+	}
+	tree, err := r.client.GetTreeByPath(ctx, rootTree, strings.Trim(dir, "/"))
+	if err != nil {
+		return nil, err
+	}
+
+	for _, entry := range tree.Entries {
+		if entry.Name != name {
+			continue
+		}
+		if entry.Type != protocol.ObjectTypeBlob {
+			return nil, nanogit.NewUnexpectedObjectTypeError(entry.Hash, protocol.ObjectTypeBlob, entry.Type)
+		}
+		data, err := fetchBlobLimited(ctx, up, entry.Hash, maxBytes)
+		if err != nil {
+			return nil, err
+		}
+		return &nanogit.Blob{Hash: entry.Hash, Content: data}, nil
+	}
+
+	return nil, nanogit.NewPathNotFoundError(blobPath)
 }
 
 func (r *gitRepository) WithMaxFileSize(maxBytes int64) {
