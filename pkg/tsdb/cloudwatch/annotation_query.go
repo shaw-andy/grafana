@@ -108,6 +108,9 @@ func (ds *DataSource) executeAnnotationQuery(ctx context.Context, model DataQuer
 			return result, nil
 		}
 		for _, alarm := range resp.MetricAlarms {
+			if alarm.AlarmName == nil {
+				continue
+			}
 			alarmNames = append(alarmNames, alarm.AlarmName)
 		}
 	}
@@ -126,11 +129,18 @@ func (ds *DataSource) executeAnnotationQuery(ctx context.Context, model DataQuer
 			return result, nil
 		}
 		for _, history := range resp.AlarmHistoryItems {
+			if history.Timestamp == nil {
+				continue
+			}
+			title := aws.ToString(alarmName)
+			if history.AlarmName != nil {
+				title = *history.AlarmName
+			}
 			annotations = append(annotations, &annotationEvent{
 				Time:  *history.Timestamp,
-				Title: *history.AlarmName,
+				Title: title,
 				Tags:  string(history.HistoryItemType),
-				Text:  *history.HistorySummary,
+				Text:  aws.ToString(history.HistorySummary),
 			})
 		}
 	}
@@ -168,10 +178,14 @@ func filterAlarms(alarms *cloudwatch.DescribeAlarmsOutput, namespace string, met
 	alarmNames := make([]*string, 0)
 
 	for _, alarm := range alarms.MetricAlarms {
-		if namespace != "" && *alarm.Namespace != namespace {
+		if alarm.AlarmName == nil {
 			continue
 		}
-		if metricName != "" && *alarm.MetricName != metricName {
+		// Metric math alarms omit Namespace, MetricName and Period, so they can never match a filter on those.
+		if namespace != "" && (alarm.Namespace == nil || *alarm.Namespace != namespace) {
+			continue
+		}
+		if metricName != "" && (alarm.MetricName == nil || *alarm.MetricName != metricName) {
 			continue
 		}
 
@@ -181,6 +195,10 @@ func filterAlarms(alarms *cloudwatch.DescribeAlarmsOutput, namespace string, met
 				matchDimension = false
 			} else {
 				for _, d := range alarm.Dimensions {
+					if d.Name == nil {
+						matchDimension = false
+						break
+					}
 					if _, ok := dimensions[*d.Name]; !ok {
 						matchDimension = false
 					}
@@ -195,7 +213,7 @@ func filterAlarms(alarms *cloudwatch.DescribeAlarmsOutput, namespace string, met
 			continue
 		}
 
-		if period != 0 && *alarm.Period != period {
+		if period != 0 && (alarm.Period == nil || *alarm.Period != period) {
 			continue
 		}
 
