@@ -127,10 +127,10 @@ func (ds *DataSource) executeAnnotationQuery(ctx context.Context, model DataQuer
 		}
 		for _, history := range resp.AlarmHistoryItems {
 			annotations = append(annotations, &annotationEvent{
-				Time:  *history.Timestamp,
-				Title: *history.AlarmName,
+				Time:  aws.ToTime(history.Timestamp),
+				Title: aws.ToString(history.AlarmName),
 				Tags:  string(history.HistoryItemType),
-				Text:  *history.HistorySummary,
+				Text:  aws.ToString(history.HistorySummary),
 			})
 		}
 	}

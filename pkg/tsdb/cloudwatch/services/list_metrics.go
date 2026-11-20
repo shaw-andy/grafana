@@ -84,6 +84,9 @@ func (l *ListMetricsService) GetDimensionValuesByDimensionFilter(ctx context.Con
 	dupCheck := make(map[string]bool)
 	for _, metric := range accountMetrics {
 		for _, dim := range metric.Metric.Dimensions {
+			if dim.Name == nil || dim.Value == nil {
+				continue
+			}
 			if *dim.Name == r.DimensionKey {
 				if _, exists := dupCheck[*dim.Value]; exists {
 					continue
