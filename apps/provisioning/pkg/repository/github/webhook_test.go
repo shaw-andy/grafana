@@ -2,6 +2,8 @@ package github
 
 import (
 	"crypto/hmac"
+	// #nosec G505 -- used only to build SHA-1 signatures the verifier must reject
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -193,6 +195,39 @@ func TestGitHubRepository_ProcessRequest_ReplayKey(t *testing.T) {
 		b, err := newRepo("secret-b").VerifyRequest(signedWebhookRequest(t, "push", "secret-b", "delivery-B", pushPayload))
 		require.NoError(t, err)
 		require.NotEqual(t, a.ReplayKey, b.ReplayKey)
+	})
+
+	t.Run("hex letter case does not change the replay key", func(t *testing.T) {
+		gh := newRepo("webhook-secret")
+		original := signedWebhookRequest(t, "push", "webhook-secret", "delivery-1", pushPayload)
+		a, err := gh.VerifyRequest(original)
+		require.NoError(t, err)
+
+		variant := signedWebhookRequest(t, "push", "webhook-secret", "delivery-2", pushPayload)
+		variant.Header.Set("X-Hub-Signature-256", "sha256="+strings.ToUpper(strings.TrimPrefix(variant.Header.Get("X-Hub-Signature-256"), "sha256=")))
+		require.NotEqual(t, original.Header.Get("X-Hub-Signature-256"), variant.Header.Get("X-Hub-Signature-256"))
+		b, err := gh.VerifyRequest(variant)
+		require.NoError(t, err)
+		require.Equal(t, a.ReplayKey, b.ReplayKey)
+	})
+
+	t.Run("sha1 signatures are rejected", func(t *testing.T) {
+		gh := newRepo("webhook-secret")
+		// #nosec G401 -- builds the SHA-1 signature GitHub also sends so the test can require it is rejected
+		mac := hmac.New(sha1.New, []byte("webhook-secret"))
+		mac.Write([]byte(pushPayload))
+		sha1Signature := "sha1=" + hex.EncodeToString(mac.Sum(nil))
+
+		sha1Only := signedWebhookRequest(t, "push", "webhook-secret", "delivery-1", pushPayload)
+		sha1Only.Header.Del("X-Hub-Signature-256")
+		sha1Only.Header.Set("X-Hub-Signature", sha1Signature)
+		_, err := gh.VerifyRequest(sha1Only)
+		require.True(t, apierrors.IsUnauthorized(err), "got %v", err)
+
+		sha1InSHA256Header := signedWebhookRequest(t, "push", "webhook-secret", "delivery-2", pushPayload)
+		sha1InSHA256Header.Header.Set("X-Hub-Signature-256", sha1Signature)
+		_, err = gh.VerifyRequest(sha1InSHA256Header)
+		require.True(t, apierrors.IsUnauthorized(err), "got %v", err)
 	})
 }
 

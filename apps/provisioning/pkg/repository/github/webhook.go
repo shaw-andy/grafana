@@ -2,7 +2,10 @@ package github
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +18,8 @@ import (
 )
 
 var subscribedEvents = []string{"pull_request", "push"} // same order as slices.Sort()
+
+const sha256SignaturePrefix = "sha256="
 
 type GithubWebhookRepository interface {
 	GithubRepository
@@ -48,26 +53,41 @@ func (r *githubWebhookRepository) VerifyRequest(req *http.Request) (*repository.
 		return nil, fmt.Errorf("missing webhook secret")
 	}
 
-	payload, err := github.ValidatePayload(req, []byte(r.secret))
+	// Only the SHA-256 header is accepted, and only with a sha256= value: the
+	// library would otherwise fall back to the SHA-1 header, or honor whatever
+	// hash prefix the value names, letting one captured delivery be presented
+	// under several distinct signatures.
+	signature := req.Header.Get(github.SHA256SignatureHeader)
+	hexMAC, ok := strings.CutPrefix(signature, sha256SignaturePrefix)
+	if !ok {
+		return nil, apierrors.NewUnauthorized("invalid signature")
+	}
+	mac, err := hex.DecodeString(hexMAC)
+	if err != nil || len(mac) != sha256.Size {
+		return nil, apierrors.NewUnauthorized("invalid signature")
+	}
+
+	contentType, _, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
+	if err != nil {
+		return nil, apierrors.NewUnauthorized("invalid signature")
+	}
+	payload, err := github.ValidatePayloadFromBody(contentType, req.Body, sha256SignaturePrefix+hexMAC, []byte(r.secret))
 	if err != nil {
 		return nil, apierrors.NewUnauthorized("invalid signature")
 	}
 
-	// Replay key: the validated signature, not the X-GitHub-Delivery header.
-	// GitHub computes the HMAC over the request body only, so the delivery ID is
+	// Replay key: the validated MAC, not the X-GitHub-Delivery header. GitHub
+	// computes the HMAC over the request body only, so the delivery ID is
 	// unauthenticated — an attacker replaying a captured (body, signature) could
-	// pick a fresh delivery ID and slip past a delivery-ID cache. The signature,
-	// by contrast, is bound to both the signed body and the repository's unique
-	// secret. The dispatcher drops deliveries whose key it has already seen.
-	signature := req.Header.Get(github.SHA256SignatureHeader)
-	if signature == "" {
-		signature = req.Header.Get(github.SHA1SignatureHeader)
-	}
-
+	// pick a fresh delivery ID and slip past a delivery-ID cache. The MAC is bound
+	// to both the signed body and the repository's unique secret. It is
+	// re-encoded from the decoded bytes because hex decoding ignores letter case,
+	// so the raw header text is not unique per delivery. The dispatcher drops
+	// deliveries whose key it has already seen.
 	return &repository.VerifiedWebhookRequest{
 		Payload:   payload,
 		Header:    req.Header,
-		ReplayKey: signature,
+		ReplayKey: sha256SignaturePrefix + hex.EncodeToString(mac),
 	}, nil
 }
 
