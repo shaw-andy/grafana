@@ -1,5 +1,7 @@
 package setting
 
+import "encoding/json"
+
 type GrafanaJavascriptAgent struct {
 	EndpointRPS   int `json:"-"`
 	EndpointBurst int `json:"-"`
@@ -15,6 +17,17 @@ type GrafanaJavascriptAgent struct {
 	TracingInstrumentalizationEnabled     bool   `json:"tracingInstrumentalizationEnabled"`
 	BotFilterEnabled                      bool   `json:"botFilterEnabled"`
 	TrackResources                        *bool  `json:"trackResources,omitempty"`
+}
+
+// MarshalJSON omits the API key while frontend logging is disabled. This struct
+// is part of the boot data served to unauthenticated users, and the browser
+// only needs the key when it runs the Faro agent.
+func (a GrafanaJavascriptAgent) MarshalJSON() ([]byte, error) {
+	type agent GrafanaJavascriptAgent
+	if !a.Enabled {
+		a.ApiKey = ""
+	}
+	return json.Marshal(agent(a))
 }
 
 func (cfg *Cfg) readGrafanaJavascriptAgentConfig() {
