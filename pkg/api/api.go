@@ -480,7 +480,7 @@ func (hs *HTTPServer) registerRoutes() {
 
 			dashboardRoute.Post("/db", authorize(ac.EvalAny(ac.EvalPermission(dashboards.ActionDashboardsCreate), ac.EvalPermission(dashboards.ActionDashboardsWrite))), routing.Wrap(hs.PostDashboard))
 			dashboardRoute.Get("/home", routing.Wrap(hs.GetHomeDashboard))
-			dashboardRoute.Get("/tags", hs.GetDashboardTags)
+			dashboardRoute.Get("/tags", authorize(ac.EvalPermission(dashboards.ActionDashboardsRead)), hs.GetDashboardTags)
 
 			// Deprecated: used to convert internal IDs to UIDs
 			dashboardRoute.Get("/ids/:ids", authorize(ac.EvalPermission(dashboards.ActionDashboardsRead)), hs.GetDashboardUIDs)
