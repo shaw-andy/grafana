@@ -125,7 +125,10 @@ func (ds *DataSource) handleGetEc2InstanceAttribute(ctx context.Context, paramet
 func getInstanceAttributeValue(attributeName string, instance ec2types.Instance) (value string, found bool, err error) {
 	tags := make(map[string]string)
 	for _, tag := range instance.Tags {
-		tags[*tag.Key] = *tag.Value
+		if tag.Key == nil {
+			continue
+		}
+		tags[*tag.Key] = aws.ToString(tag.Value)
 	}
 
 	var data string

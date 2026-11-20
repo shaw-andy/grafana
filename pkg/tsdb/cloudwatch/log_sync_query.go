@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -91,7 +92,7 @@ func (ds *DataSource) syncQuery(ctx context.Context, logsClient models.CWLogsCli
 		CloudWatchLogsQuery: dataquery.CloudWatchLogsQuery{
 			Region: logsQuery.Region,
 		},
-		QueryId: *startQueryOutput.QueryId,
+		QueryId: aws.ToString(startQueryOutput.QueryId),
 	}
 
 	/*

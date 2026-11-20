@@ -22,6 +22,7 @@ import (
 	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/features"
 	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/kinds/dataquery"
 	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/models"
+	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/utils"
 )
 
 const (
@@ -85,6 +86,16 @@ func (ds *DataSource) executeLogActions(ctx context.Context, req *backend.QueryD
 
 		query := query
 		eg.Go(func() error {
+			// A panic on an errgroup goroutine is not recovered anywhere else and would stop the process.
+			defer func() {
+				if r := recover(); r != nil {
+					ds.logger.FromContext(ctx).Error("Execute Log Action Panic", "error", r, "stack", utils.Stack(1))
+					resultChan <- backend.Responses{
+						query.RefID: backend.ErrorResponseWithErrorSource(fmt.Errorf("failed to execute log action with subtype: %s: %v", logsQuery.Subtype, r)),
+					}
+				}
+			}()
+
 			dataframe, err := ds.executeLogAction(ectx, logsQuery, query)
 			if err != nil {
 				resultChan <- backend.Responses{
@@ -188,12 +199,12 @@ func (ds *DataSource) handleGetLogEvents(ctx context.Context, logsClient models.
 	timestamps := make([]time.Time, 0)
 
 	sort.Slice(logEvents.Events, func(i, j int) bool {
-		return *(logEvents.Events[i].Timestamp) > *(logEvents.Events[j].Timestamp)
+		return aws.ToInt64(logEvents.Events[i].Timestamp) > aws.ToInt64(logEvents.Events[j].Timestamp)
 	})
 
 	for _, event := range logEvents.Events {
 		messages = append(messages, event.Message)
-		timestamps = append(timestamps, time.UnixMilli(*event.Timestamp).UTC())
+		timestamps = append(timestamps, time.UnixMilli(aws.ToInt64(event.Timestamp)).UTC())
 	}
 
 	timestampField := data.NewField("ts", nil, timestamps)
@@ -693,7 +704,7 @@ func (ds *DataSource) handleStartQuery(ctx context.Context, logsClient models.CW
 		return nil, err
 	}
 
-	dataFrame := data.NewFrame(refID, data.NewField("queryId", nil, []string{*startQueryResponse.QueryId}))
+	dataFrame := data.NewFrame(refID, data.NewField("queryId", nil, []string{aws.ToString(startQueryResponse.QueryId)}))
 	dataFrame.RefID = refID
 
 	region := "default"
