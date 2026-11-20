@@ -108,11 +108,18 @@ func (hs *HTTPServer) SignUpStep2(c *contextmodel.ReqContext) response.Response 
 		if ok, rsp := hs.verifyUserSignUpEmail(c.Req.Context(), form.Email, form.Code); !ok {
 			return rsp
 		}
+		if ok, rsp := hs.claimSignUpCode(c.Req.Context(), form.Code); !ok {
+			return rsp
+		}
 		createUserCmd.EmailVerified = true
 	}
 
 	usr, err := hs.userService.Create(c.Req.Context(), &createUserCmd)
 	if err != nil {
+		if hs.Cfg.VerifyEmailEnabled {
+			hs.releaseTempUserClaim(c.Req.Context(), 0, form.Code, tempuser.TmpUserCompleted, tempuser.TmpUserSignUpStarted)
+		}
+
 		if errors.Is(err, user.ErrUserAlreadyExists) {
 			return response.Error(http.StatusUnauthorized, "User with same email address already exists", nil)
 		}
@@ -128,9 +135,10 @@ func (hs *HTTPServer) SignUpStep2(c *contextmodel.ReqContext) response.Response 
 		return response.Error(http.StatusInternalServerError, "Failed to publish event", err)
 	}
 
-	// mark temp user as completed
-	if ok, rsp := hs.updateTempUserStatus(c.Req.Context(), form.Code, tempuser.TmpUserCompleted); !ok {
-		return rsp
+	if !hs.Cfg.VerifyEmailEnabled {
+		// Without email verification the code is optional, so it is only marked completed when it
+		// belongs to a started sign-up and never overwrites the status of another temp user.
+		_, _ = hs.claimSignUpCode(c.Req.Context(), form.Code)
 	}
 
 	// check for pending invites
@@ -142,6 +150,12 @@ func (hs *HTTPServer) SignUpStep2(c *contextmodel.ReqContext) response.Response 
 
 	apiResponse := util.DynMap{"message": "User sign up completed successfully", "code": "redirect-to-landing-page"}
 	for _, invite := range invitesQueryResult {
+		if ok, rsp := hs.claimInvite(c.Req.Context(), invite); !ok {
+			if rsp.Status() == http.StatusPreconditionFailed {
+				continue
+			}
+			return rsp
+		}
 		if ok, rsp := hs.applyUserInvite(c.Req.Context(), usr, invite, false); !ok {
 			return rsp
 		}
@@ -174,5 +188,21 @@ func (hs *HTTPServer) verifyUserSignUpEmail(ctx context.Context, email string, c
 		return false, response.Error(http.StatusNotFound, "Email verification code does not match email", nil)
 	}
 
+	return true, nil
+}
+
+// claimSignUpCode atomically moves a started sign-up to completed so the code is used once.
+func (hs *HTTPServer) claimSignUpCode(ctx context.Context, code string) (bool, response.Response) {
+	cmd := tempuser.UpdateTempUserStatusCommand{
+		Code:           code,
+		Status:         tempuser.TmpUserCompleted,
+		ExpectedStatus: tempuser.TmpUserSignUpStarted,
+	}
+	if err := hs.tempUserService.UpdateTempUserStatus(ctx, &cmd); err != nil {
+		if errors.Is(err, tempuser.ErrTempUserStatusChanged) {
+			return false, response.Error(http.StatusNotFound, "Invalid email verification code", nil)
+		}
+		return false, response.Error(http.StatusInternalServerError, "Failed to update sign-up status", err)
+	}
 	return true, nil
 }
