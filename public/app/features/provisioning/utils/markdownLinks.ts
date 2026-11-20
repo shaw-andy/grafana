@@ -1,7 +1,7 @@
 import { type RepositoryView } from 'app/api/clients/provisioning/v0alpha1';
 
 import { isMarkdownFile } from './folderDocConventions';
-import { getRepoFileUrl, getRepoRawFileUrl } from './git';
+import { buildCleanBaseUrl, getRepoFileUrl, getRepoRawFileUrl } from './git';
 
 interface RewriteOptions {
   repository: RepositoryView;
@@ -39,6 +39,9 @@ export function rewriteRelativeMarkdownLinks(html: string, options: RewriteOptio
   }
 
   const doc = new DOMParser().parseFromString(html, 'text/html');
+
+  // Only this rewriter decides which links resolve in-app; never trust the tag from the markdown itself.
+  doc.querySelectorAll(`[${RESOURCE_PATH_ATTR}]`).forEach((el) => el.removeAttribute(RESOURCE_PATH_ATTR));
 
   doc.querySelectorAll('a[href]').forEach((anchor) => {
     const href = anchor.getAttribute('href');
@@ -104,6 +107,132 @@ export function rewriteRelativeMarkdownLinks(html: string, options: RewriteOptio
   });
 
   return doc.body.innerHTML;
+}
+
+export const XLINK_NS = 'http://www.w3.org/1999/xlink';
+const RESOURCE_URL_ATTRS = new Set(['src', 'poster', 'background']);
+// Anything that can make CSS fetch a resource, other than a same-document `url(#id)`.
+// Escapes are refused outright since they can spell any of these.
+const CSS_RESOURCE_RE = /\\|@import|image-set|image\(|src\(|url\(\s*(?!['"]?#)/i;
+
+/**
+ * Final pass over rendered README HTML (or a diagram's SVG). The markdown comes
+ * from anyone who can commit to the repository, and any request it makes to
+ * Grafana carries the viewer's session — `/logout` signs them out, `?orgId=N`
+ * switches their organization. So:
+ *
+ * - links keep their href only when it is an http(s) URL on the repository's git
+ *   host, and always open in a new tab; every other link (Grafana URLs, other
+ *   schemes, protocol-relative, query-only, fragments) loses its href.
+ * - embedded resources (images, media, SVG references, CSS) are dropped when they
+ *   would load from Grafana's own host or over a non-http(s) scheme.
+ *
+ * Fails closed: without a DOM parser nothing is rendered.
+ */
+export function restrictReadmeUrls(html: string, repositoryUrl: string | undefined): string {
+  if (typeof DOMParser === 'undefined') {
+    return '';
+  }
+
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+
+  doc.body.querySelectorAll('*').forEach((el) => {
+    const tag = el.localName.toLowerCase();
+    if (tag === 'style') {
+      if (CSS_RESOURCE_RE.test(el.textContent ?? '')) {
+        el.remove();
+      }
+      return;
+    }
+
+    const isLink = tag === 'a' || tag === 'area';
+    if (isLink) {
+      restrictLink(el, repositoryUrl);
+    }
+
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.localName.toLowerCase();
+      if (name === 'srcset') {
+        el.removeAttributeNode(attr);
+      } else if (name === 'style') {
+        if (CSS_RESOURCE_RE.test(attr.value)) {
+          el.removeAttributeNode(attr);
+        }
+      } else if (RESOURCE_URL_ATTRS.has(name) || (name === 'href' && !isLink)) {
+        // SVG elements reference their own definitions with `href="#id"`.
+        const internalRef = name === 'href' && attr.value.trim().startsWith('#');
+        if (!internalRef && !isExternalResourceUrl(attr.value)) {
+          el.removeAttributeNode(attr);
+        }
+      }
+    }
+  });
+
+  return doc.body.innerHTML;
+}
+
+/**
+ * The normalized href when it may stay on a README link: an absolute http(s) URL
+ * on the repository's git host. Anything else returns undefined.
+ */
+export function getAllowedReadmeLink(href: string | null, repositoryUrl: string | undefined): string | undefined {
+  const gitHostOrigin = getGitHostOrigin(repositoryUrl);
+  if (!href || !gitHostOrigin) {
+    return undefined;
+  }
+  let url: URL;
+  try {
+    // No base: relative, query-only and protocol-relative addresses are refused.
+    url = new URL(href);
+  } catch {
+    return undefined;
+  }
+  if (url.origin !== gitHostOrigin || isGrafanaHost(url)) {
+    return undefined;
+  }
+  return url.href;
+}
+
+function restrictLink(link: Element, repositoryUrl: string | undefined) {
+  const allowed = getAllowedReadmeLink(
+    link.getAttribute('href') ?? link.getAttributeNS(XLINK_NS, 'href'),
+    repositoryUrl
+  );
+  link.removeAttribute('href');
+  link.removeAttributeNS(XLINK_NS, 'href');
+  if (allowed) {
+    link.setAttribute('href', allowed);
+    link.setAttribute('target', '_blank');
+    link.setAttribute('rel', 'noopener noreferrer');
+  } else {
+    link.removeAttribute('target');
+  }
+}
+
+function getGitHostOrigin(repositoryUrl: string | undefined): string | undefined {
+  if (!repositoryUrl) {
+    return undefined;
+  }
+  try {
+    const url = new URL(buildCleanBaseUrl(repositoryUrl));
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isExternalResourceUrl(value: string): boolean {
+  try {
+    const url = new URL(value, window.location.href);
+    return (url.protocol === 'https:' || url.protocol === 'http:') && !isGrafanaHost(url);
+  } catch {
+    return false;
+  }
+}
+
+// Cookies are scoped to the host, not the port, so any port on Grafana's host counts.
+function isGrafanaHost(url: URL): boolean {
+  return url.hostname === window.location.hostname;
 }
 
 function isAbsoluteUrl(url: string): boolean {

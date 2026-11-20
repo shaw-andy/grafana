@@ -1,6 +1,6 @@
 import { css, cx } from '@emotion/css';
 import { useBooleanFlagValue } from '@openfeature/react-sdk';
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useLocation } from 'react-router-dom-v5-compat';
 import { useIntersection } from 'react-use';
 
@@ -20,7 +20,13 @@ import { useFolderDocs } from '../../hooks/useFolderDocs';
 import { type FolderReadmeStatus, useFolderReadme } from '../../hooks/useFolderReadme';
 import { type FolderDoc, FOLDER_DOC_TAB_PARAM, getDocTabLabel } from '../../utils/folderDocConventions';
 import { getRepoEditFileUrl, getRepoNewFileUrl } from '../../utils/git';
-import { RESOURCE_PATH_ATTR, rewriteRelativeMarkdownLinks } from '../../utils/markdownLinks';
+import {
+  getAllowedReadmeLink,
+  RESOURCE_PATH_ATTR,
+  restrictReadmeUrls,
+  rewriteRelativeMarkdownLinks,
+  XLINK_NS,
+} from '../../utils/markdownLinks';
 import { createGrafanaLinkResolver } from '../../utils/markdownResourceLinks';
 import { splitPath } from '../utils/path';
 
@@ -241,10 +247,13 @@ function RenderedMarkdown({
   // (e.g. `dashboard.json`, `subfolder/`), leaving `<a href>` that resolves to
   // the app root — so folder/dashboard links can't be rewritten or resolved.
   // Render without it and rely on textUtil.sanitize below (the XSS boundary),
-  // which preserves relative links.
+  // which preserves relative links. restrictReadmeUrls then drops every URL that
+  // could load Grafana itself with the viewer's session.
+  const repositoryUrl = repository.url;
+  const restrictUrls = useCallback((content: string) => restrictReadmeUrls(content, repositoryUrl), [repositoryUrl]);
   const html = renderMarkdown(markdown, { noSanitize: true });
   const rewritten = rewriteRelativeMarkdownLinks(html, { repository, baseDirInRepo });
-  const safe = textUtil.sanitize(rewritten);
+  const safe = restrictUrls(textUtil.sanitize(rewritten));
   const containerRef = useRef<HTMLDivElement>(null);
   // Only the latest async (first-click) resolution navigates, so overlapping
   // clicks can't race and push an earlier link's destination after a later one.
@@ -307,12 +316,18 @@ function RenderedMarkdown({
       if (!(e.target instanceof Element)) {
         return;
       }
-      const anchor = e.target.closest('a');
+      const anchor = e.target.closest('a, area');
       if (!anchor) {
         return;
       }
       const repoPath = anchor.getAttribute(RESOURCE_PATH_ATTR);
-      const href = anchor.getAttribute('href');
+      const rawHref = anchor.getAttribute('href') ?? anchor.getAttributeNS(XLINK_NS, 'href');
+      const href = getAllowedReadmeLink(rawHref, repositoryUrl) ?? null;
+      if (!href) {
+        // Only git host links may navigate natively; anything else that slipped into
+        // the DOM must not load in this tab with the viewer's session.
+        e.preventDefault();
+      }
       const plainClick = e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
 
       if (repoPath && plainClick) {
@@ -345,12 +360,13 @@ function RenderedMarkdown({
 
     el.addEventListener('click', handleClick);
     return () => el.removeEventListener('click', handleClick);
-  }, [repositoryType, repositoryName, repositoryPath, fetchResources]);
+  }, [repositoryType, repositoryName, repositoryPath, repositoryUrl, fetchResources]);
 
   // React resets innerHTML whenever this object's identity changes, which would
   // wipe the diagrams the hook swapped in — so only hand it a new one when the html changes.
   const innerHtml = useMemo(() => ({ __html: safe }), [safe]);
-  useMermaidDiagrams(containerRef, safe);
+  // Diagrams can carry links and images of their own, so they get the same restriction.
+  useMermaidDiagrams(containerRef, safe, true, restrictUrls);
 
   return (
     <div ref={containerRef} className={cx('markdown-html', styles.markdownBody)} dangerouslySetInnerHTML={innerHtml} />
