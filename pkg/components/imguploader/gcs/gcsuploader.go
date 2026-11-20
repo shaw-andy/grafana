@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"cloud.google.com/go/storage"
@@ -20,22 +21,37 @@ import (
 	"github.com/grafana/grafana/pkg/util"
 )
 
+const publicReadACL = "publicRead"
+
+var predefinedACLs = []string{
+	"authenticatedRead",
+	"bucketOwnerFullControl",
+	"bucketOwnerRead",
+	"private",
+	"projectPrivate",
+	publicReadACL,
+}
+
 // NewUploader returns a new Uploader.
-func NewUploader(keyFile, bucket, path string, enableSignedURLs bool, signedURLExpiration time.Duration) (*Uploader, error) {
+func NewUploader(keyFile, bucket, path, predefinedACL string, enableSignedURLs bool, signedURLExpiration time.Duration) (*Uploader, error) {
 	if signedURLExpiration <= 0 {
 		return nil, fmt.Errorf("invalid signed URL expiration: %q", signedURLExpiration)
+	}
+	if predefinedACL != "" && !slices.Contains(predefinedACLs, predefinedACL) {
+		return nil, fmt.Errorf("unsupported predefined ACL: %q", predefinedACL)
 	}
 	uploader := &Uploader{
 		KeyFile:             keyFile,
 		Bucket:              bucket,
 		path:                path,
 		log:                 log.New("gcsuploader"),
+		predefinedACL:       predefinedACL,
 		enableSignedURLs:    enableSignedURLs,
 		signedURLExpiration: signedURLExpiration,
 	}
 
-	uploader.log.Debug("Created uploader", "key", keyFile, "bucket", bucket, "path", path, "enableSignedUrls",
-		enableSignedURLs, "signedUrlExpiration", signedURLExpiration.String())
+	uploader.log.Debug("Created uploader", "key", keyFile, "bucket", bucket, "path", path, "predefinedAcl", predefinedACL,
+		"enableSignedUrls", enableSignedURLs, "signedUrlExpiration", signedURLExpiration.String())
 
 	return uploader, nil
 }
@@ -53,8 +69,15 @@ type Uploader struct {
 	Bucket              string
 	path                string
 	log                 log.Logger
+	predefinedACL       string
 	enableSignedURLs    bool
 	signedURLExpiration time.Duration
+}
+
+// The unsigned object URL is only readable when the operator explicitly chose
+// a public ACL; every other upload is private and needs a signed URL.
+func (u *Uploader) signsURLs() bool {
+	return u.enableSignedURLs || u.predefinedACL != publicReadACL
 }
 
 // Upload uploads an image to GCS.
@@ -109,7 +132,7 @@ func (u *Uploader) Upload(ctx context.Context, imageDiskPath string) (string, er
 		return "", err
 	}
 
-	if !u.enableSignedURLs {
+	if !u.signsURLs() {
 		return fmt.Sprintf("https://storage.googleapis.com/%s/%s", u.Bucket, key), nil
 	}
 
@@ -164,16 +187,13 @@ func (u *Uploader) uploadFile(
 		}
 	}()
 
-	// Set public access if not generating a signed URL
-	pubAcc := !u.enableSignedURLs
-
-	u.log.Debug("Uploading to GCS bucket using SDK", "bucket", u.Bucket, "key", key, "public", pubAcc)
+	u.log.Debug("Uploading to GCS bucket using SDK", "bucket", u.Bucket, "key", key, "predefinedAcl", u.predefinedACL)
 
 	uri := fmt.Sprintf("gs://%s/%s", u.Bucket, key)
 
 	wc := client.Bucket(u.Bucket).Object(key).NewWriter(ctx)
-	if pubAcc {
-		wc.SetACL("publicRead")
+	if u.predefinedACL != "" {
+		wc.SetACL(u.predefinedACL)
 	}
 	if _, err := io.Copy(wc, fileReader); err != nil {
 		_ = wc.Close()
