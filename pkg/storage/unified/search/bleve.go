@@ -2651,6 +2651,10 @@ func (b *bleveIndex) toBleveSearchRequest(ctx context.Context, req *resourcepb.R
 			reqSize = b.postRankAuthz.windowSize(size)
 		}
 		reqFrom = 0
+	} else if len(req.Facet) > 0 {
+		// Bleve aggregates facets over the whole match set regardless of Size, so
+		// a large page only adds stored-field loads for hits.
+		reqSize = min(size, b.postRankAuthz.facetWindowSize())
 	}
 
 	searchrequest := &bleve.SearchRequest{
