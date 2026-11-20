@@ -364,6 +364,13 @@ func (hs *HTTPServer) MassDeleteAnnotations(c *contextmodel.ReqContext) response
 		return response.Error(http.StatusBadRequest, "bad request data", err)
 	}
 
+	// Without an explicit target the store would match every annotation with dashboard_id = 0
+	// and panel_id = 0, i.e. all organization annotations.
+	if cmd.AnnotationId == 0 && (cmd.DashboardId == 0 || cmd.PanelId == 0) {
+		err := &AnnotationError{message: "AnnotationId or both DashboardId and PanelId are required for mass delete"}
+		return response.Error(http.StatusBadRequest, "bad request data", err)
+	}
+
 	var deleteParams *annotations.DeleteParams
 
 	// validations only for RBAC. A user can mass delete all annotations in a (dashboard + panel) or a specific annotation
