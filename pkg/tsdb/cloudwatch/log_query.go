@@ -46,34 +46,50 @@ func logsResultsToDataframes(response *cloudwatchlogs.GetQueryResultsOutput, gro
 	// as just iterating over fieldValues would not give a consistent order
 	fieldNames := make([]string, 0)
 
+	seenFieldNames := make(map[string]struct{})
+
 	for i, row := range nonEmptyRows {
 		for _, resultField := range row {
+			// CloudWatch can return a null field name or value; such a cell is left empty.
+			if resultField.Field == nil {
+				continue
+			}
+			fieldName := *resultField.Field
+
 			// Strip @ptr field from results as it's not needed
-			if *resultField.Field == "@ptr" {
+			if fieldName == "@ptr" {
 				continue
 			}
 
-			if _, exists := fieldValues[*resultField.Field]; !exists {
-				fieldNames = append(fieldNames, *resultField.Field)
+			if _, seen := seenFieldNames[fieldName]; !seen {
+				seenFieldNames[fieldName] = struct{}{}
+				fieldNames = append(fieldNames, fieldName)
+			}
 
+			if resultField.Value == nil {
+				continue
+			}
+			value := *resultField.Value
+
+			if _, exists := fieldValues[fieldName]; !exists {
 				// Check if it's a cloudWatchTSFormat field or one of the known timestamp fields:
 				// https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_AnalyzeLogData-discoverable-fields.html
 				// which can be in a millisecond format as well as cloudWatchTSFormat string format
-				if _, err := time.Parse(cloudWatchTSFormat, *resultField.Value); err == nil || isTimestampField(*resultField.Field) {
-					fieldValues[*resultField.Field] = make([]*time.Time, rowCount)
-				} else if slices.Contains[[]string, string](groupingFieldNames, *resultField.Field) {
-					fieldValues[*resultField.Field] = make([]*string, rowCount)
-				} else if _, err := strconv.ParseFloat(*resultField.Value, 64); err == nil {
-					fieldValues[*resultField.Field] = make([]*float64, rowCount)
+				if _, err := time.Parse(cloudWatchTSFormat, value); err == nil || isTimestampField(fieldName) {
+					fieldValues[fieldName] = make([]*time.Time, rowCount)
+				} else if slices.Contains[[]string, string](groupingFieldNames, fieldName) {
+					fieldValues[fieldName] = make([]*string, rowCount)
+				} else if _, err := strconv.ParseFloat(value, 64); err == nil {
+					fieldValues[fieldName] = make([]*float64, rowCount)
 				} else {
-					fieldValues[*resultField.Field] = make([]*string, rowCount)
+					fieldValues[fieldName] = make([]*string, rowCount)
 				}
 			}
 
-			if timeField, ok := fieldValues[*resultField.Field].([]*time.Time); ok {
-				parsedTime, err := time.Parse(cloudWatchTSFormat, *resultField.Value)
+			if timeField, ok := fieldValues[fieldName].([]*time.Time); ok {
+				parsedTime, err := time.Parse(cloudWatchTSFormat, value)
 				if err != nil {
-					unixTimeMs, err := strconv.ParseInt(*resultField.Value, 10, 64)
+					unixTimeMs, err := strconv.ParseInt(value, 10, 64)
 					if err == nil {
 						parsedTime = time.Unix(unixTimeMs/1000, (unixTimeMs%1000)*int64(time.Millisecond))
 					} else {
@@ -81,20 +97,32 @@ func logsResultsToDataframes(response *cloudwatchlogs.GetQueryResultsOutput, gro
 					}
 				}
 				timeField[i] = &parsedTime
-			} else if numericField, ok := fieldValues[*resultField.Field].([]*float64); ok {
-				parsedFloat, err := strconv.ParseFloat(*resultField.Value, 64)
+			} else if numericField, ok := fieldValues[fieldName].([]*float64); ok {
+				parsedFloat, err := strconv.ParseFloat(value, 64)
 
 				if err != nil {
 					// This can happen if a field has a mix of numeric and non-numeric values.
 					// In that case, we change the field from a numeric field to a string field.
-					fieldValues[*resultField.Field] = changeToStringField(rowCount, nonEmptyRows[:i+1], *resultField.Field)
+					fieldValues[fieldName] = changeToStringField(rowCount, nonEmptyRows[:i+1], fieldName)
 					continue
 				}
 
 				numericField[i] = &parsedFloat
 			} else {
-				fieldValues[*resultField.Field].([]*string)[i] = resultField.Value
+				fieldValues[fieldName].([]*string)[i] = &value
 			}
+		}
+	}
+
+	// Columns whose every value was null have no type yet.
+	for _, fieldName := range fieldNames {
+		if _, exists := fieldValues[fieldName]; exists {
+			continue
+		}
+		if isTimestampField(fieldName) {
+			fieldValues[fieldName] = make([]*time.Time, rowCount)
+		} else {
+			fieldValues[fieldName] = make([]*string, rowCount)
 		}
 	}
 
@@ -158,7 +186,7 @@ func changeToStringField(lengthOfValues int, rows [][]cloudwatchlogstypes.Result
 	fieldValuesAsStrings := make([]*string, lengthOfValues)
 	for i, resultFields := range rows {
 		for _, field := range resultFields {
-			if *field.Field == logEventField {
+			if field.Field != nil && *field.Field == logEventField {
 				fieldValuesAsStrings[i] = field.Value
 			}
 		}
