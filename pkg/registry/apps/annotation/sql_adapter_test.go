@@ -280,6 +280,7 @@ func TestSQLAdapter_ListWithCreatedByFilter(t *testing.T) {
 		nil,
 		dashSvc,
 		nil,
+		nil,
 	)
 	adapter := NewSQLAdapter(repo, nil, annotations.CleanupSettings{})
 

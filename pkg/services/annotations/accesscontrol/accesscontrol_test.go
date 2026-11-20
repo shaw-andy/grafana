@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	ac "github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/annotations"
 	"github.com/grafana/grafana/pkg/services/dashboards"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
@@ -22,7 +23,9 @@ func TestMain(m *testing.M) {
 func TestDashboardsWithVisibleAnnotations(t *testing.T) {
 	cfg := setting.NewCfg()
 
-	signedInUser := &user.SignedInUser{OrgID: 1}
+	signedInUser := &user.SignedInUser{OrgID: 1, Permissions: map[int64]map[string][]string{
+		1: {ac.ActionAnnotationsRead: {dashboards.ScopeDashboardsAll}},
+	}}
 
 	dashSvc := &dashboards.FakeDashboardService{}
 
@@ -60,7 +63,7 @@ func TestDashboardsWithVisibleAnnotations(t *testing.T) {
 	}
 
 	t.Run("without DashboardUID returns all visible dashboards", func(t *testing.T) {
-		result, err := authz.dashboardsWithVisibleAnnotations(context.Background(), annotations.ItemQuery{
+		result, _, err := authz.dashboardsWithVisibleAnnotations(context.Background(), annotations.ItemQuery{
 			SignedInUser: signedInUser,
 			OrgID:        1,
 			Page:         1,
@@ -71,7 +74,7 @@ func TestDashboardsWithVisibleAnnotations(t *testing.T) {
 	})
 
 	t.Run("with DashboardUID filters to that dashboard", func(t *testing.T) {
-		result, err := authz.dashboardsWithVisibleAnnotations(context.Background(), annotations.ItemQuery{
+		result, _, err := authz.dashboardsWithVisibleAnnotations(context.Background(), annotations.ItemQuery{
 			SignedInUser: signedInUser,
 			OrgID:        1,
 			Page:         1,

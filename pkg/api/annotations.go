@@ -493,9 +493,10 @@ func findAnnotationByID(ctx context.Context, repo annotations.Repository, annota
 // 500: internalServerError
 func (hs *HTTPServer) GetAnnotationTags(c *contextmodel.ReqContext) response.Response {
 	query := &annotations.TagsQuery{
-		OrgID: c.GetOrgID(),
-		Tag:   c.Query("tag"),
-		Limit: c.QueryInt64("limit"),
+		OrgID:        c.GetOrgID(),
+		Tag:          c.Query("tag"),
+		Limit:        c.QueryInt64("limit"),
+		SignedInUser: c.SignedInUser,
 	}
 
 	// Default limit if not specified

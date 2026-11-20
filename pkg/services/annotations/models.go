@@ -34,6 +34,8 @@ type TagsQuery struct {
 	Tag   string `json:"tag"`
 	Type  string `json:"type"` // filter based on annotation type: "alert" or "annotation"
 
+	SignedInUser identity.Requester `json:"-"`
+
 	Limit int64 `json:"limit"`
 }
 

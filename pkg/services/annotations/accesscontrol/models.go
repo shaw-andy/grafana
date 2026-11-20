@@ -8,4 +8,7 @@ type AccessResources struct {
 	CanAccessOrgAnnotations bool
 	// Skip filtering
 	SkipAccessControlFilter bool
+	// HasMoreDashboards is true if the dashboard search page was full, so later pages may hold more dashboards.
+	// Dashboards can be smaller than the search page because it only keeps dashboards whose annotations the user can read.
+	HasMoreDashboards bool
 }

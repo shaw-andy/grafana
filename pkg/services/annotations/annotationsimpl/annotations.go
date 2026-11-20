@@ -2,12 +2,14 @@ package annotationsimpl
 
 import (
 	"context"
+	"sort"
 
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/grafana/grafana/pkg/services/annotations/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/annotations/annotationsimpl/loki"
 	"github.com/grafana/grafana/pkg/services/dashboards"
+	"github.com/grafana/grafana/pkg/services/folder"
 	alertingStore "github.com/grafana/grafana/pkg/services/ngalert/store"
 
 	"github.com/grafana/grafana/pkg/infra/db"
@@ -43,6 +45,7 @@ func ProvideService(
 	tracer tracing.Tracer,
 	ruleStore *alertingStore.DBstore,
 	dashSvc dashboards.DashboardService,
+	folderSvc folder.Service,
 	reg prometheus.Registerer,
 ) *RepositoryImpl {
 	l := log.New("annotations")
@@ -62,7 +65,7 @@ func ProvideService(
 	}
 
 	return NewRepositoryImpl(
-		accesscontrol.NewAuthService(db, features, dashSvc, cfg),
+		accesscontrol.NewAuthService(db, features, dashSvc, folderSvc, cfg),
 		features,
 		read,
 		write,
@@ -126,7 +129,7 @@ func (r *RepositoryImpl) Find(ctx context.Context, query *annotations.ItemQuery)
 		results = append(results, res...)
 		q.Page++ // next iteration fetches the next page of dashboards
 		// All user's dashboards are fetched
-		if len(resources.Dashboards) < int(q.Limit) {
+		if len(resources.Dashboards) < int(q.Limit) && !resources.HasMoreDashboards {
 			break
 		}
 	}
@@ -139,5 +142,53 @@ func (r *RepositoryImpl) Delete(ctx context.Context, params *annotations.DeleteP
 }
 
 func (r *RepositoryImpl) FindTags(ctx context.Context, query *annotations.TagsQuery) (annotations.FindTagsResult, error) {
-	return r.reader.GetTags(ctx, *query)
+	q := *query
+	if q.Limit == 0 {
+		q.Limit = 100
+	}
+
+	authQuery := annotations.ItemQuery{
+		OrgID:        q.OrgID,
+		SignedInUser: q.SignedInUser,
+		Page:         1,
+	}
+
+	// Tags are counted per page of dashboards the user can read annotations on, then merged.
+	counts := make(map[string]int64)
+	for {
+		resources, err := r.authZ.Authorize(ctx, authQuery)
+		if err != nil {
+			return annotations.FindTagsResult{Tags: []*annotations.TagsDTO{}}, err
+		}
+		// Organization annotations are not tied to a dashboard page, so they are only counted on the first page.
+		if authQuery.Page > 1 {
+			resources.CanAccessOrgAnnotations = false
+		}
+
+		if resources.CanAccessOrgAnnotations || len(resources.Dashboards) > 0 {
+			res, err := r.reader.GetTags(ctx, q, resources)
+			if err != nil {
+				return annotations.FindTagsResult{Tags: []*annotations.TagsDTO{}}, err
+			}
+			for _, t := range res.Tags {
+				counts[t.Tag] += t.Count
+			}
+		}
+
+		if !resources.HasMoreDashboards {
+			break
+		}
+		authQuery.Page++
+	}
+
+	tags := make([]*annotations.TagsDTO, 0, len(counts))
+	for tag, count := range counts {
+		tags = append(tags, &annotations.TagsDTO{Tag: tag, Count: count})
+	}
+	sort.Sort(annotations.SortedTags(tags))
+	if int64(len(tags)) > q.Limit {
+		tags = tags[:q.Limit]
+	}
+
+	return annotations.FindTagsResult{Tags: tags}, nil
 }
