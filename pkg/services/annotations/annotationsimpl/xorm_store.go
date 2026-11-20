@@ -528,6 +528,13 @@ func (r *xormRepositoryImpl) getAccessControlFilter(accessResources *accesscontr
 }
 
 func (r *xormRepositoryImpl) Delete(ctx context.Context, params *annotations.DeleteParams) error {
+	// Organization annotations are stored with dashboard_id = 0, so a delete without
+	// a target would otherwise match every organization annotation.
+	// nolint: staticcheck
+	if params.ID == 0 && params.DashboardUID == "" && params.DashboardID == 0 {
+		return annotations.ErrDeleteTargetMissing
+	}
+
 	return r.db.WithTransactionalDbSession(ctx, func(sess *db.Session) error {
 		var (
 			sql        string
