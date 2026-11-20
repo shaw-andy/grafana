@@ -26,7 +26,7 @@ type testConfig struct {
 	signedURL string
 }
 
-func mockSDK(ctx context.Context, t *testing.T, content []byte, bucket string, signed bool) testConfig {
+func mockSDK(ctx context.Context, t *testing.T, content []byte, bucket string, signed, publicACL bool) testConfig {
 	t.Helper()
 
 	var cfg testConfig
@@ -37,7 +37,7 @@ func mockSDK(ctx context.Context, t *testing.T, content []byte, bucket string, s
 	})
 
 	wm := mock_gcsifaces.NewMockStorageWriter(ctrl)
-	if !signed {
+	if publicACL {
 		wm.
 			EXPECT().
 			SetACL(gomock.Eq("publicRead")).
@@ -118,11 +118,24 @@ func TestUploadToGCS_DefaultCredentials(t *testing.T) {
 	err := os.WriteFile(fpath, content, 0600)
 	require.NoError(t, err)
 
-	t.Run("Without signed URL", func(t *testing.T) {
+	t.Run("Without signed URL keeps the object private", func(t *testing.T) {
 		ctx := context.Background()
-		mockSDK(ctx, t, content, bucket, false)
+		mockSDK(ctx, t, content, bucket, false, false)
 
-		uploader, err := NewUploader("", bucket, "", false, dfltExpiration)
+		uploader, err := NewUploader("", bucket, "", false, dfltExpiration, false)
+		require.NoError(t, err)
+
+		path, err := uploader.Upload(ctx, fpath)
+		require.NoError(t, err)
+
+		assert.Regexp(t, fmt.Sprintf(`^https://storage.googleapis.com/%s/[^/]+\.png$`, bucket), path)
+	})
+
+	t.Run("Without signed URL and public read ACL enabled", func(t *testing.T) {
+		ctx := context.Background()
+		mockSDK(ctx, t, content, bucket, false, true)
+
+		uploader, err := NewUploader("", bucket, "", false, dfltExpiration, true)
 		require.NoError(t, err)
 
 		path, err := uploader.Upload(ctx, fpath)
@@ -133,9 +146,22 @@ func TestUploadToGCS_DefaultCredentials(t *testing.T) {
 
 	t.Run("With signed URL", func(t *testing.T) {
 		ctx := context.Background()
-		cfg := mockSDK(ctx, t, content, bucket, true)
+		cfg := mockSDK(ctx, t, content, bucket, true, false)
 
-		uploader, err := NewUploader("", bucket, "", true, dfltExpiration)
+		uploader, err := NewUploader("", bucket, "", true, dfltExpiration, false)
+		require.NoError(t, err)
+
+		path, err := uploader.Upload(ctx, fpath)
+		require.NoError(t, err)
+
+		assert.Equal(t, cfg.signedURL, path)
+	})
+
+	t.Run("With signed URL ignores public read ACL", func(t *testing.T) {
+		ctx := context.Background()
+		cfg := mockSDK(ctx, t, content, bucket, true, false)
+
+		uploader, err := NewUploader("", bucket, "", true, dfltExpiration, true)
 		require.NoError(t, err)
 
 		path, err := uploader.Upload(ctx, fpath)

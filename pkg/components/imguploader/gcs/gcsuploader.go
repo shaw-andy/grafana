@@ -21,7 +21,8 @@ import (
 )
 
 // NewUploader returns a new Uploader.
-func NewUploader(keyFile, bucket, path string, enableSignedURLs bool, signedURLExpiration time.Duration) (*Uploader, error) {
+// Uploaded objects are private unless enablePublicReadACL is set and signed URLs are disabled.
+func NewUploader(keyFile, bucket, path string, enableSignedURLs bool, signedURLExpiration time.Duration, enablePublicReadACL bool) (*Uploader, error) {
 	if signedURLExpiration <= 0 {
 		return nil, fmt.Errorf("invalid signed URL expiration: %q", signedURLExpiration)
 	}
@@ -32,10 +33,11 @@ func NewUploader(keyFile, bucket, path string, enableSignedURLs bool, signedURLE
 		log:                 log.New("gcsuploader"),
 		enableSignedURLs:    enableSignedURLs,
 		signedURLExpiration: signedURLExpiration,
+		enablePublicReadACL: enablePublicReadACL,
 	}
 
 	uploader.log.Debug("Created uploader", "key", keyFile, "bucket", bucket, "path", path, "enableSignedUrls",
-		enableSignedURLs, "signedUrlExpiration", signedURLExpiration.String())
+		enableSignedURLs, "signedUrlExpiration", signedURLExpiration.String(), "enablePublicReadAcl", enablePublicReadACL)
 
 	return uploader, nil
 }
@@ -55,6 +57,7 @@ type Uploader struct {
 	log                 log.Logger
 	enableSignedURLs    bool
 	signedURLExpiration time.Duration
+	enablePublicReadACL bool
 }
 
 // Upload uploads an image to GCS.
@@ -164,8 +167,7 @@ func (u *Uploader) uploadFile(
 		}
 	}()
 
-	// Set public access if not generating a signed URL
-	pubAcc := !u.enableSignedURLs
+	pubAcc := u.enablePublicReadACL && !u.enableSignedURLs
 
 	u.log.Debug("Uploading to GCS bucket using SDK", "bucket", u.Bucket, "key", key, "public", pubAcc)
 
