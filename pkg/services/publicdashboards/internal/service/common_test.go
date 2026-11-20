@@ -37,7 +37,7 @@ func newPublicDashboardServiceImpl(
 	}
 	tagService := tagimpl.ProvideService(store)
 	if annotationsRepo == nil {
-		annotationsRepo = annotationsimpl.ProvideService(store, cfg, featuremgmt.WithFeatures(), tagService, tracing.InitializeTracerForTest(), nil, dashboardService, prometheus.NewPedanticRegistry())
+		annotationsRepo = annotationsimpl.ProvideService(store, cfg, featuremgmt.WithFeatures(), tagService, tracing.InitializeTracerForTest(), nil, dashboardService, nil, prometheus.NewPedanticRegistry())
 	}
 
 	if publicDashboardStore == nil {

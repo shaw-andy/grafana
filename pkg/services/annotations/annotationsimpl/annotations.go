@@ -15,6 +15,7 @@ import (
 	"github.com/grafana/grafana/pkg/infra/tracing"
 	"github.com/grafana/grafana/pkg/services/annotations"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
+	"github.com/grafana/grafana/pkg/services/folder"
 	"github.com/grafana/grafana/pkg/services/tag"
 	"github.com/grafana/grafana/pkg/setting"
 )
@@ -43,6 +44,7 @@ func ProvideService(
 	tracer tracing.Tracer,
 	ruleStore *alertingStore.DBstore,
 	dashSvc dashboards.DashboardService,
+	folderSvc folder.Service,
 	reg prometheus.Registerer,
 ) *RepositoryImpl {
 	l := log.New("annotations")
@@ -62,7 +64,7 @@ func ProvideService(
 	}
 
 	return NewRepositoryImpl(
-		accesscontrol.NewAuthService(db, features, dashSvc, cfg),
+		accesscontrol.NewAuthService(db, features, dashSvc, cfg).WithFolderService(folderSvc),
 		features,
 		read,
 		write,
@@ -126,7 +128,7 @@ func (r *RepositoryImpl) Find(ctx context.Context, query *annotations.ItemQuery)
 		results = append(results, res...)
 		q.Page++ // next iteration fetches the next page of dashboards
 		// All user's dashboards are fetched
-		if len(resources.Dashboards) < int(q.Limit) {
+		if !resources.HasMoreDashboards {
 			break
 		}
 	}
