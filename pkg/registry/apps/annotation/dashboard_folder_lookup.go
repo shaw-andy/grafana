@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
@@ -60,20 +61,34 @@ type dashboardFolderResolver struct {
 	sf           singleflight.Group
 }
 
+// resolvedFolder is a dashboard's parent folder together with the time the lookup that read it began.
+type resolvedFolder struct {
+	folder    string
+	fetchedAt time.Time
+}
+
+// ResolveFolder only returns folders read by a lookup that began after the current request was received.
+// The result feeds folder-inheritance authz, so a folder read before a dashboard move must not authorize
+// requests that arrive after it; the cache and shared fetches only deduplicate lookups within that bound.
 func (r *dashboardFolderResolver) ResolveFolder(ctx context.Context, namespace, dashboardUID string) (string, error) {
 	ctx, span := r.tracer.Start(ctx, "annotation.authz.dashboardFolderResolver.ResolveFolder", trace.WithAttributes(
 		attribute.String("dashboard_uid", dashboardUID),
 	))
 	defer span.End()
 
+	notBefore, ok := request.ReceivedTimestampFrom(ctx)
+	if !ok {
+		notBefore = time.Now()
+	}
+
 	key := namespace + "/" + dashboardUID
 	if r.cache != nil {
-		if v, ok := r.cache.Get(key); ok {
+		if v, ok := r.cache.Get(key); ok && !v.(resolvedFolder).fetchedAt.Before(notBefore) {
 			span.SetAttributes(attribute.Bool("cache_hit", true))
 			if r.metrics != nil {
 				r.metrics.FolderCacheHits.Inc()
 			}
-			return v.(string), nil
+			return v.(resolvedFolder).folder, nil
 		}
 		if r.metrics != nil {
 			r.metrics.FolderCacheMisses.Inc()
@@ -81,41 +96,57 @@ func (r *dashboardFolderResolver) ResolveFolder(ctx context.Context, namespace, 
 	}
 
 	// Group concurrent cache misses for the same dashboard into a single fetch
-	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.fetchTimeout)
-	defer cancel()
 	v, err, _ := r.sf.Do(key, func() (any, error) {
-		nsInfo, err := authlib.ParseNamespace(namespace)
-		if err != nil {
-			return "", fmt.Errorf("parse namespace %q: %w", namespace, err)
-		}
-
-		// The downstream apiserver authorizes the fetch against the service identity, not the caller's -
-		// so a viewer without dashboards:read can still resolve the folder for annotation inheritance checks.
-		svcCtx := identity.WithServiceIdentityContext(fetchCtx, nsInfo.OrgID)
-
-		dash, err := r.client.Get(svcCtx, namespace, dashboardUID)
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				return "", nil
-			}
-			return "", err
-		}
-
-		// GetFolder reads metadata.annotations["grafana.app/folder"].
-		meta, err := utils.MetaAccessor(dash)
-		if err != nil {
-			return "", fmt.Errorf("meta accessor for dashboard %q: %w", dashboardUID, err)
-		}
-		folder := meta.GetFolder()
-		if r.cache != nil {
-			r.cache.Set(key, folder, r.cacheTTL)
-		}
-		return folder, nil
+		return r.fetchFolder(ctx, namespace, dashboardUID)
 	})
 	if err != nil {
 		return "", err
 	}
-	return v.(string), nil
+	resolved := v.(resolvedFolder)
+	if resolved.fetchedAt.Before(notBefore) {
+		// The shared fetch began before this request was received.
+		resolved, err = r.fetchFolder(ctx, namespace, dashboardUID)
+		if err != nil {
+			return "", err
+		}
+	}
+	return resolved.folder, nil
+}
+
+func (r *dashboardFolderResolver) fetchFolder(ctx context.Context, namespace, dashboardUID string) (resolvedFolder, error) {
+	fetchedAt := time.Now()
+
+	nsInfo, err := authlib.ParseNamespace(namespace)
+	if err != nil {
+		return resolvedFolder{}, fmt.Errorf("parse namespace %q: %w", namespace, err)
+	}
+
+	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.fetchTimeout)
+	defer cancel()
+
+	// The downstream apiserver authorizes the fetch against the service identity, not the caller's -
+	// so a viewer without dashboards:read can still resolve the folder for annotation inheritance checks.
+	svcCtx := identity.WithServiceIdentityContext(fetchCtx, nsInfo.OrgID)
+
+	resolved := resolvedFolder{fetchedAt: fetchedAt}
+	dash, err := r.client.Get(svcCtx, namespace, dashboardUID)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return resolvedFolder{}, err
+		}
+	} else {
+		// GetFolder reads metadata.annotations["grafana.app/folder"].
+		meta, err := utils.MetaAccessor(dash)
+		if err != nil {
+			return resolvedFolder{}, fmt.Errorf("meta accessor for dashboard %q: %w", dashboardUID, err)
+		}
+		resolved.folder = meta.GetFolder()
+	}
+
+	if r.cache != nil {
+		r.cache.Set(namespace+"/"+dashboardUID, resolved, r.cacheTTL)
+	}
+	return resolved, nil
 }
 
 type dashboardClient struct {

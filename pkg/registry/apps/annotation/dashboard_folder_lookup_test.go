@@ -11,9 +11,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apiserver/pkg/endpoints/request"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -67,7 +69,8 @@ func TestDashboardFolderResolver_ResolveFolder(t *testing.T) {
 		dashUID   = "dash-abc"
 		folderUID = "folder-xyz"
 	)
-	ctx := identity.WithServiceIdentityContext(t.Context(), 1)
+	svcCtx := identity.WithServiceIdentityContext(t.Context(), 1)
+	ctx := request.WithReceivedTimestamp(svcCtx, time.Now())
 
 	countGets := func(fakeDyn *dynamicfake.FakeDynamicClient) int {
 		count := 0
@@ -78,6 +81,79 @@ func TestDashboardFolderResolver_ResolveFolder(t *testing.T) {
 		}
 		return count
 	}
+
+	moveDashboard := func(t *testing.T, fakeDyn *dynamicfake.FakeDynamicClient, folder string) {
+		t.Helper()
+		gvr := dashboardv1.DashboardResourceInfo.GroupVersionResource()
+		_, err := fakeDyn.Resource(gvr).Namespace(ns).Update(svcCtx, newFakeDashboard(ns, dashUID, folder), metav1.UpdateOptions{})
+		require.NoError(t, err)
+	}
+
+	t.Run("request received after a cached lookup resolves the current folder", func(t *testing.T) {
+		resolver, fakeDyn := newTestDashboardFolderResolver(true, newFakeDashboard(ns, dashUID, folderUID))
+
+		folder, err := resolver.ResolveFolder(ctx, ns, dashUID)
+		require.NoError(t, err)
+		assert.Equal(t, folderUID, folder)
+
+		moveDashboard(t, fakeDyn, "folder-moved")
+
+		laterCtx := request.WithReceivedTimestamp(svcCtx, time.Now())
+		folder, err = resolver.ResolveFolder(laterCtx, ns, dashUID)
+		require.NoError(t, err)
+		assert.Equal(t, "folder-moved", folder)
+		assert.Equal(t, 2, countGets(fakeDyn))
+	})
+
+	t.Run("request without a received timestamp does not use the cache", func(t *testing.T) {
+		resolver, fakeDyn := newTestDashboardFolderResolver(true, newFakeDashboard(ns, dashUID, folderUID))
+
+		_, err := resolver.ResolveFolder(svcCtx, ns, dashUID)
+		require.NoError(t, err)
+		moveDashboard(t, fakeDyn, "folder-moved")
+
+		folder, err := resolver.ResolveFolder(svcCtx, ns, dashUID)
+		require.NoError(t, err)
+		assert.Equal(t, "folder-moved", folder)
+		assert.Equal(t, 2, countGets(fakeDyn))
+	})
+
+	t.Run("request received after a shared fetch began resolves the current folder", func(t *testing.T) {
+		resolver, fakeDyn := newTestDashboardFolderResolver(true, newFakeDashboard(ns, dashUID, folderUID))
+
+		release := make(chan struct{})
+		entered := make(chan struct{})
+		var first atomic.Bool
+		// The fake client holds its lock while a reactor runs, so the move is served by the reactor.
+		fakeDyn.PrependReactor("get", "dashboards", func(k8stesting.Action) (bool, runtime.Object, error) {
+			if first.CompareAndSwap(false, true) {
+				close(entered)
+				<-release
+				return true, newFakeDashboard(ns, dashUID, folderUID), nil
+			}
+			return true, newFakeDashboard(ns, dashUID, "folder-moved"), nil
+		})
+
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			_, _ = resolver.ResolveFolder(ctx, ns, dashUID)
+		})
+		<-entered
+
+		laterCtx := request.WithReceivedTimestamp(svcCtx, time.Now())
+
+		var laterFolder string
+		var laterErr error
+		wg.Go(func() {
+			laterFolder, laterErr = resolver.ResolveFolder(laterCtx, ns, dashUID)
+		})
+
+		close(release)
+		wg.Wait()
+
+		require.NoError(t, laterErr)
+		assert.Equal(t, "folder-moved", laterFolder)
+	})
 
 	t.Run("resolves folder and caches result", func(t *testing.T) {
 		resolver, fakeDyn := newTestDashboardFolderResolver(true, newFakeDashboard(ns, dashUID, folderUID))
