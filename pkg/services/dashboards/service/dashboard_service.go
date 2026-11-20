@@ -1659,15 +1659,19 @@ func makeQueryResult(query *dashboards.FindPersistedDashboardsQuery, res []dashb
 	return hitList
 }
 
+// dashboardTagsFacetLimit matches the largest tags facet the dashboard search API accepts.
+const dashboardTagsFacetLimit = 1000
+
 func (dr *DashboardServiceImpl) GetDashboardTags(ctx context.Context, query *dashboards.GetDashboardTagsQuery) ([]*dashboards.DashboardTagCloudItem, error) {
+	// Only the facet is read, so Limit stays 0 to keep the index from loading matching dashboards.
 	res, err := dr.k8sclient.Search(ctx, query.OrgID, &resourcepb.ResourceSearchRequest{
 		Facet: map[string]*resourcepb.ResourceSearchRequest_Facet{
 			"tags": {
 				Field: "tags",
-				Limit: 100000,
+				Limit: dashboardTagsFacetLimit,
 			},
 		},
-		Limit:        100000,
+		Limit:        0,
 		ResultFormat: resourcepb.ResourceSearchRequest_FIELD_VALUES,
 	})
 	if err != nil {
