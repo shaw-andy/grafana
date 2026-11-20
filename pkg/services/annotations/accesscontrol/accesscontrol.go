@@ -2,13 +2,17 @@ package accesscontrol
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"github.com/grafana/grafana/pkg/apimachinery/errutil"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/infra/db"
 	ac "github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/annotations"
 	"github.com/grafana/grafana/pkg/services/dashboards"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
+	"github.com/grafana/grafana/pkg/services/folder"
 	"github.com/grafana/grafana/pkg/services/search/model"
 	"github.com/grafana/grafana/pkg/setting"
 )
@@ -36,11 +40,12 @@ type AuthService struct {
 	db                        db.DB
 	features                  featuremgmt.FeatureToggles
 	dashSvc                   dashboards.DashboardService
+	folderSvc                 folder.Service
 	searchDashboardsPageLimit int64
 	maxDepth                  int
 }
 
-func NewAuthService(db db.DB, features featuremgmt.FeatureToggles, dashSvc dashboards.DashboardService, cfg *setting.Cfg) *AuthService {
+func NewAuthService(db db.DB, features featuremgmt.FeatureToggles, dashSvc dashboards.DashboardService, folderSvc folder.Service, cfg *setting.Cfg) *AuthService {
 	section := cfg.Raw.Section("annotations")
 	searchDashboardsPageLimit := section.Key("search_dashboards_page_limit").MustInt64(1000)
 
@@ -48,6 +53,7 @@ func NewAuthService(db db.DB, features featuremgmt.FeatureToggles, dashSvc dashb
 		db:                        db,
 		features:                  features,
 		dashSvc:                   dashSvc,
+		folderSvc:                 folderSvc,
 		searchDashboardsPageLimit: searchDashboardsPageLimit,
 		maxDepth:                  cfg.MaxNestedFolderDepth,
 	}
@@ -74,7 +80,7 @@ func (authz *AuthService) Authorize(ctx context.Context, query annotations.ItemQ
 		query.DashboardUID = annotationDashboardUID
 	}
 
-	visibleDashboards, err := authz.dashboardsWithVisibleAnnotations(ctx, query)
+	visibleDashboards, hasMoreDashboards, err := authz.dashboardsWithVisibleAnnotations(ctx, query)
 	if err != nil {
 		return nil, ErrAccessControlInternal.Errorf("failed to fetch dashboards: %w", err)
 	}
@@ -82,6 +88,7 @@ func (authz *AuthService) Authorize(ctx context.Context, query annotations.ItemQ
 	return &AccessResources{
 		Dashboards:              visibleDashboards,
 		CanAccessOrgAnnotations: canAccessOrgAnnotations,
+		HasMoreDashboards:       hasMoreDashboards,
 	}, nil
 }
 
@@ -111,7 +118,9 @@ func (authz *AuthService) getAnnotationDashboard(ctx context.Context, query anno
 	return items[0].DashboardUID, nil
 }
 
-func (authz *AuthService) dashboardsWithVisibleAnnotations(ctx context.Context, query annotations.ItemQuery) (map[string]int64, error) {
+// dashboardsWithVisibleAnnotations returns the dashboards the user can read whose annotations the user can also read,
+// and whether the dashboard search page was full.
+func (authz *AuthService) dashboardsWithVisibleAnnotations(ctx context.Context, query annotations.ItemQuery) (map[string]int64, bool, error) {
 	var dashboardUIDs []string
 	if query.DashboardUID != "" {
 		dashboardUIDs = []string{query.DashboardUID}
@@ -126,15 +135,112 @@ func (authz *AuthService) dashboardsWithVisibleAnnotations(ctx context.Context, 
 		Limit:         authz.searchDashboardsPageLimit,
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
+	// The dashboard search only checks dashboard read access, so the annotation read scopes have to be applied here.
+	checker := newAnnotationScopeChecker(authz.folderSvc, query.SignedInUser)
 	visibleDashboards := make(map[string]int64)
 	for _, d := range dashs {
-		visibleDashboards[d.UID] = d.ID
+		if query.DashboardUID != "" && d.UID != query.DashboardUID {
+			continue
+		}
+		canRead, err := checker.canReadDashboardAnnotations(ctx, d.UID, d.FolderUID)
+		if err != nil {
+			return nil, false, err
+		}
+		if canRead {
+			visibleDashboards[d.UID] = d.ID
+		}
 	}
 
-	return visibleDashboards, nil
+	hasMoreDashboards := len(dashs) > 0 && int64(len(dashs)) >= authz.searchDashboardsPageLimit
+	return visibleDashboards, hasMoreDashboards, nil
+}
+
+// annotationScopeChecker evaluates annotations:read against the same dashboard and folder scopes
+// that the annotation ID scope resolver produces for a dashboard annotation.
+type annotationScopeChecker struct {
+	folderSvc       folder.Service
+	orgID           int64
+	permissions     map[string][]string
+	hasFolderScopes bool
+	inherited       map[string][]string
+}
+
+func newAnnotationScopeChecker(folderSvc folder.Service, user identity.Requester) *annotationScopeChecker {
+	scopes := user.GetPermissions()[ac.ActionAnnotationsRead]
+	hasFolderScopes := false
+	for _, scope := range scopes {
+		if strings.HasPrefix(scope, folder.ScopeFoldersPrefix) {
+			hasFolderScopes = true
+			break
+		}
+	}
+
+	return &annotationScopeChecker{
+		folderSvc:       folderSvc,
+		orgID:           user.GetOrgID(),
+		permissions:     map[string][]string{ac.ActionAnnotationsRead: scopes},
+		hasFolderScopes: hasFolderScopes,
+		inherited:       make(map[string][]string),
+	}
+}
+
+func (c *annotationScopeChecker) canReadDashboardAnnotations(ctx context.Context, dashboardUID, folderUID string) (bool, error) {
+	if dashboardUID == "" {
+		return false, nil
+	}
+
+	scopes := []string{dashboards.ScopeDashboardsProvider.GetResourceScopeUID(dashboardUID)}
+	if folderUID == "" || folderUID == folder.GeneralFolderUID {
+		scopes = append(scopes, folder.ScopeFoldersProvider.GetResourceScopeUID(folder.GeneralFolderUID))
+		return c.evaluate(scopes), nil
+	}
+
+	scopes = append(scopes, folder.ScopeFoldersProvider.GetResourceScopeUID(folderUID))
+	if c.evaluate(scopes) {
+		return true, nil
+	}
+	if !c.hasFolderScopes {
+		return false, nil
+	}
+
+	inherited, err := c.inheritedFolderScopes(ctx, folderUID)
+	if err != nil {
+		return false, err
+	}
+	return c.evaluate(inherited), nil
+}
+
+func (c *annotationScopeChecker) evaluate(scopes []string) bool {
+	if len(scopes) == 0 {
+		return false
+	}
+	return ac.EvalPermission(ac.ActionAnnotationsRead, scopes...).Evaluate(c.permissions)
+}
+
+func (c *annotationScopeChecker) inheritedFolderScopes(ctx context.Context, folderUID string) ([]string, error) {
+	if scopes, ok := c.inherited[folderUID]; ok {
+		return scopes, nil
+	}
+	if c.folderSvc == nil {
+		return nil, nil
+	}
+
+	// The user may be able to read the dashboard without being able to read its ancestor folders.
+	scopes, err := identity.WithServiceIdentityFn(ctx, c.orgID, func(ctx context.Context) ([]string, error) {
+		return folder.GetInheritedScopes(ctx, c.orgID, folderUID, c.folderSvc)
+	})
+	if err != nil {
+		if !errors.Is(err, folder.ErrFolderNotFound) {
+			return nil, err
+		}
+		scopes = nil
+	}
+
+	c.inherited[folderUID] = scopes
+	return scopes, nil
 }
 
 func annotationScopeTypes(scopes []string) map[any]struct{} {

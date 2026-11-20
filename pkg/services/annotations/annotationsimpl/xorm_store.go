@@ -514,8 +514,12 @@ func (r *xormRepositoryImpl) getAccessControlFilter(accessResources *accesscontr
 		filters = append(filters, "1=0") // empty set
 	} else {
 		if dashboardUID != "" {
-			filters = append(filters, "a.dashboard_uid = ?")
-			params = append(params, dashboardUID)
+			if _, ok := accessResources.Dashboards[dashboardUID]; ok {
+				filters = append(filters, "a.dashboard_uid = ?")
+				params = append(params, dashboardUID)
+			} else {
+				filters = append(filters, "1=0")
+			}
 		} else {
 			filters = append(filters, fmt.Sprintf("a.dashboard_uid IN (%s)", strings.Repeat("?,", len(accessResources.Dashboards)-1)+"?"))
 			for uid := range accessResources.Dashboards {
@@ -576,7 +580,7 @@ func (r *xormRepositoryImpl) Delete(ctx context.Context, params *annotations.Del
 	})
 }
 
-func (r *xormRepositoryImpl) GetTags(ctx context.Context, query annotations.TagsQuery) (annotations.FindTagsResult, error) {
+func (r *xormRepositoryImpl) GetTags(ctx context.Context, query annotations.TagsQuery, accessResources *accesscontrol.AccessResources) (annotations.FindTagsResult, error) {
 	var items []*annotations.Tag
 	err := r.db.WithDbSession(ctx, func(dbSession *db.Session) error {
 		if query.Limit == 0 {
@@ -595,18 +599,24 @@ func (r *xormRepositoryImpl) GetTags(ctx context.Context, query annotations.Tags
 			count(*) as count
 		FROM tag
 		INNER JOIN annotation_tag ON tag.id = annotation_tag.tag_id
-		INNER JOIN annotation ON annotation.id = annotation_tag.annotation_id
+		INNER JOIN annotation a ON a.id = annotation_tag.annotation_id
 `)
 
-		sql.WriteString(`WHERE annotation.org_id = ?`)
+		sql.WriteString(`WHERE a.org_id = ?`)
 		params = append(params, query.OrgID)
 
 		switch query.Type {
 		case "alert":
-			sql.WriteString(` AND annotation.alert_id > 0`)
+			sql.WriteString(` AND a.alert_id > 0`)
 		case "annotation":
-			sql.WriteString(` AND annotation.alert_id = 0`)
+			sql.WriteString(` AND a.alert_id = 0`)
 		}
+
+		acFilter, acParams := r.getAccessControlFilter(accessResources, "")
+		if acFilter != "" {
+			sql.WriteString(fmt.Sprintf(" AND (%s)", acFilter))
+		}
+		params = append(params, acParams...)
 
 		sql.WriteString(` AND (`)
 		s, p := r.db.GetDialect().LikeOperator(tagKey, true, query.Tag, true)
