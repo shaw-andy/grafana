@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
@@ -376,16 +377,28 @@ func (pd *PublicDashboardServiceImpl) NewPublicDashboardAccessToken(ctx context.
 func (pd *PublicDashboardServiceImpl) FindAllWithPagination(ctx context.Context, query *models.PublicDashboardListQuery) (*models.PublicDashboardListResponseWithPagination, error) {
 	ctx, span := tracer.Start(ctx, "publicdashboards.FindAllWithPagination")
 	defer span.End()
+	if query.Limit <= 0 || query.Limit > models.MaxPublicDashboardListPageSize {
+		query.Limit = models.MaxPublicDashboardListPageSize
+	}
+	query.Page = min(max(query.Page, 1), math.MaxInt/query.Limit)
 	query.Offset = query.Limit * (query.Page - 1)
 	resp, err := pd.store.FindAll(ctx, query)
 	if err != nil {
 		return nil, models.ErrInternalServerError.Errorf("FindAllWithPagination: GetPublicDashboards: %w", err)
 	}
 
+	resp.Page = query.Page
+	resp.PerPage = query.Limit
+
 	// join in the dashboard data
 	dashUIDs := make([]string, len(resp.PublicDashboards))
 	for i, pubdash := range resp.PublicDashboards {
 		dashUIDs[i] = pubdash.DashboardUid
+	}
+
+	// An empty UID filter would make dashboard search match every dashboard in the org.
+	if len(dashUIDs) == 0 {
+		return resp, nil
 	}
 
 	dashboardsFound, err := pd.dashboardService.FindDashboards(ctx, &dashboards.FindPersistedDashboardsQuery{
@@ -423,20 +436,6 @@ func (pd *PublicDashboardServiceImpl) FindAllWithPagination(ctx context.Context,
 	sort.Slice(resp.PublicDashboards, func(i, j int) bool {
 		return resp.PublicDashboards[i].Title < resp.PublicDashboards[j].Title
 	})
-
-	// and now paginate
-	start := query.Offset
-	end := start + query.Limit
-	if start > len(resp.PublicDashboards) {
-		start = len(resp.PublicDashboards)
-	}
-	if end > len(resp.PublicDashboards) {
-		end = len(resp.PublicDashboards)
-	}
-	resp.PublicDashboards = resp.PublicDashboards[start:end]
-
-	resp.Page = query.Page
-	resp.PerPage = query.Limit
 
 	return resp, nil
 }

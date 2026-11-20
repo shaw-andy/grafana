@@ -118,8 +118,8 @@ func (api *Api) RegisterAPIEndpoints() {
 // 500: internalServerPublicError
 func (api *Api) ListPublicDashboards(c *contextmodel.ReqContext) response.Response {
 	perPage := c.QueryInt("perpage")
-	if perPage <= 0 {
-		perPage = 1000
+	if perPage <= 0 || perPage > models.MaxPublicDashboardListPageSize {
+		perPage = models.MaxPublicDashboardListPageSize
 	}
 
 	page := max(c.QueryInt("page"), 1)

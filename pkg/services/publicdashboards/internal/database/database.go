@@ -47,6 +47,12 @@ func (d *PublicDashboardStoreImpl) FindAll(ctx context.Context, query *models.Pu
 		TotalCount:       0,
 	}
 
+	limit := query.Limit
+	if limit <= 0 || limit > models.MaxPublicDashboardListPageSize {
+		limit = models.MaxPublicDashboardListPageSize
+	}
+	offset := max(query.Offset, 0)
+
 	recursiveQueriesAreSupported, err := d.sqlStore.RecursiveQueriesAreSupported()
 	if err != nil {
 		return nil, err
@@ -56,6 +62,8 @@ func (d *PublicDashboardStoreImpl) FindAll(ctx context.Context, query *models.Pu
 	pubdashBuilder.Write("SELECT uid, access_token, dashboard_uid, is_enabled")
 	pubdashBuilder.Write(" FROM dashboard_public")
 	pubdashBuilder.Write(` WHERE org_id = ?`, query.OrgID)
+	pubdashBuilder.Write(" ORDER BY dashboard_uid, uid")
+	pubdashBuilder.Write(d.sqlStore.GetDialect().LimitOffset(int64(limit), int64(offset)))
 
 	counterBuilder := db.NewSqlBuilder(d.cfg, d.features, d.sqlStore.GetDialect(), recursiveQueriesAreSupported)
 	counterBuilder.Write("SELECT COUNT(*)")
