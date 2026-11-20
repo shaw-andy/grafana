@@ -139,14 +139,28 @@ func (s *Verifier) Complete(ctx context.Context, cmd user.CompleteEmailVerifyCom
 		return errors.New("trying to update email on unknown field")
 	}
 
-	if err := s.us.Update(ctx, update); err != nil {
+	// Claim the code before applying it so that it can only be used once.
+	if err := s.ts.UpdateTempUserStatus(ctx, &tempuser.UpdateTempUserStatusCommand{
+		ID:             tmpUsr.ID,
+		Code:           cmd.Code,
+		Status:         tempuser.TmpUserEmailUpdateCompleted,
+		ExpectedStatus: tempuser.TmpUserEmailUpdateStarted,
+	}); err != nil {
+		if errors.Is(err, tempuser.ErrTempUserStatusChanged) {
+			return errInvalidCode.Errorf("verification code is no longer pending")
+		}
 		return err
 	}
 
-	if err := s.ts.UpdateTempUserStatus(
-		ctx,
-		&tempuser.UpdateTempUserStatusCommand{Code: cmd.Code, Status: tempuser.TmpUserEmailUpdateCompleted},
-	); err != nil {
+	if err := s.us.Update(ctx, update); err != nil {
+		if releaseErr := s.ts.UpdateTempUserStatus(ctx, &tempuser.UpdateTempUserStatusCommand{
+			ID:             tmpUsr.ID,
+			Code:           cmd.Code,
+			Status:         tempuser.TmpUserEmailUpdateStarted,
+			ExpectedStatus: tempuser.TmpUserEmailUpdateCompleted,
+		}); releaseErr != nil {
+			return errors.Join(err, releaseErr)
+		}
 		return err
 	}
 

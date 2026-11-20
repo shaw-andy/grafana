@@ -9,7 +9,8 @@ import (
 
 // Typed errors
 var (
-	ErrTempUserNotFound = errors.New("user not found")
+	ErrTempUserNotFound      = errors.New("user not found")
+	ErrTempUserStatusChanged = errors.New("temp user status is no longer the expected status")
 )
 
 type TempUserStatus string
@@ -62,6 +63,12 @@ type CreateTempUserCommand struct {
 type UpdateTempUserStatusCommand struct {
 	Code   string
 	Status TempUserStatus
+	// ExpectedStatus, when set, makes the update conditional: the row is changed only if its
+	// current status equals ExpectedStatus, and ErrTempUserStatusChanged is returned otherwise.
+	// Use it to claim a code so that only one caller can act on it.
+	ExpectedStatus TempUserStatus
+	// ID, when set together with ExpectedStatus, restricts the claim to the row that was read.
+	ID int64
 }
 
 type ExpireTempUsersCommand struct {

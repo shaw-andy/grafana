@@ -291,6 +291,10 @@ func (hs *HTTPServer) CompleteInvite(c *contextmodel.ReqContext) response.Respon
 		}
 	}
 
+	if ok, rsp := hs.claimInvite(c.Req.Context(), invite); !ok {
+		return rsp
+	}
+
 	cmd := user.CreateUserCommand{
 		Email:        completeInvite.Email,
 		Name:         completeInvite.Name,
@@ -301,6 +305,9 @@ func (hs *HTTPServer) CompleteInvite(c *contextmodel.ReqContext) response.Respon
 
 	usr, err := hs.userService.Create(c.Req.Context(), &cmd)
 	if err != nil {
+		// No account was added to the invited org, so the invite can be used again.
+		hs.releaseTempUserClaim(c.Req.Context(), invite.ID, invite.Code, tempuser.TmpUserCompleted, tempuser.TmpUserInvitePending)
+
 		if errors.Is(err, user.ErrUserAlreadyExists) {
 			return response.Error(http.StatusPreconditionFailed, fmt.Sprintf("User with email '%s' or username '%s' already exists", completeInvite.Email, completeInvite.Username), err)
 		}
@@ -343,18 +350,41 @@ func (hs *HTTPServer) updateTempUserStatus(ctx context.Context, code string, sta
 	return true, nil
 }
 
+// claimInvite atomically moves a pending invite to completed. Only one caller can claim an
+// invite, so it must be claimed before any account or membership is created from it.
+func (hs *HTTPServer) claimInvite(ctx context.Context, invite *tempuser.TempUserDTO) (bool, response.Response) {
+	cmd := tempuser.UpdateTempUserStatusCommand{
+		ID:             invite.ID,
+		Code:           invite.Code,
+		Status:         tempuser.TmpUserCompleted,
+		ExpectedStatus: tempuser.TmpUserInvitePending,
+	}
+	if err := hs.tempUserService.UpdateTempUserStatus(ctx, &cmd); err != nil {
+		if errors.Is(err, tempuser.ErrTempUserStatusChanged) {
+			return false, response.Error(http.StatusPreconditionFailed, "Invite is no longer pending", nil)
+		}
+		return false, response.Error(http.StatusInternalServerError, "Failed to update invite status", err)
+	}
+	return true, nil
+}
+
+// releaseTempUserClaim reverts a claim made with a conditional status update. It must only be
+// called when nothing was granted through the claimed code.
+func (hs *HTTPServer) releaseTempUserClaim(ctx context.Context, id int64, code string, claimed, previous tempuser.TempUserStatus) {
+	cmd := tempuser.UpdateTempUserStatusCommand{ID: id, Code: code, Status: previous, ExpectedStatus: claimed}
+	if err := hs.tempUserService.UpdateTempUserStatus(ctx, &cmd); err != nil {
+		hs.log.FromContext(ctx).Warn("Failed to release temp user claim", "status", previous, "error", err)
+	}
+}
+
+// applyUserInvite adds the user to the invited org. The caller must have claimed the invite
+// with claimInvite first.
 func (hs *HTTPServer) applyUserInvite(ctx context.Context, usr *user.User, invite *tempuser.TempUserDTO, setActive bool) (bool, response.Response) {
-	// add to org
 	addOrgUserCmd := org.AddOrgUserCommand{OrgID: invite.OrgID, UserID: usr.ID, Role: invite.Role}
 	if err := hs.orgService.AddOrgUser(ctx, &addOrgUserCmd); err != nil {
 		if !errors.Is(err, org.ErrOrgUserAlreadyAdded) {
 			return false, response.Error(http.StatusInternalServerError, "Error while trying to create org user", err)
 		}
-	}
-
-	// update temp user status
-	if ok, rsp := hs.updateTempUserStatus(ctx, invite.Code, tempuser.TmpUserCompleted); !ok {
-		return false, rsp
 	}
 
 	if setActive {
