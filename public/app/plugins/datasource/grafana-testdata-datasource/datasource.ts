@@ -33,6 +33,7 @@ import { type Scenario, type TestDataDataQuery, TestDataQueryType } from './data
 import { queryMetricTree } from './metricTree';
 import { generateRandomEdges, generateRandomNodes, generateShowcaseData, savedNodesResponse } from './nodeGraphUtils';
 import { runStream } from './runStreams';
+import { parseStepsLines, stepsLimitMessage } from './steps';
 import { flameGraphData, flameGraphDataDiff } from './testData/flameGraphResponse';
 import { TestDataVariableSupport } from './variables';
 
@@ -433,10 +434,15 @@ export class TestDataDataSource
   step = 0;
 
   stepsQuery(target: TestDataDataQuery): Observable<DataQueryResponse> {
-    let steps = (target.csvContent ?? `a\n,b\nc\n`)
-      .split('\n')
-      .map((v) => v.trim())
-      .filter((v) => Boolean(v.length));
+    const steps = parseStepsLines(target.csvContent ?? `a\n,b\nc\n`);
+    if (!steps) {
+      return of({
+        key: target.refId,
+        data: [],
+        state: LoadingState.Error,
+        error: { refId: target.refId, message: stepsLimitMessage },
+      }).pipe(delay(50));
+    }
 
     this.step = this.step % steps.length;
     const step = target.alias?.length ? target.alias : 'step';
