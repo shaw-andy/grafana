@@ -106,7 +106,7 @@ func TestImageUploaderFactory(t *testing.T) {
 			original, ok := uploader.(*S3Uploader)
 			require.True(t, ok)
 			require.False(t, original.opts.EnablePresignedURLs)
-			require.Equal(t, "public-read", original.opts.ACL)
+			require.Empty(t, original.opts.ACL)
 			require.Equal(t, 7*24*time.Hour, original.opts.PresignedURLExpiration)
 		})
 
@@ -136,8 +136,56 @@ func TestImageUploaderFactory(t *testing.T) {
 			original, ok := uploader.(*S3Uploader)
 			require.True(t, ok)
 			require.True(t, original.opts.EnablePresignedURLs)
-			require.Equal(t, "public-read", original.opts.ACL)
+			require.Empty(t, original.opts.ACL)
 			require.Equal(t, 48*time.Hour, original.opts.PresignedURLExpiration)
+		})
+
+		t.Run("S3ImageUploader with explicit ACL", func(t *testing.T) {
+			cfg := setting.NewCfg()
+			err := cfg.Load(setting.CommandLineArgs{
+				HomePath: "../../../",
+			})
+			require.NoError(t, err)
+
+			cfg.ImageUploadProvider = "s3"
+
+			s3sec, err := cfg.Raw.GetSection("external_image_storage.s3")
+			require.NoError(t, err)
+			_, err = s3sec.NewKey("bucket", "test-bucket")
+			require.NoError(t, err)
+			_, err = s3sec.NewKey("region", "us-east-1")
+			require.NoError(t, err)
+			_, err = s3sec.NewKey("acl", "bucket-owner-full-control")
+			require.NoError(t, err)
+
+			uploader, err := NewImageUploader(cfg)
+			require.NoError(t, err)
+
+			original, ok := uploader.(*S3Uploader)
+			require.True(t, ok)
+			require.Equal(t, "bucket-owner-full-control", original.opts.ACL)
+		})
+
+		t.Run("S3ImageUploader with unsupported ACL", func(t *testing.T) {
+			cfg := setting.NewCfg()
+			err := cfg.Load(setting.CommandLineArgs{
+				HomePath: "../../../",
+			})
+			require.NoError(t, err)
+
+			cfg.ImageUploadProvider = "s3"
+
+			s3sec, err := cfg.Raw.GetSection("external_image_storage.s3")
+			require.NoError(t, err)
+			_, err = s3sec.NewKey("bucket", "test-bucket")
+			require.NoError(t, err)
+			_, err = s3sec.NewKey("region", "us-east-1")
+			require.NoError(t, err)
+			_, err = s3sec.NewKey("acl", "public")
+			require.NoError(t, err)
+
+			_, err = NewImageUploader(cfg)
+			require.ErrorContains(t, err, "unsupported external_image_storage.s3 acl")
 		})
 
 		t.Run("S3ImageUploader with unparseable presigned URL expiration", func(t *testing.T) {
@@ -236,6 +284,26 @@ func TestImageUploaderFactory(t *testing.T) {
 			require.True(t, ok)
 			require.Equal(t, "/etc/secrets/project-79a52befa3f6.json", original.KeyFile)
 			require.Equal(t, "project-grafana-east", original.Bucket)
+		})
+
+		t.Run("GCS uploader with unsupported predefined ACL", func(t *testing.T) {
+			cfg := setting.NewCfg()
+			err := cfg.Load(setting.CommandLineArgs{
+				HomePath: "../../../",
+			})
+			require.NoError(t, err)
+
+			cfg.ImageUploadProvider = "gcs"
+
+			gcpSec, err := cfg.Raw.GetSection("external_image_storage.gcs")
+			require.NoError(t, err)
+			_, err = gcpSec.NewKey("bucket", "project-grafana-east")
+			require.NoError(t, err)
+			_, err = gcpSec.NewKey("predefined_acl", "allUsers")
+			require.NoError(t, err)
+
+			_, err = NewImageUploader(cfg)
+			require.ErrorContains(t, err, "unsupported predefined ACL")
 		})
 
 		t.Run("AzureBlobUploader config", func(t *testing.T) {

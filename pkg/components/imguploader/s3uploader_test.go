@@ -89,7 +89,72 @@ func TestS3Upload(t *testing.T) {
 	fpath := filepath.Join(tmpDir, "test.png")
 	require.NoError(t, os.WriteFile(fpath, []byte("fake png"), 0600))
 
-	t.Run("without presigned URLs sets ACL and returns location", func(t *testing.T) {
+	t.Run("without ACL or presigned URLs omits ACL and returns presigned URL", func(t *testing.T) {
+		ctx := context.Background()
+		ctrl := gomock.NewController(t)
+
+		const presignedURL = "https://test-bucket.s3.amazonaws.com/images/abc.png?X-Amz-Signature=sig"
+		expiration := 7 * 24 * time.Hour
+
+		m := mock_s3ifaces.NewMockS3Client(ctrl)
+		m.EXPECT().
+			Upload(gomock.Eq(ctx), gomock.Any()).
+			DoAndReturn(func(_ context.Context, input *s3.PutObjectInput) (*manager.UploadOutput, error) {
+				assert.Empty(t, input.ACL)
+				return &manager.UploadOutput{Location: publicURL}, nil
+			})
+		m.EXPECT().
+			PresignGetObject(gomock.Eq(ctx), gomock.Eq(bucket), gomock.Any(), gomock.Eq(expiration)).
+			Return(presignedURL, nil)
+
+		stubS3Client(t, m)
+
+		uploader := NewS3Uploader(S3UploaderOptions{
+			Region:                 region,
+			Bucket:                 bucket,
+			Path:                   imgPath,
+			PresignedURLExpiration: expiration,
+		})
+
+		url, err := uploader.Upload(ctx, fpath)
+		require.NoError(t, err)
+		assert.Equal(t, presignedURL, url)
+	})
+
+	t.Run("with private ACL and without presigned URLs sets ACL and returns presigned URL", func(t *testing.T) {
+		ctx := context.Background()
+		ctrl := gomock.NewController(t)
+
+		const presignedURL = "https://test-bucket.s3.amazonaws.com/images/abc.png?X-Amz-Signature=sig"
+		expiration := 6 * time.Hour
+
+		m := mock_s3ifaces.NewMockS3Client(ctrl)
+		m.EXPECT().
+			Upload(gomock.Eq(ctx), gomock.Any()).
+			DoAndReturn(func(_ context.Context, input *s3.PutObjectInput) (*manager.UploadOutput, error) {
+				assert.Equal(t, types.ObjectCannedACLBucketOwnerFullControl, input.ACL)
+				return &manager.UploadOutput{Location: publicURL}, nil
+			})
+		m.EXPECT().
+			PresignGetObject(gomock.Eq(ctx), gomock.Eq(bucket), gomock.Any(), gomock.Eq(expiration)).
+			Return(presignedURL, nil)
+
+		stubS3Client(t, m)
+
+		uploader := NewS3Uploader(S3UploaderOptions{
+			Region:                 region,
+			Bucket:                 bucket,
+			Path:                   imgPath,
+			ACL:                    "bucket-owner-full-control",
+			PresignedURLExpiration: expiration,
+		})
+
+		url, err := uploader.Upload(ctx, fpath)
+		require.NoError(t, err)
+		assert.Equal(t, presignedURL, url)
+	})
+
+	t.Run("with explicit public ACL and without presigned URLs sets ACL and returns location", func(t *testing.T) {
 		ctx := context.Background()
 		ctrl := gomock.NewController(t)
 
@@ -99,7 +164,7 @@ func TestS3Upload(t *testing.T) {
 			DoAndReturn(func(_ context.Context, input *s3.PutObjectInput) (*manager.UploadOutput, error) {
 				assert.Equal(t, bucket, aws.ToString(input.Bucket))
 				assert.Equal(t, "image/png", aws.ToString(input.ContentType))
-				assert.Equal(t, types.ObjectCannedACL("public-read"), input.ACL, "ACL should be set when presigned URLs are disabled")
+				assert.Equal(t, types.ObjectCannedACL("public-read"), input.ACL)
 				return &manager.UploadOutput{Location: publicURL}, nil
 			})
 
@@ -118,7 +183,7 @@ func TestS3Upload(t *testing.T) {
 		assert.Equal(t, publicURL, url)
 	})
 
-	t.Run("with presigned URLs omits ACL and returns presigned URL", func(t *testing.T) {
+	t.Run("with presigned URLs and no ACL omits ACL and returns presigned URL", func(t *testing.T) {
 		ctx := context.Background()
 		ctrl := gomock.NewController(t)
 
@@ -130,7 +195,7 @@ func TestS3Upload(t *testing.T) {
 			Upload(gomock.Eq(ctx), gomock.Any()).
 			DoAndReturn(func(_ context.Context, input *s3.PutObjectInput) (*manager.UploadOutput, error) {
 				assert.Equal(t, bucket, aws.ToString(input.Bucket))
-				assert.Empty(t, input.ACL, "ACL should not be set when presigned URLs are enabled")
+				assert.Empty(t, input.ACL)
 				return &manager.UploadOutput{Location: publicURL}, nil
 			})
 		m.EXPECT().
@@ -143,7 +208,6 @@ func TestS3Upload(t *testing.T) {
 			Region:                 region,
 			Bucket:                 bucket,
 			Path:                   imgPath,
-			ACL:                    "public-read",
 			EnablePresignedURLs:    true,
 			PresignedURLExpiration: expiration,
 		})

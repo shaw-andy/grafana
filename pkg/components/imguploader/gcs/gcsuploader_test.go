@@ -26,7 +26,7 @@ type testConfig struct {
 	signedURL string
 }
 
-func mockSDK(ctx context.Context, t *testing.T, content []byte, bucket string, signed bool) testConfig {
+func mockSDK(ctx context.Context, t *testing.T, content []byte, bucket, acl string, signed bool) testConfig {
 	t.Helper()
 
 	var cfg testConfig
@@ -37,10 +37,10 @@ func mockSDK(ctx context.Context, t *testing.T, content []byte, bucket string, s
 	})
 
 	wm := mock_gcsifaces.NewMockStorageWriter(ctrl)
-	if !signed {
+	if acl != "" {
 		wm.
 			EXPECT().
-			SetACL(gomock.Eq("publicRead")).
+			SetACL(gomock.Eq(acl)).
 			Return()
 	}
 	wm.EXPECT().
@@ -118,11 +118,37 @@ func TestUploadToGCS_DefaultCredentials(t *testing.T) {
 	err := os.WriteFile(fpath, content, 0600)
 	require.NoError(t, err)
 
-	t.Run("Without signed URL", func(t *testing.T) {
+	t.Run("Without ACL or signed URL setting", func(t *testing.T) {
 		ctx := context.Background()
-		mockSDK(ctx, t, content, bucket, false)
+		cfg := mockSDK(ctx, t, content, bucket, "", true)
 
-		uploader, err := NewUploader("", bucket, "", false, dfltExpiration)
+		uploader, err := NewUploader("", bucket, "", "", false, dfltExpiration)
+		require.NoError(t, err)
+
+		path, err := uploader.Upload(ctx, fpath)
+		require.NoError(t, err)
+
+		assert.Equal(t, cfg.signedURL, path)
+	})
+
+	t.Run("With private predefined ACL", func(t *testing.T) {
+		ctx := context.Background()
+		cfg := mockSDK(ctx, t, content, bucket, "projectPrivate", true)
+
+		uploader, err := NewUploader("", bucket, "", "projectPrivate", false, dfltExpiration)
+		require.NoError(t, err)
+
+		path, err := uploader.Upload(ctx, fpath)
+		require.NoError(t, err)
+
+		assert.Equal(t, cfg.signedURL, path)
+	})
+
+	t.Run("With explicit publicRead ACL and without signed URL", func(t *testing.T) {
+		ctx := context.Background()
+		mockSDK(ctx, t, content, bucket, "publicRead", false)
+
+		uploader, err := NewUploader("", bucket, "", "publicRead", false, dfltExpiration)
 		require.NoError(t, err)
 
 		path, err := uploader.Upload(ctx, fpath)
@@ -133,15 +159,20 @@ func TestUploadToGCS_DefaultCredentials(t *testing.T) {
 
 	t.Run("With signed URL", func(t *testing.T) {
 		ctx := context.Background()
-		cfg := mockSDK(ctx, t, content, bucket, true)
+		cfg := mockSDK(ctx, t, content, bucket, "", true)
 
-		uploader, err := NewUploader("", bucket, "", true, dfltExpiration)
+		uploader, err := NewUploader("", bucket, "", "", true, dfltExpiration)
 		require.NoError(t, err)
 
 		path, err := uploader.Upload(ctx, fpath)
 		require.NoError(t, err)
 
 		assert.Equal(t, cfg.signedURL, path)
+	})
+
+	t.Run("With unsupported predefined ACL", func(t *testing.T) {
+		_, err := NewUploader("", bucket, "", "allUsers", false, dfltExpiration)
+		require.ErrorContains(t, err, "unsupported predefined ACL")
 	})
 }
 

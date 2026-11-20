@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	"github.com/grafana/grafana/pkg/components/imguploader/gcs"
 	"github.com/grafana/grafana/pkg/infra/log"
@@ -65,7 +68,10 @@ func NewImageUploader(cfg *setting.Cfg) (ImageUploader, error) {
 			presignedURLExpiration = defaultS3PresignedURLExpiration
 		}
 
-		acl := "public-read"
+		acl := s3sec.Key("acl").MustString("")
+		if acl != "" && !slices.Contains(types.ObjectCannedACL("").Values(), types.ObjectCannedACL(acl)) {
+			return nil, fmt.Errorf("unsupported external_image_storage.s3 acl %q", acl)
+		}
 
 		if path != "" && path[len(path)-1:] != "/" {
 			path += "/"
@@ -117,6 +123,7 @@ func NewImageUploader(cfg *setting.Cfg) (ImageUploader, error) {
 		keyFile := gcssec.Key("key_file").MustString("")
 		bucketName := gcssec.Key("bucket").MustString("")
 		path := gcssec.Key("path").MustString("")
+		predefinedACL := gcssec.Key("predefined_acl").MustString("")
 		enableSignedURLs := gcssec.Key("enable_signed_urls").MustBool(false)
 		exp := gcssec.Key("signed_url_expiration").MustString("")
 		var suExp time.Duration
@@ -129,7 +136,7 @@ func NewImageUploader(cfg *setting.Cfg) (ImageUploader, error) {
 			suExp = defaultGCSSignedURLExpiration
 		}
 
-		return gcs.NewUploader(keyFile, bucketName, path, enableSignedURLs, suExp)
+		return gcs.NewUploader(keyFile, bucketName, path, predefinedACL, enableSignedURLs, suExp)
 	case "azure_blob":
 		azureBlobSec, err := cfg.Raw.GetSection("external_image_storage.azure_blob")
 		if err != nil {
