@@ -11,6 +11,7 @@ import (
 var (
 	ErrTimerangeMissing     = errors.New("missing timerange")
 	ErrBaseTagLimitExceeded = errutil.BadRequest("annotations.tag-limit-exceeded", errutil.WithPublicMessage("Tags length exceeds the maximum allowed."))
+	ErrDeleteTargetMissing  = errutil.BadRequest("annotations.delete-target-missing", errutil.WithPublicMessage("An annotation ID or a dashboard and panel are required to delete annotations."))
 )
 
 //go:generate mockery --name Repository --structname FakeAnnotationsRepo --inpackage --filename annotations_repository_mock.go

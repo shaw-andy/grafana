@@ -399,6 +399,11 @@ func (hs *HTTPServer) MassDeleteAnnotations(c *contextmodel.ReqContext) response
 		}
 	}
 
+	if deleteParams.ID == 0 && (deleteParams.DashboardUID == "" || deleteParams.PanelID == 0) {
+		err := &AnnotationError{message: "AnnotationId, or both a dashboard and PanelId, are required for mass delete"}
+		return response.Error(http.StatusBadRequest, "bad request data", err)
+	}
+
 	err = hs.annotationsRepo.Delete(c.Req.Context(), deleteParams)
 
 	if err != nil {
@@ -450,6 +455,9 @@ func (hs *HTTPServer) DeleteAnnotationByID(c *contextmodel.ReqContext) response.
 	if err != nil {
 		return response.Error(http.StatusBadRequest, "annotationId is invalid", err)
 	}
+	if annotationID <= 0 {
+		return response.Error(http.StatusBadRequest, "annotationId is invalid", nil)
+	}
 
 	err = hs.annotationsRepo.Delete(c.Req.Context(), &annotations.DeleteParams{
 		OrgID: c.GetOrgID(),
@@ -463,6 +471,11 @@ func (hs *HTTPServer) DeleteAnnotationByID(c *contextmodel.ReqContext) response.
 }
 
 func findAnnotationByID(ctx context.Context, repo annotations.Repository, annotationID int64, user identity.Requester) (*annotations.ItemDTO, response.Response) {
+	// An ID of 0 disables the ID filter and would return an arbitrary annotation.
+	if annotationID <= 0 {
+		return nil, response.Error(http.StatusNotFound, "Annotation not found", nil)
+	}
+
 	query := &annotations.ItemQuery{
 		AnnotationID: annotationID,
 		OrgID:        user.GetOrgID(),
