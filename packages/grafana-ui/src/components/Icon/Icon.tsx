@@ -67,7 +67,8 @@ function useIconWorkaround(name: IconName) {
     // Not loading - use new name immediately (happy path)
     currentNameRef.current = name;
     bufferedNameRef.current = null;
-    isLoadingRef.current = true; // Mark as loading when we accept a new name
+    // Invalid names render nothing and never fire onLoad, so they must not block later name changes.
+    isLoadingRef.current = isIconName(name);
   }
 
   const handleLoad = useCallback(() => {
@@ -95,8 +96,10 @@ export const Icon = memo(
       const styles = useStyles2(getIconStyles);
       const { nameToUse: name, handleLoad } = useIconWorkaround(nameProp);
 
+      // The name becomes part of a same-origin URL, so anything outside the built-in list must never be fetched.
       if (!isIconName(name)) {
         console.warn('Icon component passed an invalid icon name', name);
+        return null;
       }
 
       // handle the deprecated 'fa fa-spinner'

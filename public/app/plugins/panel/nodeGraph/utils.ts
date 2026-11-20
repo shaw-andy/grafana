@@ -5,6 +5,7 @@ import {
   FieldColorModeId,
   type FieldConfig,
   FieldType,
+  isIconName,
   MutableDataFrame,
   NodeGraphDataFrameFieldNames,
 } from '@grafana/data';
@@ -356,6 +357,7 @@ function makeSimpleNodeDatum(name: string, index: number): NodeDatumFromEdge {
 }
 
 function makeNodeDatum(id: string, nodeFields: NodeFields, index: number): NodeDatum {
+  const icon = nodeFields.icon?.values[index];
   return {
     id: id,
     title: nodeFields.title?.values[index] || '',
@@ -366,7 +368,7 @@ function makeNodeDatum(id: string, nodeFields: NodeFields, index: number): NodeD
     secondaryStat: nodeFields.secondaryStat,
     arcSections: nodeFields.arc,
     color: nodeFields.color,
-    icon: nodeFields.icon?.values[index] || '',
+    icon: isIconName(icon) ? icon : undefined,
     nodeRadius: nodeFields.nodeRadius,
     highlighted: nodeFields.highlighted?.values[index] || false,
     x: nodeFields.fixedX?.values[index] ?? undefined,

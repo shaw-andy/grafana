@@ -325,7 +325,7 @@ export function isIconName(iconName: unknown): iconName is IconName {
     return false;
   }
 
-  return iconName in availableIconsIndex;
+  return Object.prototype.hasOwnProperty.call(availableIconsIndex, iconName);
 }
 
 export function toIconName(iconName: string): IconName | undefined {
