@@ -2602,7 +2602,7 @@ Optional extra path inside bucket, useful to apply expiration policies.
 
 Access key, for example, AAAAAAAAAAAAAAAAAAAA.
 
-Access key requires permissions to the S3 bucket for the 's3:PutObject' and 's3:PutObjectAcl' actions.
+Access key requires permissions to the S3 bucket for the 's3:PutObject' action, and for the 's3:PutObjectAcl' action when `enable_public_read_acl` is enabled.
 
 #### `secret_key`
 
@@ -2619,6 +2619,10 @@ Duration for which presigned URLs remain valid. Uses Go duration format (e.g., `
 {{< admonition type="note" >}}
 The maximum expiration depends on your AWS credential type: IAM user credentials support up to 7 days, IAM role or STS credentials are limited to the session duration (typically 1–12 hours), and instance profile credentials are limited to 6 hours.
 {{< /admonition >}}
+
+#### `enable_public_read_acl`
+
+If set to `true` and `enable_presigned_urls` is `false`, Grafana uploads images with the `public-read` canned ACL, so anyone with the image URL can view it. Default is `false`, which uploads images without an ACL. In that case, the returned URL only works for clients that the bucket policy allows to read the object.
 
 <hr>
 
@@ -2650,8 +2654,7 @@ Otherwise, the filename is appended to the path part of the URL, leaving any que
 Optional path to JSON key file associated with a Google service account to authenticate and authorize. If no value is provided it tries to use the [application default credentials](https://cloud.google.com/docs/authentication/production#finding_credentials_automatically).
 Service Account keys can be created and downloaded from https://console.developers.google.com/permissions/serviceaccounts.
 
-Service Account should have "Storage Object Writer" role. The access control model of the bucket needs to be "Set object-level and bucket-level permissions".
-Grafana makes the images public readable when signed URLs aren't enabled.
+Service Account should have "Storage Object Writer" role. If you enable `enable_public_read_acl`, the access control model of the bucket needs to be "Set object-level and bucket-level permissions".
 
 #### `bucket`
 
@@ -2669,6 +2672,10 @@ the image uploaded to Google Cloud Storage.
 #### `signed_url_expiration`
 
 Sets the signed URL expiration, which defaults to seven days.
+
+#### `enable_public_read_acl`
+
+If set to `true` and `enable_signed_urls` is `false`, Grafana uploads images with the `publicRead` predefined ACL, so anyone with the image URL can view it. Default is `false`, which keeps uploaded objects private. In that case, the returned URL only works for clients that the bucket's IAM policy allows to read the object.
 
 ### `[external_image_storage.azure_blob]`
 
