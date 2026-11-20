@@ -8,8 +8,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metainternalversion "k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apiserver/pkg/registry/rest"
 	"k8s.io/client-go/dynamic"
 
@@ -207,7 +209,7 @@ func (s *cascadeDeleteStorage) cascadeDelete(ctx context.Context, user identity.
 	}
 
 	// Remove the dashboards contained directly in this folder before deleting the folder itself.
-	if err := s.deleteDashboardsInFolder(ctx, namespace, name, options); err != nil {
+	if err := s.deleteDashboardsInFolder(ctx, user, namespace, name, options); err != nil {
 		return nil, false, err
 	}
 
@@ -243,7 +245,12 @@ func (s *cascadeDeleteStorage) cascadeDelete(ctx context.Context, user identity.
 
 // deleteDashboardsInFolder deletes every dashboard in folderUID via the dashboard apiserver (so its
 // hooks run). A NotFound is treated as already-done, keeping the sweep idempotent and resumable.
-func (s *cascadeDeleteStorage) deleteDashboardsInFolder(ctx context.Context, namespace, folderUID string, options *metav1.DeleteOptions) error {
+//
+// The client acts as the service identity, so the dashboard apiserver does not authorize the
+// requester. Every listed dashboard is therefore authorized for user before any is deleted, and each
+// delete is pinned to the uid/resourceVersion that was authorized so a dashboard replaced or moved in
+// between fails with a conflict instead of being deleted unchecked.
+func (s *cascadeDeleteStorage) deleteDashboardsInFolder(ctx context.Context, user identity.Requester, namespace, folderUID string, options *metav1.DeleteOptions) error {
 	svc, err := s.dashboardClient(ctx)
 	if err != nil {
 		return fmt.Errorf("get dashboard client: %w", err)
@@ -264,10 +271,79 @@ func (s *cascadeDeleteStorage) deleteDashboardsInFolder(ctx context.Context, nam
 		return err
 	}
 
+	authorized := make([]authorizedDashboard, 0, len(names))
 	for _, name := range names {
-		if err := client.Delete(ctx, name, *dashOpts); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("delete dashboard %q: %w", name, err)
+		obj, err := client.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			continue
 		}
+		if err != nil {
+			return fmt.Errorf("get dashboard %q: %w", name, err)
+		}
+		if err := s.checkDashboardDeleteAccess(ctx, user, namespace, folderUID, obj); err != nil {
+			return err
+		}
+		authorized = append(authorized, authorizedDashboard{name: name, uid: obj.GetUID(), resourceVersion: obj.GetResourceVersion()})
+	}
+
+	for _, d := range authorized {
+		opts := *dashOpts
+		opts.Preconditions = d.preconditions()
+		if err := client.Delete(ctx, d.name, opts); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete dashboard %q: %w", d.name, err)
+		}
+	}
+	return nil
+}
+
+// authorizedDashboard is a dashboard the requester was authorized to delete, identified by the
+// object version that was checked.
+type authorizedDashboard struct {
+	name            string
+	uid             types.UID
+	resourceVersion string
+}
+
+func (d authorizedDashboard) preconditions() *metav1.Preconditions {
+	pre := &metav1.Preconditions{}
+	if d.uid != "" {
+		pre.UID = &d.uid
+	}
+	if d.resourceVersion != "" {
+		pre.ResourceVersion = &d.resourceVersion
+	}
+	if pre.UID == nil && pre.ResourceVersion == nil {
+		return nil
+	}
+	return pre
+}
+
+// checkDashboardDeleteAccess denies the cascade unless user may delete this dashboard, evaluated by
+// name in the folder the stored object is actually in. A folder-scope check is not enough: dashboards
+// carry their own permissions. The denial names the folder, not the dashboard, so the names of
+// dashboards hidden from the requester are not disclosed. No-op when no access client is wired (e.g.
+// tests).
+func (s *cascadeDeleteStorage) checkDashboardDeleteAccess(ctx context.Context, user identity.Requester, namespace, folderUID string, obj *unstructured.Unstructured) error {
+	if s.accessClient == nil {
+		return nil
+	}
+	meta, err := utils.MetaAccessor(obj)
+	if err != nil {
+		return err
+	}
+	dashGVR := dashv1.DashboardResourceInfo.GroupVersionResource()
+	resp, err := s.accessClient.Check(ctx, user, authlib.CheckRequest{
+		Namespace: namespace,
+		Verb:      utils.VerbDelete,
+		Group:     dashGVR.Group,
+		Resource:  dashGVR.Resource,
+		Name:      obj.GetName(),
+	}, meta.GetFolder())
+	if err != nil {
+		return err
+	}
+	if !resp.Allowed {
+		return apierrors.NewForbidden(foldersv1.FolderResourceInfo.GroupResource(), folderUID, folder.ErrAccessDenied)
 	}
 	return nil
 }
