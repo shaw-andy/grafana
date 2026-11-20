@@ -118,6 +118,33 @@ func TestS3Upload(t *testing.T) {
 		assert.Equal(t, publicURL, url)
 	})
 
+	t.Run("without presigned URLs and without ACL omits ACL", func(t *testing.T) {
+		ctx := context.Background()
+		ctrl := gomock.NewController(t)
+
+		m := mock_s3ifaces.NewMockS3Client(ctrl)
+		m.EXPECT().
+			Upload(gomock.Eq(ctx), gomock.Any()).
+			DoAndReturn(func(_ context.Context, input *s3.PutObjectInput) (*manager.UploadOutput, error) {
+				assert.Equal(t, bucket, aws.ToString(input.Bucket))
+				assert.Empty(t, input.ACL, "ACL should not be set unless public read is enabled")
+				return &manager.UploadOutput{Location: publicURL}, nil
+			})
+
+		stubS3Client(t, m)
+
+		uploader := NewS3Uploader(S3UploaderOptions{
+			Region:              region,
+			Bucket:              bucket,
+			Path:                imgPath,
+			EnablePresignedURLs: false,
+		})
+
+		url, err := uploader.Upload(ctx, fpath)
+		require.NoError(t, err)
+		assert.Equal(t, publicURL, url)
+	})
+
 	t.Run("with presigned URLs omits ACL and returns presigned URL", func(t *testing.T) {
 		ctx := context.Background()
 		ctrl := gomock.NewController(t)

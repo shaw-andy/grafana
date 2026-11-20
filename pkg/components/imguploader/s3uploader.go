@@ -115,7 +115,7 @@ func (u *S3Uploader) Upload(ctx context.Context, imageDiskPath string) (string, 
 		Body:        file,
 		ContentType: aws.String("image/png"),
 	}
-	if !u.opts.EnablePresignedURLs {
+	if !u.opts.EnablePresignedURLs && u.opts.ACL != "" {
 		uploadInput.ACL = types.ObjectCannedACL(u.opts.ACL)
 	}
 

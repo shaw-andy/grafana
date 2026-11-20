@@ -65,7 +65,10 @@ func NewImageUploader(cfg *setting.Cfg) (ImageUploader, error) {
 			presignedURLExpiration = defaultS3PresignedURLExpiration
 		}
 
-		acl := "public-read"
+		acl := ""
+		if s3sec.Key("enable_public_read_acl").MustBool(false) {
+			acl = "public-read"
+		}
 
 		if path != "" && path[len(path)-1:] != "/" {
 			path += "/"
@@ -129,7 +132,9 @@ func NewImageUploader(cfg *setting.Cfg) (ImageUploader, error) {
 			suExp = defaultGCSSignedURLExpiration
 		}
 
-		return gcs.NewUploader(keyFile, bucketName, path, enableSignedURLs, suExp)
+		enablePublicReadACL := gcssec.Key("enable_public_read_acl").MustBool(false)
+
+		return gcs.NewUploader(keyFile, bucketName, path, enableSignedURLs, suExp, enablePublicReadACL)
 	case "azure_blob":
 		azureBlobSec, err := cfg.Raw.GetSection("external_image_storage.azure_blob")
 		if err != nil {

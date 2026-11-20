@@ -106,8 +106,34 @@ func TestImageUploaderFactory(t *testing.T) {
 			original, ok := uploader.(*S3Uploader)
 			require.True(t, ok)
 			require.False(t, original.opts.EnablePresignedURLs)
-			require.Equal(t, "public-read", original.opts.ACL)
+			require.Empty(t, original.opts.ACL)
 			require.Equal(t, 7*24*time.Hour, original.opts.PresignedURLExpiration)
+		})
+
+		t.Run("S3ImageUploader with public read ACL enabled", func(t *testing.T) {
+			cfg := setting.NewCfg()
+			err := cfg.Load(setting.CommandLineArgs{
+				HomePath: "../../../",
+			})
+			require.NoError(t, err)
+
+			cfg.ImageUploadProvider = "s3"
+
+			s3sec, err := cfg.Raw.GetSection("external_image_storage.s3")
+			require.NoError(t, err)
+			_, err = s3sec.NewKey("bucket", "test-bucket")
+			require.NoError(t, err)
+			_, err = s3sec.NewKey("region", "us-east-1")
+			require.NoError(t, err)
+			_, err = s3sec.NewKey("enable_public_read_acl", "true")
+			require.NoError(t, err)
+
+			uploader, err := NewImageUploader(cfg)
+			require.NoError(t, err)
+
+			original, ok := uploader.(*S3Uploader)
+			require.True(t, ok)
+			require.Equal(t, "public-read", original.opts.ACL)
 		})
 
 		t.Run("S3ImageUploader with presigned URLs enabled and custom expiration", func(t *testing.T) {
@@ -136,7 +162,7 @@ func TestImageUploaderFactory(t *testing.T) {
 			original, ok := uploader.(*S3Uploader)
 			require.True(t, ok)
 			require.True(t, original.opts.EnablePresignedURLs)
-			require.Equal(t, "public-read", original.opts.ACL)
+			require.Empty(t, original.opts.ACL)
 			require.Equal(t, 48*time.Hour, original.opts.PresignedURLExpiration)
 		})
 
