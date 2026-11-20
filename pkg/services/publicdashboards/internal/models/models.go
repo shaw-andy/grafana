@@ -94,6 +94,9 @@ func (pd PublicDashboard) TableName() string {
 	return "dashboard_public"
 }
 
+// MaxPublicDashboardListPageSize bounds how many public dashboards a single list request loads.
+const MaxPublicDashboardListPageSize = 1000
+
 type PublicDashboardListQuery struct {
 	OrgID  int64
 	Query  string
