@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 
 	cloudwatchLogsTypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
@@ -87,13 +88,11 @@ func logsAnomaliesResultsToDataframes(response *cloudwatchlogs.ListAnomaliesOutp
 	logTrends := make([]*json.RawMessage, n)
 
 	for i, anomaly := range response.Anomalies {
-		anomalyArns[i] = *anomaly.AnomalyDetectorArn
-		descriptions[i] = *anomaly.Description
-		suppressedStatus[i] = *anomaly.Suppressed
-		priorities[i] = *anomaly.Priority
-		if anomaly.PatternString != nil {
-			patterns[i] = *anomaly.PatternString
-		}
+		anomalyArns[i] = aws.ToString(anomaly.AnomalyDetectorArn)
+		descriptions[i] = aws.ToString(anomaly.Description)
+		suppressedStatus[i] = aws.ToBool(anomaly.Suppressed)
+		priorities[i] = aws.ToString(anomaly.Priority)
+		patterns[i] = aws.ToString(anomaly.PatternString)
 		statuses[i] = string(anomaly.State)
 		logGroupArnLists[i] = strings.Join(anomaly.LogGroupArnList, ",")
 
