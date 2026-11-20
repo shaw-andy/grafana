@@ -295,6 +295,9 @@ func validateLeaf(n *searchv0.WhereNode, key string, fs *fieldSet, p *field.Path
 		if strings.TrimSpace(t.Value) == "" {
 			errs = append(errs, field.Required(tp.Child("value"), "text value is required"))
 		}
+		if len(t.Value) > resource.MaxSearchQueryLength {
+			errs = append(errs, field.TooLong(tp.Child("value"), t.Value, resource.MaxSearchQueryLength))
+		}
 		if t.Boost != nil {
 			errs = append(errs, field.Forbidden(tp.Child("boost"), "boost is not supported in v1"))
 		}
@@ -643,7 +646,8 @@ func regexRequirement(r *searchv0.RegexPredicate) *resourcepb.Requirement {
 }
 
 func applyText(req *resourcepb.ResourceSearchRequest, t *searchv0.TextPredicate) {
-	req.Query = t.Value
+	// The only error is a value over the length limit, which validateLeaf rejects.
+	req.Query, _ = resource.NormalizeSearchQuery(t.Value)
 	fields := t.Fields
 	if len(fields) == 0 {
 		fields = defaultTextFields

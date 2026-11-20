@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -280,10 +279,11 @@ func (s *SearchHandler) DoSearch(w http.ResponseWriter, r *http.Request) {
 		limit = common.DefaultListLimit
 	}
 
-	// Escape characters that are used by bleve wildcard search to be literal strings.
-	rawQuery := escapeBleveQuery(queryParams.Get("query"))
-
-	searchQuery := fmt.Sprintf(`*%s*`, rawQuery)
+	searchQuery, err := resource.ContainsSearchQuery(queryParams.Get("query"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	userGvr := iamv0.UserResourceInfo.GroupResource()
 	request := &resourcepb.ResourceSearchRequest{
@@ -552,10 +552,4 @@ func newUserSearchResponse(result *resourcepb.ResourceSearchResponse, hitCount i
 	sr.MaxScore = result.MaxScore
 	sr.Hits = make([]iamv0.GetSearchUsersUserHit, 0, hitCount)
 	return sr
-}
-
-var bleveEscapeRegex = regexp.MustCompile(`([\\*?])`)
-
-func escapeBleveQuery(query string) string {
-	return bleveEscapeRegex.ReplaceAllString(query, `\$1`)
 }

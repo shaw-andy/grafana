@@ -2677,7 +2677,10 @@ func (b *bleveIndex) toBleveSearchRequest(ctx context.Context, req *resourcepb.R
 	if errResult != nil {
 		return nil, errResult
 	}
-	textQuery := b.buildTextQuery(searchrequest, req)
+	textQuery, errResult := b.buildTextQuery(searchrequest, req)
+	if errResult != nil {
+		return nil, errResult
+	}
 	expirationThreshold := int64(0)
 	if req.IsDeleted {
 		// An index that does not keep deleted documents cannot distinguish an empty
@@ -3192,7 +3195,7 @@ func (b *bleveIndex) filterQueries(req *resourcepb.ResourceSearchRequest) ([]que
 // buildTextQuery builds the free-text (or wildcard) query clause from req.Query,
 // returning nil when the query is too short to search. It may append
 // SEARCH_FIELD_SCORE to searchrequest.Fields for free-text relevance scoring.
-func (b *bleveIndex) buildTextQuery(searchrequest *bleve.SearchRequest, req *resourcepb.ResourceSearchRequest) query.Query {
+func (b *bleveIndex) buildTextQuery(searchrequest *bleve.SearchRequest, req *resourcepb.ResourceSearchRequest) (query.Query, *resourcepb.ErrorResult) {
 	// Queries shorter than NGRAM_MIN_TOKEN can't hit the title_ngram index. Without this
 	// rewrite, 1-char queries fell through to MatchAllQuery and 2-char queries usually returned
 	// nothing. Treat them as a prefix wildcard ("f" → "f*") so search-as-you-type matches by
@@ -3202,8 +3205,19 @@ func (b *bleveIndex) buildTextQuery(searchrequest *bleve.SearchRequest, req *res
 		req.Query = q + "*"
 	}
 
+	// Bleve compiles every '*' and '?' of a wildcard query into the automaton it
+	// scans the term dictionary with, so only a bounded prefix, suffix or
+	// contains pattern is allowed through.
+	if strings.Contains(req.Query, "*") {
+		pattern, err := resource.NormalizeSearchQuery(req.Query)
+		if err != nil {
+			return nil, resource.NewBadRequestError(err.Error())
+		}
+		req.Query = pattern
+	}
+
 	if len(req.Query) <= 1 {
-		return nil
+		return nil, nil
 	}
 
 	disjoin := bleve.NewDisjunctionQuery()
@@ -3220,7 +3234,7 @@ func (b *bleveIndex) buildTextQuery(searchrequest *bleve.SearchRequest, req *res
 		} else {
 			addWildcardQueries(disjoin, req.Query, resource.SEARCH_FIELD_TITLE)
 		}
-		return disjoin
+		return disjoin, nil
 	}
 
 	// Free-text search uses explicit query fields so each title field can use the query type that matches its analyzer.
@@ -3259,7 +3273,7 @@ func (b *bleveIndex) buildTextQuery(searchrequest *bleve.SearchRequest, req *res
 			disjoin.AddQuery(q)
 		}
 	}
-	return disjoin
+	return disjoin, nil
 }
 
 // textQueryKindFor reports how a physical index field has to be queried.
@@ -3929,10 +3943,17 @@ func fieldFilterQuery(key string, value string) query.Query {
 	if value == "*" {
 		return bleve.NewMatchAllQuery()
 	}
-	if strings.Contains(value, "*") {
+	if isBoundedWildcard(value) {
 		return fieldWildcardQuery(key, value)
 	}
 	return fieldMatchQuery(key, value)
+}
+
+// isBoundedWildcard reports whether a filter value may run as a Bleve wildcard.
+// Bleve compiles every '*' and '?' into the automaton it scans the term
+// dictionary with, so any other value containing '*' is matched literally.
+func isBoundedWildcard(value string) bool {
+	return strings.Contains(value, "*") && resource.ValidateWildcardPattern(value) == nil
 }
 
 // titleFieldFilterQuery expands the public title filter across the internal title fields.
@@ -3956,7 +3977,7 @@ func titleFieldTokenQuery(value string) query.Query {
 	if value == "*" {
 		return bleve.NewMatchAllQuery()
 	}
-	if strings.Contains(value, "*") {
+	if isBoundedWildcard(value) {
 		return fieldWildcardQuery(resource.SEARCH_FIELD_TITLE, value)
 	}
 	if delimiter, ok := firstTermSeparator(value); ok {

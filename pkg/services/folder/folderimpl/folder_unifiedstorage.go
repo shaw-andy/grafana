@@ -203,11 +203,13 @@ func (s *Service) SearchFolders(ctx context.Context, query folder.SearchFoldersQ
 	}
 
 	if query.Title != "" {
-		// allow wildcard search
-		request.Query = "*" + strings.ToLower(query.Title) + "*"
-		// or perform exact match if requested
+		titleQuery, err := resource.ContainsSearchQuery(strings.ToLower(query.Title))
+		if err != nil {
+			return nil, folder.ErrBadRequest.Errorf("%s", err)
+		}
+		request.Query = titleQuery
 		if query.TitleExactMatch {
-			request.Query = query.Title
+			request.Query = resource.StripSearchWildcards(query.Title)
 		}
 
 		// if using query, you need to specify the fields you want. This request asks for

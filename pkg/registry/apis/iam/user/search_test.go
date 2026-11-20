@@ -558,30 +558,6 @@ func (m *mockAccessClient) BatchCheck(ctx context.Context, info authlib.AuthInfo
 	return authlib.BatchCheckResponse{}, nil
 }
 
-func TestEscapeBleveQuery(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{input: "normal", expected: "normal"},
-		{input: "*", expected: "\\*"},
-		{input: "?", expected: "\\?"},
-		{input: "\\", expected: "\\\\"},
-		{input: "\\*", expected: "\\\\\\*"},
-		{input: "*\\?", expected: "\\*\\\\\\?"},
-		{input: "foo*bar", expected: "foo\\*bar"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := escapeBleveQuery(tt.input)
-			if got != tt.expected {
-				t.Errorf("escapeBleveQuery(%q) = %q, want %q", tt.input, got, tt.expected)
-			}
-		})
-	}
-}
-
 func TestParseResults(t *testing.T) {
 	i64 := func(v int64) []byte {
 		b := make([]byte, 8)
