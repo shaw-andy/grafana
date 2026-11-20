@@ -97,14 +97,14 @@ export async function getDebugDashboard(panel: VizPanel, rand: Randomize, timeRa
   const html = `<table width="100%">
     <tr>
       <th width="2%">Panel</th>
-      <td >${info.panelType} @ ${saveModel.pluginVersion ?? grafanaVersion}</td>
+      <td >${escapeDebugValue(info.panelType)} @ ${escapeDebugValue(saveModel.pluginVersion ?? grafanaVersion)}</td>
     </tr>
     <tr>
       <th>Queries</th>
       <td>${queries
         .map((t) => {
           const ds = t.datasource ?? dsref;
-          return `${t.refId}[${ds?.type}]`;
+          return `${escapeDebugValue(t.refId)}[${escapeDebugValue(ds?.type)}]`;
         })
         .join(', ')}</td>
     </tr>
@@ -203,8 +203,14 @@ function getTransformsRow(saveModel: any): string {
   }
   return `<tr>
       <th>Transform</th>
-      <td>${saveModel.transformations.map((t: DataTransformerConfig) => t.id).join(', ')}</td>
+      <td>${saveModel.transformations.map((t: DataTransformerConfig) => escapeDebugValue(t.id)).join(', ')}</td>
   </tr>`;
+}
+
+// The text panel interpolates template variables and Handlebars before it sanitizes,
+// so saved panel values must not keep any markup or template syntax.
+function escapeDebugValue(value: unknown): string {
+  return String(value).replace(/[^\w .-]/gu, (c) => `&#${c.codePointAt(0)};`);
 }
 
 function getDataRow(data: PanelData, frames: DataFrameJSON[]): string {
