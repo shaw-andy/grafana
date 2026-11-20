@@ -182,14 +182,6 @@ func (s *DashboardStarsStorage) write(ctx context.Context, obj *collections.Star
 	}
 
 	stars := getStars(obj, schema.GroupKind{Group: "dashboard.grafana.app", Kind: "Dashboard"})
-	if len(stars) == 0 {
-		err = s.stars.DeleteByUser(ctx, user.ID)
-		return &collections.Stars{ObjectMeta: metav1.ObjectMeta{
-			Name:              obj.Name,
-			Namespace:         obj.Namespace,
-			DeletionTimestamp: new(metav1.Now()),
-		}}, err
-	}
 
 	current, _, err := s.sql.getDashboardStars(ctx, ns.OrgID, owner.Identifier)
 	if err != nil {
@@ -237,6 +229,14 @@ func (s *DashboardStarsStorage) write(ctx context.Context, obj *collections.Star
 			return nil, err
 		}
 		changed = true
+	}
+
+	if len(stars) == 0 {
+		return &collections.Stars{ObjectMeta: metav1.ObjectMeta{
+			Name:              obj.Name,
+			Namespace:         obj.Namespace,
+			DeletionTimestamp: new(metav1.Now()),
+		}}, nil
 	}
 
 	if changed {
