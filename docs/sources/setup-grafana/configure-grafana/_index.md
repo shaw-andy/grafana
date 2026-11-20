@@ -2602,15 +2602,25 @@ Optional extra path inside bucket, useful to apply expiration policies.
 
 Access key, for example, AAAAAAAAAAAAAAAAAAAA.
 
-Access key requires permissions to the S3 bucket for the 's3:PutObject' and 's3:PutObjectAcl' actions.
+Access key requires permissions to the S3 bucket for the 's3:PutObject' action, and for the 's3:PutObjectAcl' action when you set `acl`.
 
 #### `secret_key`
 
 Secret key, for example, AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.
 
+#### `acl`
+
+Optional [canned ACL](https://docs.aws.amazon.com/AmazonS3/latest/userguide/acl-overview.html#canned-acl) applied to uploaded images when `enable_presigned_urls` is `false`, for example `bucket-owner-full-control` or `public-read`. Default is empty, which uploads images without an ACL header so they stay private.
+
+Grafana returns the unsigned object URL only when `acl` is `public-read` or `public-read-write` and `enable_presigned_urls` is `false`. Anyone with that URL can read the image without credentials for as long as the object exists. In every other case, Grafana returns a presigned URL that expires after `presigned_url_expiration`.
+
+{{< admonition type="note" >}}
+Earlier versions of Grafana always uploaded images with the `public-read` ACL when `enable_presigned_urls` was `false`. To keep that behavior, set `acl = public-read`.
+{{< /admonition >}}
+
 #### `enable_presigned_urls`
 
-Generate presigned URLs for uploaded images instead of requiring publicly readable objects. When enabled, objects are uploaded without an ACL header, making this compatible with S3 buckets that have `ObjectOwnership` set to `BucketOwnerEnforced` (ACLs disabled). Default is `false`.
+Always generate presigned URLs for uploaded images, even when `acl` is public. When enabled, objects are uploaded without an ACL header, making this compatible with S3 buckets that have `ObjectOwnership` set to `BucketOwnerEnforced` (ACLs disabled). Default is `false`.
 
 #### `presigned_url_expiration`
 
@@ -2650,8 +2660,7 @@ Otherwise, the filename is appended to the path part of the URL, leaving any que
 Optional path to JSON key file associated with a Google service account to authenticate and authorize. If no value is provided it tries to use the [application default credentials](https://cloud.google.com/docs/authentication/production#finding_credentials_automatically).
 Service Account keys can be created and downloaded from https://console.developers.google.com/permissions/serviceaccounts.
 
-Service Account should have "Storage Object Writer" role. The access control model of the bucket needs to be "Set object-level and bucket-level permissions".
-Grafana makes the images public readable when signed URLs aren't enabled.
+Service Account should have "Storage Object Writer" role. When you set `acl`, the access control model of the bucket needs to be "Set object-level and bucket-level permissions".
 
 #### `bucket`
 
@@ -2661,10 +2670,20 @@ Bucket Name on Google Cloud Storage.
 
 Optional extra path inside bucket.
 
+#### `acl`
+
+Optional [predefined ACL](https://cloud.google.com/storage/docs/access-control/lists#predefined-acl) applied to uploaded images when `enable_signed_urls` is `false`, for example `bucketOwnerFullControl` or `publicRead`. Default is empty, which uploads images with the bucket's default object ACL.
+
+Grafana returns the unsigned object URL only when `acl` is `publicRead` and `enable_signed_urls` is `false`. Anyone with that URL can read the image without credentials for as long as the object exists. In every other case, Grafana creates a [signed URL](https://cloud.google.com/storage/docs/access-control/signed-urls) that expires after `signed_url_expiration`. Signing requires a service account private key, either from `key_file` or from application default credentials that include one.
+
+{{< admonition type="note" >}}
+Earlier versions of Grafana always made images publicly readable when `enable_signed_urls` was `false`. To keep that behavior, set `acl = publicRead`.
+{{< /admonition >}}
+
 #### `enable_signed_urls`
 
-If set to true, Grafana creates a [signed URL](https://cloud.google.com/storage/docs/access-control/signed-urls) for
-the image uploaded to Google Cloud Storage.
+If set to true, Grafana always creates a [signed URL](https://cloud.google.com/storage/docs/access-control/signed-urls) for
+the image uploaded to Google Cloud Storage, even when `acl` is `publicRead`, and uploads the image without an ACL.
 
 #### `signed_url_expiration`
 

@@ -115,7 +115,7 @@ func (u *S3Uploader) Upload(ctx context.Context, imageDiskPath string) (string, 
 		Body:        file,
 		ContentType: aws.String("image/png"),
 	}
-	if !u.opts.EnablePresignedURLs {
+	if !u.opts.EnablePresignedURLs && u.opts.ACL != "" {
 		uploadInput.ACL = types.ObjectCannedACL(u.opts.ACL)
 	}
 
@@ -124,11 +124,22 @@ func (u *S3Uploader) Upload(ctx context.Context, imageDiskPath string) (string, 
 		return "", err
 	}
 
-	if u.opts.EnablePresignedURLs {
-		return s3Client.PresignGetObject(ctx, u.opts.Bucket, key, u.opts.PresignedURLExpiration)
+	// The bare object URL is only readable by recipients when the object was
+	// explicitly made public; every other object needs a presigned URL.
+	if !u.opts.EnablePresignedURLs && isPublicReadACL(u.opts.ACL) {
+		return result.Location, nil
 	}
 
-	return result.Location, nil
+	return s3Client.PresignGetObject(ctx, u.opts.Bucket, key, u.opts.PresignedURLExpiration)
+}
+
+func isPublicReadACL(acl string) bool {
+	switch types.ObjectCannedACL(acl) {
+	case types.ObjectCannedACLPublicRead, types.ObjectCannedACLPublicReadWrite:
+		return true
+	default:
+		return false
+	}
 }
 
 // normalizeEndpoint ensures a custom endpoint carries a scheme.

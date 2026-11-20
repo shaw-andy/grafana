@@ -118,11 +118,11 @@ func TestUploadToGCS_DefaultCredentials(t *testing.T) {
 	err := os.WriteFile(fpath, content, 0600)
 	require.NoError(t, err)
 
-	t.Run("Without signed URL", func(t *testing.T) {
+	t.Run("Without signed URL and with publicRead ACL", func(t *testing.T) {
 		ctx := context.Background()
 		mockSDK(ctx, t, content, bucket, false)
 
-		uploader, err := NewUploader("", bucket, "", false, dfltExpiration)
+		uploader, err := NewUploader("", bucket, "", "publicRead", false, dfltExpiration)
 		require.NoError(t, err)
 
 		path, err := uploader.Upload(ctx, fpath)
@@ -131,11 +131,11 @@ func TestUploadToGCS_DefaultCredentials(t *testing.T) {
 		assert.Regexp(t, fmt.Sprintf(`^https://storage.googleapis.com/%s/[^/]+\.png$`, bucket), path)
 	})
 
-	t.Run("With signed URL", func(t *testing.T) {
+	t.Run("Without signed URL or ACL", func(t *testing.T) {
 		ctx := context.Background()
 		cfg := mockSDK(ctx, t, content, bucket, true)
 
-		uploader, err := NewUploader("", bucket, "", true, dfltExpiration)
+		uploader, err := NewUploader("", bucket, "", "", false, dfltExpiration)
 		require.NoError(t, err)
 
 		path, err := uploader.Upload(ctx, fpath)
@@ -143,6 +143,24 @@ func TestUploadToGCS_DefaultCredentials(t *testing.T) {
 
 		assert.Equal(t, cfg.signedURL, path)
 	})
+
+	t.Run("With signed URL", func(t *testing.T) {
+		ctx := context.Background()
+		cfg := mockSDK(ctx, t, content, bucket, true)
+
+		uploader, err := NewUploader("", bucket, "", "publicRead", true, dfltExpiration)
+		require.NoError(t, err)
+
+		path, err := uploader.Upload(ctx, fpath)
+		require.NoError(t, err)
+
+		assert.Equal(t, cfg.signedURL, path)
+	})
+}
+
+func TestNewUploader_InvalidACL(t *testing.T) {
+	_, err := NewUploader("", "test", "", "public-read", false, dfltExpiration)
+	require.ErrorContains(t, err, "invalid predefined ACL")
 }
 
 type signedURLOptsMatcher struct {
