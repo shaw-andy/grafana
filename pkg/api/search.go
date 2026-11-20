@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/dashboards/dashboardaccess"
 	"github.com/grafana/grafana/pkg/services/search"
 	"github.com/grafana/grafana/pkg/services/search/model"
+	"github.com/grafana/grafana/pkg/storage/unified/resource"
 	"github.com/grafana/grafana/pkg/util"
 )
 
@@ -42,6 +44,10 @@ func (hs *HTTPServer) Search(c *contextmodel.ReqContext) response.Response {
 
 	if limit > 5000 {
 		return response.Error(http.StatusUnprocessableEntity, "Limit is above maximum allowed (5000), use page parameter to access hits beyond limit", nil)
+	}
+
+	if len(query) > resource.MaxSearchTextLength {
+		return response.Error(http.StatusUnprocessableEntity, fmt.Sprintf("Query is longer than the maximum allowed (%d characters)", resource.MaxSearchTextLength), nil)
 	}
 
 	if c.Query("permission") == "Edit" {

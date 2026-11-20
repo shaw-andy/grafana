@@ -2056,8 +2056,11 @@ func (dr *DashboardServiceImpl) buildDashboardSearchRequest(query *dashboards.Fi
 	}
 
 	if query.Title != "" {
-		// allow wildcard search
-		request.Query = "*" + strings.ToLower(query.Title) + "*"
+		titleQuery, err := resource.ContainsSearchQuery(strings.ToLower(query.Title))
+		if err != nil {
+			return nil, dashboards.ErrDashboardSearchQueryTooLong
+		}
+		request.Query = titleQuery
 	}
 
 	if len(query.Tags) > 0 {

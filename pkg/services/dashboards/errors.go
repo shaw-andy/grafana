@@ -56,6 +56,10 @@ var (
 		Reason:     "message too long, max 500 characters",
 		StatusCode: 400,
 	}
+	ErrDashboardSearchQueryTooLong = dashboardaccess.DashboardErr{
+		Reason:     "search query too long, max 254 characters",
+		StatusCode: 400,
+	}
 	ErrDashboardTagTooLong = dashboardaccess.DashboardErr{
 		Reason:     "dashboard tag too long, max 50 characters",
 		StatusCode: 400,

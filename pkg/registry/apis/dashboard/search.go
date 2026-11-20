@@ -993,9 +993,11 @@ func convertHttpSearchRequestToResourceSearchRequest(queryParams url.Values, use
 		})
 	}
 
-	if searchRequest.Query == "*" {
-		searchRequest.Query = "" // will match everything
-	} else if searchRequest.Query != "" {
+	searchRequest.Query, err = resource.NormalizeSearchQuery(searchRequest.Query)
+	if err != nil {
+		return nil, apierrors.NewBadRequest(err.Error())
+	}
+	if searchRequest.Query != "" {
 		// Name the title field once. The server picks which stored form of the
 		// title to query, and how to weight each one.
 		searchRequest.QueryFields = []*resourcepb.ResourceSearchRequest_QueryField{

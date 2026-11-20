@@ -295,6 +295,12 @@ func (s *SearchHandler) DoTeamSearch(w http.ResponseWriter, r *http.Request) {
 		limit = common.DefaultListLimit
 	}
 
+	searchQuery, err := resource.NormalizeSearchQuery(queryParams.Get("query"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	searchRequest := &resourcepb.ResourceSearchRequest{
 		Options: &resourcepb.ListOptions{
 			Key: &resourcepb.ResourceKey{
@@ -303,7 +309,7 @@ func (s *SearchHandler) DoTeamSearch(w http.ResponseWriter, r *http.Request) {
 				Namespace: requester.GetNamespace(),
 			},
 		},
-		Query:        queryParams.Get("query"),
+		Query:        searchQuery,
 		Limit:        int64(limit),
 		Offset:       int64(offset),
 		Page:         int64(page),
