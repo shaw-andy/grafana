@@ -1,3 +1,4 @@
+import { PathValidationError } from '@grafana/data';
 import { t } from '@grafana/i18n';
 import { type AlertmanagerAlert, type Matcher } from 'app/plugins/datasource/alertmanager/types';
 import { type RuleIdentifier, type RuleNamespace, type RulerDataSourceConfig } from 'app/types/unified-alerting';
@@ -403,11 +404,23 @@ export const alertRuleApi = alertingApi.injectEndpoints({
       keepUnusedDataFor: 0,
     }),
     exportMuteTiming: build.query<string, { format: ExportFormats; muteTiming: string }>({
-      query: ({ format, muteTiming }) => ({
-        url: `/api/v1/provisioning/mute-timings/${muteTiming}/export/`,
-        params: { format: format },
-        responseType: 'text',
-      }),
+      async queryFn({ format, muteTiming }, _api, _extraOptions, baseQuery) {
+        const nameSegment = encodeURIComponent(muteTiming);
+        // Browsers resolve "." and ".." as dot-segments even after encoding, so these names cannot be addressed by path.
+        if (nameSegment === '.' || nameSegment === '..') {
+          return { error: new PathValidationError() };
+        }
+
+        const result = await baseQuery({
+          url: `/api/v1/provisioning/mute-timings/${nameSegment}/export/`,
+          params: { format: format },
+          responseType: 'text',
+        });
+        if (result.error) {
+          return { error: result.error };
+        }
+        return { data: String(result.data) };
+      },
       keepUnusedDataFor: 0,
     }),
     getDeletedRules: build.query<Array<RulerGrafanaRuleDTO<GrafanaRuleDefinition>>, {}>({
