@@ -89,3 +89,33 @@ func setBodyContent(req *http.Request, route *plugins.Route, data templateData) 
 
 	return nil
 }
+
+// maxLoggedRequestBodyBytes bounds how much of a proxied request body is
+// buffered in memory and written to the log when dataproxy logging is enabled.
+const maxLoggedRequestBodyBytes = 64 * 1024
+
+type prefixedReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
+// peekRequestBodyForLog reads at most maxLoggedRequestBodyBytes from the
+// request body and returns them for logging. The body is replaced with one that
+// yields the peeked prefix followed by the unread remainder, so the full body
+// is still streamed to the upstream without being buffered.
+func peekRequestBodyForLog(req *http.Request) string {
+	if req.Body == nil || req.Body == http.NoBody {
+		return ""
+	}
+
+	original := req.Body
+	prefix, err := io.ReadAll(io.LimitReader(original, maxLoggedRequestBodyBytes))
+	req.Body = &prefixedReadCloser{
+		Reader: io.MultiReader(bytes.NewReader(prefix), original),
+		Closer: original,
+	}
+	if err != nil {
+		return ""
+	}
+	return string(prefix)
+}
