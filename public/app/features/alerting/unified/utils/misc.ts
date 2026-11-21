@@ -115,7 +115,7 @@ export function createShareLink(ruleIdentifier: RuleIdentifier): string | undefi
       `/alerting/${encodeURIComponent(ruleIdentifier.ruleSourceName)}/${encodeURIComponent(escapePathSeparators(ruleIdentifier.ruleName))}/find`
     );
   } else if (isGrafanaRuleIdentifier(ruleIdentifier)) {
-    return createAbsoluteUrl(`/alerting/grafana/${ruleIdentifier.uid}/view`);
+    return createAbsoluteUrl(`/alerting/grafana/${encodeURIComponent(ruleIdentifier.uid)}/view`);
   }
 
   return;

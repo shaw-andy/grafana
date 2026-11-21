@@ -9,6 +9,7 @@ import { LoadingPlaceholder, Stack, Text, TextLink, Tooltip, useStyles2 } from '
 
 import { AlertEnrichments } from '../components/AlertEnrichments';
 import { StateTag } from '../components/StateTag';
+import { rulesNav } from '../utils/navigation';
 
 type AlertEntry = CreateNotificationsqueryalertsNotificationEntryAlert;
 
@@ -176,7 +177,7 @@ function AlertCard({ alert, groupLabels }: AlertCardProps) {
   const alertName = alert.labels?.alertname || 'Alert';
   const folderName = alert.labels?.grafana_folder || '';
   const linkText = folderName ? `${folderName} / ${alertName}` : alertName;
-  const ruleLink = ruleUid ? `/alerting/grafana/${ruleUid}/view` : undefined;
+  const ruleLink = rulesNav.grafanaRuleViewPath(ruleUid);
 
   const isFiring = alert.status === 'firing';
 
