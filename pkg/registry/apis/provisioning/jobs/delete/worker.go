@@ -12,6 +12,7 @@ import (
 	"github.com/grafana/grafana-app-sdk/logging"
 	provisioning "github.com/grafana/grafana/apps/provisioning/pkg/apis/provisioning/v0alpha1"
 	"github.com/grafana/grafana/apps/provisioning/pkg/repository"
+	"github.com/grafana/grafana/apps/provisioning/pkg/safepath"
 	"github.com/grafana/grafana/pkg/infra/tracing"
 	"github.com/grafana/grafana/pkg/registry/apis/provisioning/jobs"
 	"github.com/grafana/grafana/pkg/registry/apis/provisioning/resources"
@@ -83,6 +84,11 @@ func (w *Worker) Process(ctx context.Context, repo repository.Repository, job pr
 		// Deduplicate paths to avoid attempting to delete the same file multiple times
 		paths = deduplicatePaths(paths)
 
+		if err := verifyAuthorizedDirectories(ctx, rw, opts.Ref, job, paths); err != nil {
+			logger.Error("refusing to delete directory", "error", err)
+			return err
+		}
+
 		return w.deleteFiles(ctx, rw, progress, opts, paths...)
 	}
 
@@ -133,6 +139,43 @@ func (w *Worker) Process(ctx context.Context, repo repository.Repository, job pr
 	// the job's final status, so the returned status is not needed here.
 	progress.Complete(ctx, nil)
 
+	return nil
+}
+
+// verifyAuthorizedDirectories checks that every directory in paths still has the
+// contents recorded when the job was authorized (see jobs.AnnoAuthorizedDirectories).
+// Deletes on the configured branch are synced into Grafana, so there a directory may
+// only be removed with exactly the contents its deletion was authorized for.
+func verifyAuthorizedDirectories(ctx context.Context, rw repository.ReaderWriter, ref string, job provisioning.Job, paths []string) error {
+	var dirs []string
+	for _, path := range paths {
+		if safepath.IsDir(path) {
+			dirs = append(dirs, path)
+		}
+	}
+	if len(dirs) == 0 || (ref != "" && ref != rw.Config().Branch()) {
+		return nil
+	}
+
+	authorized, err := jobs.AuthorizedDirectories(job)
+	if err != nil {
+		return err
+	}
+
+	tree, err := rw.ReadTree(ctx, ref)
+	if err != nil {
+		return fmt.Errorf("read repository tree: %w", err)
+	}
+
+	for _, dir := range dirs {
+		expected, ok := authorized[dir]
+		if !ok {
+			return fmt.Errorf("deletion of directory %q and its contents was not authorized; create the delete job again", dir)
+		}
+		if resources.DirectoryFingerprint(resources.EntriesInDirectory(tree, dir)) != expected {
+			return fmt.Errorf("contents of directory %q changed after the delete job was authorized; create the delete job again", dir)
+		}
+	}
 	return nil
 }
 

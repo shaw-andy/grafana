@@ -19,6 +19,7 @@ import (
 	"github.com/grafana/grafana/apps/provisioning/pkg/apis/auth"
 	provisioning "github.com/grafana/grafana/apps/provisioning/pkg/apis/provisioning/v0alpha1"
 	"github.com/grafana/grafana/apps/provisioning/pkg/repository"
+	"github.com/grafana/grafana/apps/provisioning/pkg/safepath"
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
 	"github.com/grafana/grafana/pkg/registry/apis/provisioning/jobs"
@@ -175,19 +176,7 @@ func (c *jobsConnector) handleCreateJob(ctx context.Context, r *http.Request, na
 		return
 	}
 
-	if spec.Action == provisioning.JobActionPull || spec.Action == provisioning.JobActionTest {
-		if err := c.authorizeAdminJob(ctx, cfg); err != nil {
-			responder.Error(err)
-			return
-		}
-	}
-
-	if err := c.validateWriteAccess(cfg, spec); err != nil {
-		responder.Error(err)
-		return
-	}
-
-	if err := c.authorizeJob(ctx, repo, cfg, spec); err != nil {
+	if _, err := c.authorizeJobCreate(ctx, repo, cfg, spec, false); err != nil {
 		responder.Error(err)
 		return
 	}
@@ -302,16 +291,64 @@ func (c *jobsConnector) handleOrphanCleanupJob(ctx context.Context, r *http.Requ
 	responder.Object(http.StatusAccepted, job)
 }
 
+// authorizeJobCreate runs every check the creator of a job for repo must pass.
+//
+// With bindDirectories, a delete job is also authorized for everything below the
+// directories it removes, and the fingerprints of those directories are returned keyed
+// by the path the delete worker deletes (see jobs.AnnoAuthorizedDirectories). Job
+// admission does this so that the contents recorded on the job are the contents that
+// were authorized; the jobs subresource only runs the pre-flight checks before queuing.
+func (c *jobsConnector) authorizeJobCreate(ctx context.Context, repo repository.Repository, cfg *provisioning.Repository, spec provisioning.JobSpec, bindDirectories bool) (map[string]string, error) {
+	if spec.Action == provisioning.JobActionPull || spec.Action == provisioning.JobActionTest {
+		if err := c.authorizeAdminJob(ctx, cfg); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := c.validateWriteAccess(cfg, spec); err != nil {
+		return nil, err
+	}
+
+	return c.authorizeJobTargets(ctx, repo, cfg, spec, bindDirectories)
+}
+
+// authorizeJobAdmission authorizes a new Job object against its creator, whether it was
+// queued by the repository jobs subresource or written to the jobs resource directly.
+// It returns the directory fingerprints to record on the job.
+func (c *jobsConnector) authorizeJobAdmission(ctx context.Context, namespace string, spec provisioning.JobSpec) (map[string]string, error) {
+	namespaceOnly := &provisioning.Repository{ObjectMeta: metav1.ObjectMeta{Namespace: namespace}}
+	if jobs.IsOrphanCleanupAction(spec.Action) {
+		return nil, c.authorizeAdminJob(ctx, namespaceOnly)
+	}
+
+	repo, err := c.repoGetter.GetRepository(ctx, spec.Repository)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// A job for a missing repository fails without changing anything.
+			return nil, c.authorizeAdminJob(ctx, namespaceOnly)
+		}
+		return nil, err
+	}
+
+	return c.authorizeJobCreate(ctx, repo, repo.Config(), spec, true)
+}
+
 // authorizeJob dispatches pre-flight validation and authorization checks based on the job action.
 func (c *jobsConnector) authorizeJob(ctx context.Context, repo repository.Repository, cfg *provisioning.Repository, spec provisioning.JobSpec) error {
+	_, err := c.authorizeJobTargets(ctx, repo, cfg, spec, false)
+	return err
+}
+
+// authorizeJobTargets is authorizeJob; see authorizeJobCreate for bindDirectories.
+func (c *jobsConnector) authorizeJobTargets(ctx context.Context, repo repository.Repository, cfg *provisioning.Repository, spec provisioning.JobSpec, bindDirectories bool) (map[string]string, error) {
 	if spec.Action == provisioning.JobActionPullRequest {
-		return apierrors.NewBadRequest("pull request jobs cannot be created via the API; they are triggered by webhooks")
+		return nil, apierrors.NewBadRequest("pull request jobs cannot be created via the API; they are triggered by webhooks")
 	}
 	if spec.Action == provisioning.JobActionFixFolderMetadata && !c.folderMetadataEnabled {
-		return apierrors.NewBadRequest("fixFolderMetadata jobs require the provisioningFolderMetadata feature flag")
+		return nil, apierrors.NewBadRequest("fixFolderMetadata jobs require the provisioningFolderMetadata feature flag")
 	}
 	if spec.Action == provisioning.JobActionTest && (c.perfTestingEnabled == nil || !c.perfTestingEnabled(ctx)) {
-		return apierrors.NewBadRequest("test jobs require the provisioning.performance feature flag")
+		return nil, apierrors.NewBadRequest("test jobs require the provisioning.performance feature flag")
 	}
 
 	exportEnabled := openfeature.NewDefaultClient().Boolean(ctx, featuremgmt.FlagProvisioningExport, false, openfeature.TransactionContext(ctx))
@@ -319,33 +356,37 @@ func (c *jobsConnector) authorizeJob(ctx context.Context, repo repository.Reposi
 	// so the API user gets a clear error at creation time instead of a job that is
 	// created only to complete as a no-op.
 	if spec.Action == provisioning.JobActionPush && !exportEnabled {
-		return apierrors.NewBadRequest("push jobs require the provisioningExport feature flag")
+		return nil, apierrors.NewBadRequest("push jobs require the provisioningExport feature flag")
 	}
 	if spec.Action == provisioning.JobActionMigrate && !exportEnabled {
-		return apierrors.NewBadRequest("migrate jobs require the provisioningExport feature flag")
+		return nil, apierrors.NewBadRequest("migrate jobs require the provisioningExport feature flag")
 	}
 
 	switch spec.Action {
 	case provisioning.JobActionPush:
-		return c.authorizePushJob(ctx, repo, cfg)
+		return nil, c.authorizePushJob(ctx, repo, cfg)
 	case provisioning.JobActionMigrate:
-		return c.authorizeMigrateJob(ctx, repo, cfg, spec)
+		return nil, c.authorizeMigrateJob(ctx, repo, cfg, spec)
 	case provisioning.JobActionDelete:
-		if spec.Delete != nil {
-			return c.authorizeDeleteJob(ctx, repo, cfg, spec.Delete.Paths, spec.Delete.Resources)
+		if spec.Delete == nil {
+			break
 		}
+		if bindDirectories {
+			return c.authorizeDeleteTargets(ctx, repo, cfg, spec.Delete.Paths, spec.Delete.Resources)
+		}
+		return nil, c.authorizeDeleteJob(ctx, repo, cfg, spec.Delete.Paths, spec.Delete.Resources)
 	case provisioning.JobActionMove:
 		if spec.Move != nil {
-			return c.authorizeMoveJob(ctx, repo, cfg, spec.Move)
+			return nil, c.authorizeMoveJob(ctx, repo, cfg, spec.Move)
 		}
 	case provisioning.JobActionPull, provisioning.JobActionPullRequest, provisioning.JobActionFixFolderMetadata, provisioning.JobActionTest:
 		// Read-only / no-op operations don't require pre-flight resource authorization.
-		// Pull and test are authorized inline in handleCreateJob (admin-only).
+		// Pull and test are authorized in authorizeJobCreate (admin-only).
 	case provisioning.JobActionReleaseResources, provisioning.JobActionDeleteResources:
 		// Orphan cleanup actions are handled separately via handleOrphanCleanupJob
 		// and never reach authorizeJob.
 	}
-	return nil
+	return nil, nil
 }
 
 // newJobAuthorizer creates an Authorizer for the given repository. Returns an error
@@ -364,7 +405,12 @@ func (c *jobsConnector) newJobAuthorizer(ctx context.Context, repo repository.Re
 
 // authorizeResourceRefs fetches each referenced resource and checks that the user
 // has the given verb permission on it. Resources that no longer exist are skipped.
-func (c *jobsConnector) authorizeResourceRefs(ctx context.Context, authorizer resources.Authorizer, namespace string, refs []provisioning.ResourceRef, verb, action string) error {
+//
+// The delete worker deletes a folder by deleting its source directory. When directories
+// is not nil, deleting a folder also requires delete on everything in that directory,
+// and the directory fingerprint is recorded in directories keyed by the path the worker
+// resolves.
+func (c *jobsConnector) authorizeResourceRefs(ctx context.Context, authorizer resources.Authorizer, namespace string, refs []provisioning.ResourceRef, verb, action string, directories map[string]string) error {
 	if len(refs) == 0 {
 		return nil
 	}
@@ -403,6 +449,23 @@ func (c *jobsConnector) authorizeResourceRefs(ctx context.Context, authorizer re
 		if err := authorizer.AuthorizeResource(ctx, parsed, verb); err != nil {
 			return fmt.Errorf("authorize %s %s/%s/%s: %w", action, ref.Group, ref.Kind, ref.Name, err)
 		}
+
+		if directories == nil || verb != utils.VerbDelete || gvr.GroupResource() != resources.FolderResource.GroupResource() {
+			continue
+		}
+		source, _ := meta.GetSourceProperties()
+		if source.Path == "" {
+			continue
+		}
+		dir := source.Path
+		if !safepath.IsDir(dir) {
+			dir += "/"
+		}
+		fingerprint, err := authorizer.AuthorizeDeleteDirectory(ctx, dir)
+		if err != nil {
+			return fmt.Errorf("authorize %s contents of %s/%s/%s: %w", action, ref.Group, ref.Kind, ref.Name, err)
+		}
+		directories[dir] = fingerprint
 	}
 	return nil
 }
@@ -513,7 +576,9 @@ func (c *jobsConnector) authorizeDeleteAllSupported(ctx context.Context, repo re
 	return authorizer.AuthorizeDeleteAllSupported(ctx)
 }
 
-// authorizeDeleteJob checks delete permissions on targeted paths and resources.
+// authorizeDeleteJob is the pre-flight check of delete permissions on the targeted
+// paths and resources themselves. The contents of targeted directories are authorized
+// by authorizeDeleteTargets when the job is admitted.
 func (c *jobsConnector) authorizeDeleteJob(ctx context.Context, repo repository.Repository, cfg *provisioning.Repository, paths []string, resources []provisioning.ResourceRef) error {
 	authorizer, err := c.newJobAuthorizer(ctx, repo, cfg)
 	if err != nil {
@@ -526,7 +591,37 @@ func (c *jobsConnector) authorizeDeleteJob(ctx context.Context, repo repository.
 		}
 	}
 
-	return c.authorizeResourceRefs(ctx, authorizer, cfg.Namespace, resources, utils.VerbDelete, "delete")
+	return c.authorizeResourceRefs(ctx, authorizer, cfg.Namespace, resources, utils.VerbDelete, "delete", nil)
+}
+
+// authorizeDeleteTargets checks delete permissions on the targeted paths and resources
+// and on everything below each directory the job removes. It returns the fingerprints
+// of those directories keyed by the path the delete worker deletes.
+func (c *jobsConnector) authorizeDeleteTargets(ctx context.Context, repo repository.Repository, cfg *provisioning.Repository, paths []string, resources []provisioning.ResourceRef) (map[string]string, error) {
+	authorizer, err := c.newJobAuthorizer(ctx, repo, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	directories := map[string]string{}
+	for _, path := range paths {
+		if !safepath.IsDir(path) {
+			if err := authorizer.AuthorizeDeleteByPath(ctx, path); err != nil {
+				return nil, fmt.Errorf("authorize delete %q: %w", path, err)
+			}
+			continue
+		}
+		fingerprint, err := authorizer.AuthorizeDeleteDirectory(ctx, path)
+		if err != nil {
+			return nil, fmt.Errorf("authorize delete %q: %w", path, err)
+		}
+		directories[path] = fingerprint
+	}
+
+	if err := c.authorizeResourceRefs(ctx, authorizer, cfg.Namespace, resources, utils.VerbDelete, "delete", directories); err != nil {
+		return nil, err
+	}
+	return directories, nil
 }
 
 // authorizeMoveJob checks update permission on sources and create permission on targets.
@@ -542,7 +637,7 @@ func (c *jobsConnector) authorizeMoveJob(ctx context.Context, repo repository.Re
 		}
 	}
 
-	return c.authorizeResourceRefs(ctx, authorizer, cfg.Namespace, opts.Resources, utils.VerbUpdate, "move")
+	return c.authorizeResourceRefs(ctx, authorizer, cfg.Namespace, opts.Resources, utils.VerbUpdate, "move", nil)
 }
 
 // ValidUUID ensures the ID is valid for a blob.
