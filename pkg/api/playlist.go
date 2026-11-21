@@ -10,6 +10,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	playlistv1 "github.com/grafana/grafana/apps/playlist/pkg/apis/playlist/v1"
+	playlistapp "github.com/grafana/grafana/apps/playlist/pkg/app"
 	"github.com/grafana/grafana/pkg/api/dtos"
 	"github.com/grafana/grafana/pkg/api/routing"
 	"github.com/grafana/grafana/pkg/registry/apps/playlist"
@@ -132,6 +133,11 @@ type CreatePlaylistResponse struct {
 	Body *playlist.Playlist `json:"body"`
 }
 
+const (
+	maxPlaylistSearchLimit = 1000
+	maxPlaylistSearchBytes = 2 * 1024 * 1024
+)
+
 type playlistK8sHandler struct {
 	namespacer           request.NamespaceMapper
 	gvr                  schema.GroupVersionResource
@@ -166,23 +172,46 @@ func (pk8s *playlistK8sHandler) searchPlaylists(c *contextmodel.ReqContext) {
 	if !ok {
 		return // error is already sent
 	}
-	out, err := client.List(c.Req.Context(), v1.ListOptions{})
-	if err != nil {
-		pk8s.writeError(c, err)
-		return
-	}
 
+	limit := c.QueryInt("limit")
+	if limit < 1 || limit > maxPlaylistSearchLimit {
+		limit = maxPlaylistSearchLimit
+	}
 	query := strings.ToUpper(c.Query("query"))
+
+	// Each page is bounded by the storage page size and dropped once converted,
+	// so only the legacy rows, bounded by limit and maxPlaylistSearchBytes, are kept.
 	playlists := []playlist.Playlist{}
-	for _, item := range out.Items {
-		p := playlist.UnstructuredToLegacyPlaylist(item)
-		if p == nil {
-			continue
+	responseBytes := 0
+	opts := v1.ListOptions{Limit: int64(limit)}
+	for {
+		out, err := client.List(c.Req.Context(), opts)
+		if err != nil {
+			pk8s.writeError(c, err)
+			return
 		}
-		if query != "" && !strings.Contains(strings.ToUpper(p.Name), query) {
-			continue // query filter
+		for _, item := range out.Items {
+			p := playlist.UnstructuredToLegacyPlaylist(item)
+			if p == nil {
+				continue
+			}
+			if query != "" && !strings.Contains(strings.ToUpper(p.Name), query) {
+				continue // query filter
+			}
+			playlists = append(playlists, *p)
+			responseBytes += len(p.UID) + len(p.Name) + len(p.Interval)
+			if len(playlists) >= limit || responseBytes >= maxPlaylistSearchBytes {
+				c.JSON(http.StatusOK, playlists)
+				return
+			}
 		}
-		playlists = append(playlists, *p)
+		opts.Continue = out.GetContinue()
+		if opts.Continue == "" {
+			break
+		}
+		if query == "" {
+			opts.Limit = int64(limit - len(playlists))
+		}
 	}
 	c.JSON(http.StatusOK, playlists)
 }
@@ -296,6 +325,10 @@ func (pk8s *playlistK8sHandler) updatePlaylist(c *contextmodel.ReqContext) {
 		c.JsonApiErr(http.StatusBadRequest, "bad request data", err)
 		return
 	}
+	if err := playlistapp.ValidateItemCount(len(cmd.Items)); err != nil {
+		c.JsonApiErr(http.StatusBadRequest, err.Error(), err)
+		return
+	}
 	obj := playlist.LegacyUpdateCommandToUnstructured(cmd)
 	obj.SetName(uid)
 	existing, err := client.Get(c.Req.Context(), uid, v1.GetOptions{})
@@ -334,6 +367,10 @@ func (pk8s *playlistK8sHandler) createPlaylist(c *contextmodel.ReqContext) {
 	cmd := playlist.UpdatePlaylistCommand{}
 	if err := web.Bind(c.Req, &cmd); err != nil {
 		c.JsonApiErr(http.StatusBadRequest, "bad request data", err)
+		return
+	}
+	if err := playlistapp.ValidateItemCount(len(cmd.Items)); err != nil {
+		c.JsonApiErr(http.StatusBadRequest, err.Error(), err)
 		return
 	}
 	obj := playlist.LegacyUpdateCommandToUnstructured(cmd)
