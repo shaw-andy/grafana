@@ -25,6 +25,11 @@ import (
 	"github.com/grafana/grafana/pkg/util"
 )
 
+// maxCheckBodyBytes bounds the POST /check request body. Neither the apiserver
+// nor the app SDK limits custom route bodies, so without this a caller could
+// make the handler buffer an arbitrarily large payload.
+const maxCheckBodyBytes = 4 << 20 // 4 MiB
+
 type DashValidatorConfig struct {
 	DatasourceSvc      datasources.DataSourceService
 	HTTPClientProvider httpclient.Provider
@@ -140,12 +145,20 @@ func handleCheckRoute(
 		logger.Info("Received compatibility check request")
 
 		// Step 1: Parse request body
-		body, err := io.ReadAll(r.Body)
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxCheckBodyBytes+1))
 		if err != nil {
 			logger.Error("Failed to read request body", "error", err)
 			w.WriteHeader(http.StatusBadRequest)
 			return json.NewEncoder(w).Encode(map[string]string{
 				"error": "failed to read request body",
+			})
+		}
+		if len(body) > maxCheckBodyBytes {
+			logger.Warn("Request body too large", "limitBytes", maxCheckBodyBytes)
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return json.NewEncoder(w).Encode(map[string]string{
+				"error": fmt.Sprintf("request body exceeds %d bytes", maxCheckBodyBytes),
+				"code":  "request_too_large",
 			})
 		}
 
