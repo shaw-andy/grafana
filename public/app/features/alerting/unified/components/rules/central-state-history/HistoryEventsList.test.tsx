@@ -1,7 +1,9 @@
-import { render, waitFor } from 'test/test-utils';
+import { HttpResponse, http } from 'msw';
+import { render, screen, waitFor } from 'test/test-utils';
 import { byLabelText, byTestId } from 'testing-library-selector';
 
-import { getDefaultTimeRange } from '@grafana/data';
+import { type DataFrameJSON, getDefaultTimeRange } from '@grafana/data';
+import { config } from '@grafana/runtime';
 
 import { setupMswServer } from '../../../mockApi';
 import { captureRequests } from '../../../mocks/server/events';
@@ -10,7 +12,7 @@ import { getHistory } from './CentralHistoryRuntimeDataSource';
 import { HistoryEventsList } from './EventListSceneObject';
 import { StateFilterValues } from './constants';
 
-setupMswServer();
+const server = setupMswServer();
 // msw server is setup to intercept the history api call and return the mocked data by default
 // that consists in 4 rows.
 // 2 rows for alert1 and 2 rows for alert2
@@ -204,6 +206,70 @@ describe('HistoryEventsList', () => {
       expect(url.searchParams.get('matchers')).toBe(matchers);
       expect(url.searchParams.get('from')).toBe(from.toString());
       expect(url.searchParams.get('to')).toBe(to.toString());
+    });
+  });
+
+  describe('rule link from a state-history log line', () => {
+    function historyFrame(ruleUID: string): DataFrameJSON {
+      return {
+        data: {
+          values: [
+            [1_700_000_000_000],
+            [
+              {
+                previous: 'Normal',
+                current: 'Alerting',
+                ruleUID,
+                labels: { alertname: 'Disk almost full' },
+              },
+            ],
+            [{ from: 'state-history', orgID: '1' }],
+          ],
+        },
+      };
+    }
+
+    function renderHistory(ruleUID: string) {
+      server.use(http.get('/api/v1/rules/history', () => HttpResponse.json(historyFrame(ruleUID))));
+      render(
+        <HistoryEventsList
+          valueInLabelFilter={''}
+          valueInStateToFilter={StateFilterValues.all}
+          valueInStateFromFilter={StateFilterValues.all}
+          addFilter={jest.fn()}
+          timeRange={getDefaultTimeRange()}
+        />
+      );
+    }
+
+    function requestUrl(href: string): URL {
+      return new URL(href, 'http://grafana.example');
+    }
+
+    it('keeps a short rule uid on the rule view path', async () => {
+      renderHistory('abc_DEF-123');
+      const link = await screen.findByRole('link', { name: 'Disk almost full' });
+      const subPath = config.appSubUrl ?? '';
+      expect(requestUrl(link.getAttribute('href') ?? '').pathname).toBe(
+        `${subPath}/alerting/grafana/abc_DEF-123/view`
+      );
+    });
+
+    it.each([
+      ['../../../logout?', '/logout'],
+      ['../../../profile/switch-org/2?', '/profile/switch-org/2'],
+    ])('does not let ruleUID %s navigate to %s', async (ruleUID, escapedPath) => {
+      renderHistory(ruleUID);
+      const header = await screen.findByTestId('event-row-header');
+      expect(header).toHaveTextContent('Disk almost full');
+      const link = header.querySelector('a');
+      if (link) {
+        const url = requestUrl(link.getAttribute('href') ?? '');
+        const subPath = config.appSubUrl ?? '';
+        expect(url.origin).toBe('http://grafana.example');
+        expect(url.pathname.startsWith(`${subPath}/alerting/grafana/`)).toBe(true);
+        expect(url.pathname).not.toBe(escapedPath);
+      }
     });
   });
 });
