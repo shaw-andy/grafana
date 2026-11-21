@@ -1,6 +1,8 @@
 package satokengen
 
 import (
+	"crypto/pbkdf2"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"hash/crc32"
@@ -25,11 +27,20 @@ type PrefixedKey struct {
 }
 
 func (p *PrefixedKey) Hash() (string, error) {
-	hash, err := util.EncodePassword(p.Secret, p.Checksum)
+	return HashSecret(p.Secret, p.Checksum)
+}
+
+// HashSecret returns the stored hash of a generated API key or service account
+// token secret. Tokens are looked up by this value, so it must stay
+// deterministic and unchanged for already issued tokens. The secrets are 32
+// random characters, so it does not need the work factor of a login password
+// hash.
+func HashSecret(secret, salt string) (string, error) {
+	digest, err := pbkdf2.Key(sha256.New, secret, []byte(salt), 10000, 50)
 	if err != nil {
 		return "", err
 	}
-	return hash, nil
+	return hex.EncodeToString(digest), nil
 }
 
 func (p *PrefixedKey) key() string {

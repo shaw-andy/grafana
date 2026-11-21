@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/grafana/grafana/pkg/util"
+	"github.com/grafana/grafana/pkg/components/satokengen"
 )
 
 func TestApiKeyGen(t *testing.T) {
@@ -19,7 +19,7 @@ func TestApiKeyGen(t *testing.T) {
 	keyInfo, err := Decode(result.ClientSecret)
 	require.NoError(t, err)
 
-	keyHashed, err := util.EncodePassword(keyInfo.Key, keyInfo.Name)
+	keyHashed, err := satokengen.HashSecret(keyInfo.Key, keyInfo.Name)
 	require.NoError(t, err)
 	assert.Equal(t, result.HashedKey, keyHashed)
 
