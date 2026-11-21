@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
@@ -22,10 +23,49 @@ type TraceQueries struct {
 	TraceLogsExploreQuery   string
 }
 
-func buildTracesQuery(operationId string, parentSpanID *string, traceTypes []string, filters []dataquery.AzureTracesFilter, resultFormat *dataquery.ResultFormat, resources []string) string {
+var (
+	kqlIdentifierRegExp     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	kqlPropertyPathRegExp   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`)
+	kqlVerbatimStringEscape = strings.NewReplacer(
+		"'", "''",
+		// KqlInterpolate expands macros anywhere in the query text, including inside
+		// string literals, so "$__" is split across adjacent (concatenated) literals.
+		"$__", "$'@'__",
+		// Verbatim literals cannot contain line breaks, so these are emitted as
+		// adjacent escaped literals.
+		"\n", `'"\n"@'`,
+		"\r", `'"\r"@'`,
+	)
+)
+
+// kqlString returns s as a Kusto verbatim string literal.
+func kqlString(s string) string {
+	return "@'" + kqlVerbatimStringEscape.Replace(s) + "'"
+}
+
+// kqlPropertyReference returns a column reference for a trace filter property.
+// Bracket-quoted identifiers use regular string literal rules, so characters that
+// could end the literal or start a macro are refused rather than escaped. Kusto
+// identifiers never contain them.
+func kqlPropertyReference(property string) (string, error) {
+	if kqlPropertyPathRegExp.MatchString(property) {
+		return property, nil
+	}
+	if property == "" || strings.ContainsAny(property, `'"\$`) || strings.IndexFunc(property, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("invalid trace filter property %q", property)
+	}
+	return "['" + property + "']", nil
+}
+
+func buildTracesQuery(operationId string, parentSpanID *string, traceTypes []string, filters []dataquery.AzureTracesFilter, resultFormat *dataquery.ResultFormat, resources []string) (string, error) {
 	types := traceTypes
 	if len(types) == 0 {
 		types = Tables
+	}
+	for _, t := range types {
+		if !kqlIdentifierRegExp.MatchString(t) {
+			return "", fmt.Errorf("invalid trace type %q", t)
+		}
 	}
 
 	filteredTypes := make([]string, 0)
@@ -46,7 +86,7 @@ func buildTracesQuery(operationId string, parentSpanID *string, traceTypes []str
 	sort.Strings(filteredTypes)
 
 	if len(filteredTypes) == 0 {
-		return ""
+		return "", nil
 	}
 
 	resourcesQuery := strings.Join(filteredTypes, ",")
@@ -54,7 +94,7 @@ func buildTracesQuery(operationId string, parentSpanID *string, traceTypes []str
 		intermediate := make([]string, 0)
 		for _, resource := range resources {
 			for _, table := range filteredTypes {
-				intermediate = append(intermediate, fmt.Sprintf("app('%s').%s", resource, table))
+				intermediate = append(intermediate, fmt.Sprintf("app(%s).%s", kqlString(resource), table))
 			}
 		}
 		resourcesQuery += "," + strings.Join(intermediate, ",")
@@ -80,12 +120,13 @@ func buildTracesQuery(operationId string, parentSpanID *string, traceTypes []str
 	whereClause := ""
 
 	if operationId != "" {
-		whereClause = fmt.Sprintf("| where (operation_Id != '' and operation_Id == '%s') or (customDimensions.ai_legacyRootId != '' and customDimensions.ai_legacyRootId == '%s')", operationId, operationId)
+		quotedOperationId := kqlString(operationId)
+		whereClause = fmt.Sprintf("| where (operation_Id != '' and operation_Id == %s) or (customDimensions.ai_legacyRootId != '' and customDimensions.ai_legacyRootId == %s)", quotedOperationId, quotedOperationId)
 	}
 
 	parentWhereClause := ""
 	if parentSpanID != nil && *parentSpanID != "" {
-		parentWhereClause = fmt.Sprintf("| where (operation_ParentId != '' and operation_ParentId == '%s')", *parentSpanID)
+		parentWhereClause = fmt.Sprintf("| where (operation_ParentId != '' and operation_ParentId == %s)", kqlString(*parentSpanID))
 	}
 
 	filtersClause := ""
@@ -95,15 +136,19 @@ func buildTracesQuery(operationId string, parentSpanID *string, traceTypes []str
 			if len(filter.Filters) == 0 {
 				continue
 			}
+			property, err := kqlPropertyReference(filter.Property)
+			if err != nil {
+				return "", err
+			}
 			operation := "in"
 			if filter.Operation == "ne" {
 				operation = "!in"
 			}
 			filterValues := []string{}
 			for _, val := range filter.Filters {
-				filterValues = append(filterValues, fmt.Sprintf(`"%s"`, val))
+				filterValues = append(filterValues, kqlString(val))
 			}
-			filtersClause += fmt.Sprintf("| where %s %s (%s)", filter.Property, operation, strings.Join(filterValues, ","))
+			filtersClause += fmt.Sprintf("| where %s %s (%s)", property, operation, strings.Join(filterValues, ","))
 		}
 	}
 
@@ -124,7 +169,7 @@ func buildTracesQuery(operationId string, parentSpanID *string, traceTypes []str
 	projectClause := `| project-rename traceID = operation_Id, parentSpanID = operation_ParentId, startTime = timestamp, resource = _ResourceId` +
 		`| project startTime, itemType, serviceName, duration, traceID, spanID, parentSpanID, operationName, serviceTags, tags, itemId, resource` +
 		`| order by startTime asc`
-	return baseQuery + whereClause + parentWhereClause + propertiesStaticQuery + errorProperty + propertiesQuery + filtersClause + projectClause
+	return baseQuery + whereClause + parentWhereClause + propertiesStaticQuery + errorProperty + propertiesQuery + filtersClause + projectClause, nil
 }
 
 func buildTracesLogsQuery(operationId string, resources []string) string {
@@ -135,7 +180,7 @@ func buildTracesLogsQuery(operationId string, resources []string) string {
 		intermediate := make([]string, 0, len(resources)*len(types))
 		for _, resource := range resources {
 			for _, table := range types {
-				intermediate = append(intermediate, fmt.Sprintf("app('%s').%s", resource, table))
+				intermediate = append(intermediate, fmt.Sprintf("app(%s).%s", kqlString(resource), table))
 			}
 		}
 		sort.Strings(intermediate)
@@ -144,7 +189,7 @@ func buildTracesLogsQuery(operationId string, resources []string) string {
 	}
 
 	query := selectors
-	query += fmt.Sprintf(`| where operation_Id == "%s"`, operationId)
+	query += fmt.Sprintf(`| where operation_Id == %s`, kqlString(operationId))
 	return query
 }
 
@@ -158,15 +203,27 @@ func buildTraceQueries(query backend.DataQuery, dsInfo types.DatasourceInfo, tra
 
 	traceQueries := TraceQueries{}
 
-	queryString := buildTracesQuery(operationId, nil, tracesQuery.TraceTypes, tracesQuery.Filters, &resultFormat, queryResources)
+	queryString, err := buildTracesQuery(operationId, nil, tracesQuery.TraceTypes, tracesQuery.Filters, &resultFormat, queryResources)
+	if err != nil {
+		return "", &traceQueries, err
+	}
 
 	if operationId == "" {
-		traceExploreQuery = buildTracesQuery(traceIdVariable, nil, tracesQuery.TraceTypes, tracesQuery.Filters, &resultFormat, queryResources)
-		traceParentExploreQuery = buildTracesQuery(traceIdVariable, &parentSpanIdVariable, tracesQuery.TraceTypes, tracesQuery.Filters, &resultFormat, queryResources)
+		traceExploreQuery, err = buildTracesQuery(traceIdVariable, nil, tracesQuery.TraceTypes, tracesQuery.Filters, &resultFormat, queryResources)
+		if err != nil {
+			return "", &traceQueries, err
+		}
+		traceParentExploreQuery, err = buildTracesQuery(traceIdVariable, &parentSpanIdVariable, tracesQuery.TraceTypes, tracesQuery.Filters, &resultFormat, queryResources)
+		if err != nil {
+			return "", &traceQueries, err
+		}
 		traceLogsExploreQuery = buildTracesLogsQuery(traceIdVariable, queryResources)
 	} else {
 		traceExploreQuery = queryString
-		traceParentExploreQuery = buildTracesQuery(operationId, &parentSpanIdVariable, tracesQuery.TraceTypes, tracesQuery.Filters, &resultFormat, queryResources)
+		traceParentExploreQuery, err = buildTracesQuery(operationId, &parentSpanIdVariable, tracesQuery.TraceTypes, tracesQuery.Filters, &resultFormat, queryResources)
+		if err != nil {
+			return "", &traceQueries, err
+		}
 		traceLogsExploreQuery = buildTracesLogsQuery(operationId, queryResources)
 	}
 
