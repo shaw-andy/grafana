@@ -1779,21 +1779,43 @@ func (s *server) listAuthorized(ctx context.Context, req *resourcepb.ListRequest
 	)
 	maxPageBytes := s.maxPageSizeBytes
 
+	pageFull := func() bool {
+		return (req.Limit > 0 && len(rsp.Items) >= int(req.Limit)) || pageBytes >= maxPageBytes
+	}
+
 	rv, err := backendList(ctx, req, func(iter ListIterator) error {
-		// Convert ListIterator to iter.Seq for FilterAuthorized
+		exhausted := false
+
+		// FilterAuthorized buffers a whole authorization batch before it yields,
+		// and every candidate holds its stored value. Each round therefore reads
+		// only what could still fit on the page, plus one item that tells whether
+		// another page exists, so bodies past the page are never held.
 		candidates := func(yield func(candidateItem) bool) {
-			for iter.Next() {
-				if err := iter.Error(); err != nil {
+			maxCount := claims.MaxBatchCheckItems
+			if pageFull() {
+				maxCount = 1
+			} else if req.Limit > 0 {
+				maxCount = int(req.Limit) - len(rsp.Items) + 1
+			}
+			roundBytes := pageBytes
+			for range maxCount {
+				if !iter.Next() || iter.Error() != nil {
+					exhausted = true
 					return
 				}
+				value := iter.Value()
 				if !yield(candidateItem{
 					namespace:       iter.Namespace(),
 					name:            iter.Name(),
 					folder:          iter.Folder(),
 					resourceVersion: iter.ResourceVersion(),
-					value:           iter.Value(),
+					value:           value,
 					continueToken:   iter.ContinueToken(),
 				}) {
+					return
+				}
+				roundBytes += len(value)
+				if roundBytes >= maxPageBytes {
 					return
 				}
 			}
@@ -1818,36 +1840,38 @@ func (s *server) listAuthorized(ctx context.Context, req *resourcepb.ListRequest
 		}
 
 		var lastContinueToken string
-		for item, err := range authz.FilterAuthorized(ctx, s.access, candidates, extractFn, authz.WithTracer(tracer)) {
-			if err != nil {
-				return err
-			}
+		for !exhausted {
+			for item, err := range authz.FilterAuthorized(ctx, s.access, candidates, extractFn, authz.WithTracer(tracer)) {
+				if err != nil {
+					return err
+				}
 
-			// If the page is already full, this extra authorized item confirms
-			// there are more results. Set the continue token and stop.
-			if (req.Limit > 0 && len(rsp.Items) >= int(req.Limit)) || pageBytes >= maxPageBytes {
-				nextToken = lastContinueToken
-				break
-			}
+				// If the page is already full, this extra authorized item confirms
+				// there are more results. Set the continue token and stop.
+				if pageFull() {
+					nextToken = lastContinueToken
+					return iter.Error()
+				}
 
-			if req.KeysOnly {
-				rsp.Items = append(rsp.Items, &resourcepb.ResourceWrapper{
-					ResourceVersion: item.resourceVersion,
-					Namespace:       item.namespace,
-					Name:            item.name,
-					Folder:          item.folder,
-				})
-				// Measured rather than approximated from the string lengths, so the
-				// budget stays right if the wrapper gains a field.
-				pageBytes += proto.Size(rsp.Items[len(rsp.Items)-1])
-			} else {
-				rsp.Items = append(rsp.Items, &resourcepb.ResourceWrapper{
-					ResourceVersion: item.resourceVersion,
-					Value:           item.value,
-				})
-				pageBytes += len(item.value)
+				if req.KeysOnly {
+					rsp.Items = append(rsp.Items, &resourcepb.ResourceWrapper{
+						ResourceVersion: item.resourceVersion,
+						Namespace:       item.namespace,
+						Name:            item.name,
+						Folder:          item.folder,
+					})
+					// Measured rather than approximated from the string lengths, so the
+					// budget stays right if the wrapper gains a field.
+					pageBytes += proto.Size(rsp.Items[len(rsp.Items)-1])
+				} else {
+					rsp.Items = append(rsp.Items, &resourcepb.ResourceWrapper{
+						ResourceVersion: item.resourceVersion,
+						Value:           item.value,
+					})
+					pageBytes += len(item.value)
+				}
+				lastContinueToken = item.continueToken
 			}
-			lastContinueToken = item.continueToken
 		}
 
 		return iter.Error()
