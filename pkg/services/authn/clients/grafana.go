@@ -2,7 +2,6 @@ package clients
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"net/mail"
 	"strconv"
@@ -10,6 +9,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	claims "github.com/grafana/authlib/types"
+	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/services/authn"
 	"github.com/grafana/grafana/pkg/services/login"
 	"github.com/grafana/grafana/pkg/services/org"
@@ -22,13 +22,14 @@ var _ authn.ProxyClient = new(Grafana)
 var _ authn.PasswordClient = new(Grafana)
 
 func ProvideGrafana(cfg *setting.Cfg, userService user.Service, tracer trace.Tracer) *Grafana {
-	return &Grafana{cfg, userService, tracer}
+	return &Grafana{cfg, userService, tracer, log.New("authn.grafana")}
 }
 
 type Grafana struct {
 	cfg         *setting.Cfg
 	userService user.Service
 	tracer      trace.Tracer
+	log         log.Logger
 }
 
 func (c *Grafana) String() string {
@@ -111,8 +112,18 @@ func (c *Grafana) AuthenticatePassword(ctx context.Context, r *authn.Request, us
 	// user was found so set auth module in req metadata
 	r.SetMeta(authn.MetaKeyAuthModule, "grafana")
 
-	if ok := comparePassword(password, usr.Salt, string(usr.Password)); !ok {
+	ok, needsRehash := user.Password(password).Verify(usr.Salt, usr.Password)
+	if !ok {
 		return nil, errInvalidPassword.Errorf("invalid password")
+	}
+	if needsRehash {
+		if err := c.userService.RehashPassword(ctx, &user.RehashPasswordCommand{
+			UserID:      usr.ID,
+			Password:    user.Password(password),
+			CurrentHash: usr.Password,
+		}); err != nil {
+			c.log.FromContext(ctx).Warn("Failed to upgrade stored password hash", "userId", usr.ID, "err", err)
+		}
 	}
 
 	return &authn.Identity{
@@ -122,10 +133,4 @@ func (c *Grafana) AuthenticatePassword(ctx context.Context, r *authn.Request, us
 		ClientParams:    authn.ClientParams{FetchSyncedUser: true, SyncPermissions: true},
 		AuthenticatedBy: login.PasswordAuthModule,
 	}, nil
-}
-
-func comparePassword(password, salt, hash string) bool {
-	// It is ok to ignore the error here because util.EncodePassword can never return a error
-	hashedPassword, _ := util.EncodePassword(password, salt)
-	return subtle.ConstantTimeCompare([]byte(hashedPassword), []byte(hash)) == 1
 }

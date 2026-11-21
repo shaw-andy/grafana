@@ -364,6 +364,10 @@ func (s *UserK8sService) GetByLoginWithPassword(_ context.Context, _ *user.GetUs
 	return nil, errors.New("not implemented")
 }
 
+func (s *UserK8sService) RehashPassword(_ context.Context, _ *user.RehashPasswordCommand) error {
+	return errors.New("not implemented")
+}
+
 func (s *UserK8sService) GetByLogin(ctx context.Context, cmd *user.GetUserByLoginQuery) (*user.User, error) {
 	ctx, span := s.tracer.Start(ctx, "user.getByLogin", trace.WithAttributes(
 		attribute.String("loginOrEmail", cmd.LoginOrEmail),

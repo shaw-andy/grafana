@@ -370,6 +370,24 @@ func (_m *MockService) ListByIdOrUID(_a0 context.Context, _a1 []string, _a2 []in
 	return r0, r1
 }
 
+// RehashPassword provides a mock function with given fields: _a0, _a1
+func (_m *MockService) RehashPassword(_a0 context.Context, _a1 *user.RehashPasswordCommand) error {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RehashPassword")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *user.RehashPasswordCommand) error); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // Search provides a mock function with given fields: _a0, _a1
 func (_m *MockService) Search(_a0 context.Context, _a1 *user.SearchUsersQuery) (*user.SearchUserQueryResult, error) {
 	ret := _m.Called(_a0, _a1)

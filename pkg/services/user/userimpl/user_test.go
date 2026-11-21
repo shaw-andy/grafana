@@ -819,6 +819,10 @@ func (f *FakeUserStore) Update(ctx context.Context, cmd *user.UpdateUserCommand)
 	return f.ExpectedError
 }
 
+func (f *FakeUserStore) ReplacePasswordHash(ctx context.Context, userID int64, current, next user.Password) error {
+	return f.ExpectedError
+}
+
 func (f *FakeUserStore) UpdateLastSeenAt(ctx context.Context, cmd *user.UpdateUserLastSeenAtCommand) error {
 	return f.ExpectedError
 }

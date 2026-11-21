@@ -25,7 +25,7 @@ type PrefixedKey struct {
 }
 
 func (p *PrefixedKey) Hash() (string, error) {
-	hash, err := util.EncodePassword(p.Secret, p.Checksum)
+	hash, err := util.EncodeAPIKeySecret(p.Secret, p.Checksum)
 	if err != nil {
 		return "", err
 	}
