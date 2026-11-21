@@ -83,7 +83,7 @@ func (s *SocialGrafanaCom) Validate(ctx context.Context, newSettings ssoModels.S
 		oldInfo = &social.OAuthInfo{}
 	}
 
-	err = validateInfo(info, oldInfo, requester)
+	err = s.validateInfo(ctx, info, oldInfo, requester)
 	if err != nil {
 		return err
 	}
