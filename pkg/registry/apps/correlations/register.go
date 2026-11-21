@@ -41,11 +41,15 @@ func RegisterAppInstaller(
 	legacyService *correlations.CorrelationsService,
 ) (*AppInstaller, error) {
 	installer := &AppInstaller{}
-	provider := simple.NewAppProvider(apis.LocalManifest(), nil, correlationsapp.New)
+	specificConfig := &correlationsapp.Config{
+		AppURL: cfg.AppURL,
+	}
+	provider := simple.NewAppProvider(apis.LocalManifest(), specificConfig, correlationsapp.New)
 
 	appConfig := app.Config{
-		KubeConfig:   restclient.Config{}, // this will be overridden by the installer's InitializeApp method
-		ManifestData: *apis.LocalManifest().ManifestData,
+		KubeConfig:     restclient.Config{}, // this will be overridden by the installer's InitializeApp method
+		ManifestData:   *apis.LocalManifest().ManifestData,
+		SpecificConfig: specificConfig,
 	}
 	i, err := appsdkapiserver.NewDefaultAppInstaller(provider, appConfig, &apis.GoTypeAssociator{})
 	if err != nil {

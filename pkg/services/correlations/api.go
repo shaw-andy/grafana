@@ -43,7 +43,7 @@ func (s *CorrelationsService) registerAPIEndpoints() {
 // 404: notFoundError
 // 500: internalServerError
 func (s *CorrelationsService) createHandler(c *contextmodel.ReqContext) response.Response {
-	cmd := CreateCorrelationCommand{}
+	cmd := CreateCorrelationCommand{RequestHost: c.Req.Host}
 	if err := web.Bind(c.Req, &cmd); err != nil {
 		return response.Error(http.StatusBadRequest, "bad request data", err)
 	}
@@ -54,6 +54,9 @@ func (s *CorrelationsService) createHandler(c *contextmodel.ReqContext) response
 	if err != nil {
 		if errors.Is(err, ErrSourceDataSourceDoesNotExists) || errors.Is(err, ErrTargetDataSourceDoesNotExists) {
 			return response.Error(http.StatusNotFound, "Data source not found", err)
+		}
+		if errors.Is(err, ErrInvalidExternalTarget) {
+			return response.Error(http.StatusBadRequest, "Invalid external correlation target", err)
 		}
 		return response.Error(http.StatusInternalServerError, "Failed to add correlation", err)
 	}
@@ -142,7 +145,7 @@ type DeleteCorrelationResponse struct {
 // 404: notFoundError
 // 500: internalServerError
 func (s *CorrelationsService) updateHandler(c *contextmodel.ReqContext) response.Response {
-	cmd := UpdateCorrelationCommand{}
+	cmd := UpdateCorrelationCommand{RequestHost: c.Req.Host}
 	if err := web.Bind(c.Req, &cmd); err != nil {
 		if errors.Is(err, ErrUpdateCorrelationEmptyParams) {
 			return response.Error(http.StatusBadRequest, "At least one of label, description or config is required", err)
@@ -167,6 +170,10 @@ func (s *CorrelationsService) updateHandler(c *contextmodel.ReqContext) response
 
 		if errors.Is(err, ErrCorrelationReadOnly) {
 			return response.Error(http.StatusForbidden, "Correlation can only be edited via provisioning", err)
+		}
+
+		if errors.Is(err, ErrInvalidExternalTarget) {
+			return response.Error(http.StatusBadRequest, "Invalid external correlation target", err)
 		}
 
 		return response.Error(http.StatusInternalServerError, "Failed to update correlation", err)
@@ -374,7 +381,7 @@ func (s *CorrelationsK8sService) registerAPIEndpoints() {
 }
 
 func (s *CorrelationsK8sService) createHandler(c *contextmodel.ReqContext) response.Response {
-	cmd := CreateCorrelationCommand{}
+	cmd := CreateCorrelationCommand{RequestHost: c.Req.Host}
 	if err := web.Bind(c.Req, &cmd); err != nil {
 		return response.Error(http.StatusBadRequest, "bad request data", err)
 	}
@@ -385,6 +392,9 @@ func (s *CorrelationsK8sService) createHandler(c *contextmodel.ReqContext) respo
 	if err != nil {
 		if errors.Is(err, ErrSourceDataSourceDoesNotExists) || errors.Is(err, ErrTargetDataSourceDoesNotExists) {
 			return response.Error(http.StatusNotFound, "Data source not found", err)
+		}
+		if errors.Is(err, ErrInvalidExternalTarget) {
+			return response.Error(http.StatusBadRequest, "Invalid external correlation target", err)
 		}
 		return response.Error(http.StatusInternalServerError, "Failed to add correlation", err)
 	}
@@ -420,7 +430,7 @@ func (s *CorrelationsK8sService) deleteHandler(c *contextmodel.ReqContext) respo
 }
 
 func (s *CorrelationsK8sService) updateHandler(c *contextmodel.ReqContext) response.Response {
-	cmd := UpdateCorrelationCommand{}
+	cmd := UpdateCorrelationCommand{RequestHost: c.Req.Host}
 	if err := web.Bind(c.Req, &cmd); err != nil {
 		if errors.Is(err, ErrUpdateCorrelationEmptyParams) {
 			return response.Error(http.StatusBadRequest, "At least one of label, description or config is required", err)
@@ -445,6 +455,10 @@ func (s *CorrelationsK8sService) updateHandler(c *contextmodel.ReqContext) respo
 
 		if errors.Is(err, ErrCorrelationReadOnly) {
 			return response.Error(http.StatusForbidden, "Correlation can only be edited via provisioning", err)
+		}
+
+		if errors.Is(err, ErrInvalidExternalTarget) {
+			return response.Error(http.StatusBadRequest, "Invalid external correlation target", err)
 		}
 
 		return response.Error(http.StatusInternalServerError, "Failed to update correlation", err)

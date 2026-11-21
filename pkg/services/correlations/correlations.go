@@ -8,6 +8,7 @@ import (
 
 	"github.com/grafana/grafana-app-sdk/resource"
 	v0alpha1 "github.com/grafana/grafana/apps/correlations/pkg/apis/correlation/v0alpha1"
+	correlationsApp "github.com/grafana/grafana/apps/correlations/pkg/app"
 	"github.com/grafana/grafana/pkg/api/routing"
 	"github.com/grafana/grafana/pkg/events"
 	"github.com/grafana/grafana/pkg/infra/db"
@@ -43,6 +44,8 @@ type CorrelationsService struct {
 	DataSourceService datasources.DataSourceService
 	AccessControl     accesscontrol.AccessControl
 	QuotaService      quota.Service
+	// grafanaHost is the host of Grafana's root_url; external targets on it are rejected.
+	grafanaHost string
 }
 
 func (s CorrelationsService) CreateCorrelation(ctx context.Context, cmd CreateCorrelationCommand) (Correlation, error) {
@@ -137,6 +140,8 @@ type CorrelationsK8sService struct {
 	clientGen         resource.ClientGenerator
 	k8sClient         client.K8sHandler
 	DataSourceService datasources.DataSourceService
+	// grafanaHost is the host of Grafana's root_url; external targets on it are rejected.
+	grafanaHost string
 }
 
 func (s *CorrelationsK8sService) CreateCorrelation(ctx context.Context, cmd CreateCorrelationCommand) (Correlation, error) {
@@ -173,6 +178,12 @@ func (s *CorrelationsK8sService) CreateCorrelation(ctx context.Context, cmd Crea
 		Config:      cmd.Config,
 		Provisioned: cmd.Provisioned,
 		Type:        cmd.Type,
+	}
+
+	if correlation.Type == external {
+		if err := correlationsApp.ValidateExternalTarget(correlation.Config.Target, s.grafanaHost, cmd.RequestHost); err != nil {
+			return Correlation{}, err
+		}
 	}
 
 	corrSpec, err := convertCorrelationToUnstructured(correlation)
@@ -222,6 +233,12 @@ func (s *CorrelationsK8sService) UpdateCorrelation(ctx context.Context, cmd Upda
 			correlation.Config.Target = *cmd.Config.Target
 		}
 		correlation.Config.Transformations = cmd.Config.Transformations
+	}
+
+	if correlation.Type == external {
+		if err := correlationsApp.ValidateExternalTarget(correlation.Config.Target, s.grafanaHost, cmd.RequestHost); err != nil {
+			return Correlation{}, err
+		}
 	}
 
 	dsCmd := &datasources.GetDataSourceQuery{OrgID: cmd.OrgId, UID: cmd.SourceUID}

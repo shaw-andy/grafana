@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	correlationsApp "github.com/grafana/grafana/apps/correlations/pkg/app"
 	"github.com/grafana/grafana/pkg/services/quota"
 )
 
@@ -21,6 +22,7 @@ var (
 	ErrCorrelationsQuotaFailed       = errors.New("error getting correlations quota")
 	ErrCorrelationsQuotaReached      = errors.New("correlations quota reached")
 	ErrConfigTypeDeprecated          = errors.New("config.type is deprecated; please move type to be sibling of config")
+	ErrInvalidExternalTarget         = correlationsApp.ErrInvalidExternalTarget
 )
 
 const (
@@ -172,6 +174,8 @@ type CreateCorrelationCommand struct {
 	Provisioned bool `json:"provisioned"`
 	// correlation type
 	Type CorrelationType `json:"type" binding:"Required"`
+	// Host the API request was served on. External targets on this host are rejected.
+	RequestHost string `json:"-"`
 }
 
 func (c CreateCorrelationCommand) Validate() error {
@@ -180,6 +184,11 @@ func (c CreateCorrelationCommand) Validate() error {
 	}
 	if c.TargetUID == nil && c.Type == query {
 		return fmt.Errorf("correlations of type \"%s\" must have a targetUID", query)
+	}
+	if c.Type == external {
+		if err := correlationsApp.ValidateExternalTarget(c.Config.Target, c.RequestHost); err != nil {
+			return err
+		}
 	}
 
 	if err := c.Config.Transformations.Validate(); err != nil {
@@ -240,11 +249,18 @@ type UpdateCorrelationCommand struct {
 	Config *CorrelationConfigUpdateDTO `json:"config"`
 	// correlation type
 	Type *CorrelationType `json:"type"`
+	// Host the API request was served on. External targets on this host are rejected.
+	RequestHost string `json:"-"`
 }
 
 func (c UpdateCorrelationCommand) Validate() error {
 	if c.Label == nil && c.Description == nil && c.Type == nil && (c.Config == nil || (c.Config.Field == nil && c.Config.Target == nil)) {
 		return ErrUpdateCorrelationEmptyParams
+	}
+	if c.Type != nil && *c.Type == external && c.Config != nil && c.Config.Target != nil {
+		if err := correlationsApp.ValidateExternalTarget(*c.Config.Target, c.RequestHost); err != nil {
+			return err
+		}
 	}
 
 	return nil
