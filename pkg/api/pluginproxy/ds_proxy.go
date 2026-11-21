@@ -1,7 +1,6 @@
 package pluginproxy
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -140,7 +139,7 @@ func (proxy *DataSourceProxy) HandleRequest() {
 	modifyResponse := func(resp *http.Response) error {
 		if resp.StatusCode == 401 {
 			// The data source rejected the request as unauthorized, convert to 400 (bad request)
-			body, err := io.ReadAll(resp.Body)
+			body, err := io.ReadAll(io.LimitReader(resp.Body, maxLoggedBodyBytes))
 			if err != nil {
 				return fmt.Errorf("failed to read data source response body: %w", err)
 			}
@@ -421,14 +420,7 @@ func (proxy *DataSourceProxy) logRequest() {
 		return
 	}
 
-	var body string
-	if proxy.ctx.Req.Body != nil {
-		buffer, err := io.ReadAll(proxy.ctx.Req.Body)
-		if err == nil {
-			proxy.ctx.Req.Body = io.NopCloser(bytes.NewBuffer(buffer))
-			body = string(buffer)
-		}
-	}
+	body := peekRequestBody(proxy.ctx.Req)
 
 	ctxLogger := logger.FromContext(proxy.ctx.Req.Context())
 	panelPluginId := proxy.ctx.Req.Header.Get("X-Panel-Plugin-Id")

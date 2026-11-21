@@ -1,9 +1,7 @@
 package pluginproxy
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -217,14 +215,7 @@ func (proxy PluginProxy) logRequest() {
 		return
 	}
 
-	var body string
-	if proxy.req.Body != nil {
-		buffer, err := io.ReadAll(proxy.req.Body)
-		if err == nil {
-			proxy.req.Body = io.NopCloser(bytes.NewBuffer(buffer))
-			body = string(buffer)
-		}
-	}
+	body := peekRequestBody(proxy.req)
 
 	ctxLogger := logger.FromContext(proxy.req.Context())
 	ctxLogger.Info("Proxying incoming request",
