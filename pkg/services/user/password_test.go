@@ -19,15 +19,28 @@ func TestPasswowrdService_ValidatePasswordHardcodePolicy(t *testing.T) {
 		strongPasswordPolicyEnabled bool
 	}{
 		{
-			name:                        "should return error when the password has less than 4 characters and strong password policy is disabled",
-			passwordTest:                NUMBER,
+			name:                        "should return error when the password has less than 12 characters and strong password policy is disabled",
+			passwordTest:                LOWERCASE,
 			expectedError:               ErrPasswordTooShort.Errorf("new password is too short"),
 			strongPasswordPolicyEnabled: false,
 		},
-		{name: "should not return error when the password has 4 characters and strong password policy is disabled",
-			passwordTest:                "test",
+		{
+			name:                        "should count characters rather than bytes when strong password policy is disabled",
+			passwordTest:                "ääääää",
+			expectedError:               ErrPasswordTooShort.Errorf("new password is too short"),
+			strongPasswordPolicyEnabled: false,
+		},
+		{
+			name:                        "should not return error when the password has 12 characters and strong password policy is disabled",
+			passwordTest:                LOWERCASE + LOWERCASE[:3],
 			expectedError:               nil,
 			strongPasswordPolicyEnabled: false,
+		},
+		{
+			name:                        "should count characters rather than bytes when strong password policy is enabled",
+			passwordTest:                "Ää1!ÄäÄä",
+			expectedError:               ErrPasswordPolicyInfringe.Errorf("new password is too short for the strong password policy"),
+			strongPasswordPolicyEnabled: true,
 		},
 		{
 			name:                        "should return error when the password has less than 12 characters and strong password policy is enabled",
