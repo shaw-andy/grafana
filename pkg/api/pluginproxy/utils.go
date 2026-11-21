@@ -13,6 +13,33 @@ import (
 	"github.com/grafana/grafana/pkg/plugins"
 )
 
+// maxLoggedBodyBytes caps how much of a proxied body is read for logging, so a
+// caller cannot make the proxy buffer an arbitrarily large body in memory.
+const maxLoggedBodyBytes = 1024
+
+// peekRequestBody returns at most maxLoggedBodyBytes of req.Body and replaces
+// req.Body so the proxied request still streams the complete body upstream.
+func peekRequestBody(req *http.Request) string {
+	if req.Body == nil || req.Body == http.NoBody {
+		return ""
+	}
+
+	prefix, err := io.ReadAll(io.LimitReader(req.Body, maxLoggedBodyBytes))
+	req.Body = &prefixedReadCloser{
+		Reader: io.MultiReader(bytes.NewReader(prefix), req.Body),
+		Closer: req.Body,
+	}
+	if err != nil {
+		return ""
+	}
+	return string(prefix)
+}
+
+type prefixedReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
 // interpolateString accepts template data and return a string with substitutions
 func interpolateString(text string, data templateData) (string, error) {
 	extraFuncs := map[string]any{
