@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
@@ -17,8 +18,19 @@ import (
 	"github.com/grafana/grafana/apps/playlist/pkg/reconcilers"
 )
 
+// MaxItems is the largest item list a playlist may store. List pages carry
+// whole stored bodies, so this bounds what each listed playlist costs.
+const MaxItems = 256
+
 type PlaylistConfig struct {
 	EnableReconcilers bool
+}
+
+func ValidateItemCount(n int) error {
+	if n > MaxItems {
+		return fmt.Errorf("playlist has %d items, the maximum is %d", n, MaxItems)
+	}
+	return nil
 }
 
 func getPatchClient(restConfig rest.Config, playlistKind resource.Kind) (operator.PatchClient, error) {
@@ -58,7 +70,14 @@ func New(cfg app.Config) (app.App, error) {
 
 	playlistValidator := &simple.Validator{
 		ValidateFunc: func(ctx context.Context, req *app.AdmissionRequest) error {
-			return nil
+			switch obj := req.Object.(type) {
+			case *playlistv1.Playlist:
+				return ValidateItemCount(len(obj.Spec.Items))
+			case *playlistv0alpha1.Playlist:
+				return ValidateItemCount(len(obj.Spec.Items))
+			default:
+				return fmt.Errorf("expected Playlist object, got %T", req.Object)
+			}
 		},
 	}
 
