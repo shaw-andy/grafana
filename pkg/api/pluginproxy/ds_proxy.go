@@ -1,7 +1,6 @@
 package pluginproxy
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -421,14 +420,7 @@ func (proxy *DataSourceProxy) logRequest() {
 		return
 	}
 
-	var body string
-	if proxy.ctx.Req.Body != nil {
-		buffer, err := io.ReadAll(proxy.ctx.Req.Body)
-		if err == nil {
-			proxy.ctx.Req.Body = io.NopCloser(bytes.NewBuffer(buffer))
-			body = string(buffer)
-		}
-	}
+	body := peekRequestBodyForLog(proxy.ctx.Req)
 
 	ctxLogger := logger.FromContext(proxy.ctx.Req.Context())
 	panelPluginId := proxy.ctx.Req.Header.Get("X-Panel-Plugin-Id")
