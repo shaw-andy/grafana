@@ -31,7 +31,7 @@ func New(orgId int64, name string) (KeyGenResult, error) {
 		return result, err
 	}
 
-	result.HashedKey, err = util.EncodePassword(jsonKey.Key, name)
+	result.HashedKey, err = util.EncodeAPIKeySecret(jsonKey.Key, name)
 	if err != nil {
 		return result, err
 	}
@@ -61,7 +61,7 @@ func Decode(keyString string) (*ApiKeyJson, error) {
 }
 
 func IsValid(key *ApiKeyJson, hashedKey string) (bool, error) {
-	check, err := util.EncodePassword(key.Key, key.Name)
+	check, err := util.EncodeAPIKeySecret(key.Key, key.Name)
 	if err != nil {
 		return false, err
 	}

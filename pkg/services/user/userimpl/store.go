@@ -29,6 +29,7 @@ type store interface {
 	Delete(context.Context, int64) error
 	LoginConflict(ctx context.Context, login, email string) error
 	Update(context.Context, *user.UpdateUserCommand) error
+	ReplacePasswordHash(ctx context.Context, userID int64, current, next user.Password) error
 	UpdateLastSeenAt(context.Context, *user.UpdateUserLastSeenAtCommand) error
 	GetSignedInUser(context.Context, *user.GetSignedInUserQuery) (*user.SignedInUser, error)
 	GetProfile(context.Context, *user.GetUserProfileQuery) (*user.UserProfileDTO, error)
@@ -349,19 +350,22 @@ func (ss *sqlStore) LoginConflict(ctx context.Context, login, email string) erro
 
 type updateUserQuery struct {
 	sqltemplate.SQLTemplate
-	UserTable      string
-	UserID         int64
-	Email          string
-	Name           string
-	Login          string
-	Password       *user.Password
-	EmailVerified  *bool
-	Theme          string
-	IsDisabled     *bool
-	IsGrafanaAdmin *bool
-	OrgID          *int64
-	IsProvisioned  *bool
-	Updated        legacysql.DBTime
+	UserTable string
+	UserID    int64
+	Email     string
+	Name      string
+	Login     string
+	Password  *user.Password
+	// CurrentPassword, when set, restricts the update to a row whose stored
+	// password hash still equals this value.
+	CurrentPassword *user.Password
+	EmailVerified   *bool
+	Theme           string
+	IsDisabled      *bool
+	IsGrafanaAdmin  *bool
+	OrgID           *int64
+	IsProvisioned   *bool
+	Updated         legacysql.DBTime
 }
 
 func (q updateUserQuery) EmailVerifiedValue() bool {
@@ -373,6 +377,13 @@ func (q updateUserQuery) PasswordValue() string {
 		return ""
 	}
 	return string(*q.Password)
+}
+
+func (q updateUserQuery) CurrentPasswordValue() string {
+	if q.CurrentPassword == nil {
+		return ""
+	}
+	return string(*q.CurrentPassword)
 }
 
 func (q updateUserQuery) IsDisabledValue() bool {
@@ -440,6 +451,38 @@ func (ss *sqlStore) Update(ctx context.Context, cmd *user.UpdateUserCommand) err
 			}
 		}
 
+		return nil
+	})
+}
+
+func (ss *sqlStore) ReplacePasswordHash(ctx context.Context, userID int64, current, next user.Password) error {
+	if current == "" || next == "" {
+		return fmt.Errorf("password hash must not be empty")
+	}
+
+	dbHelper, err := ss.sql(ctx)
+	if err != nil {
+		return fmt.Errorf("get legacy DB: %w", err)
+	}
+
+	return dbHelper.DB.WithDbSession(ctx, func(sess *db.Session) error {
+		now := time.Now().In(dbHelper.DB.GetEngine().DatabaseTZ).Truncate(time.Second)
+		query := updateUserQuery{
+			SQLTemplate:     sqltemplate.New(dbHelper.DialectForDriver()),
+			UserTable:       dbHelper.Table("user"),
+			UserID:          userID,
+			Password:        &next,
+			CurrentPassword: &current,
+			Updated:         legacysql.NewDBTime(now),
+		}
+
+		rawSQL, err := renderUserQuery(updateUserTemplate, query)
+		if err != nil {
+			return err
+		}
+		if _, err := sess.Exec(append([]any{rawSQL}, query.GetArgs()...)...); err != nil {
+			return handleSQLError(dbHelper.DB.GetDialect(), err)
+		}
 		return nil
 	})
 }

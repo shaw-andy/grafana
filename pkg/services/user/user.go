@@ -21,6 +21,7 @@ type Service interface {
 	GetByLoginWithPassword(context.Context, *GetUserByLoginQuery) (*User, error)
 	GetByEmail(context.Context, *GetUserByEmailQuery) (*User, error)
 	Update(context.Context, *UpdateUserCommand) error
+	RehashPassword(context.Context, *RehashPasswordCommand) error
 	UpdateLastSeenAt(context.Context, *UpdateUserLastSeenAtCommand) error
 	GetSignedInUser(context.Context, *GetSignedInUserQuery) (*SignedInUser, error)
 	Search(context.Context, *SearchUsersQuery) (*SearchUserQueryResult, error)

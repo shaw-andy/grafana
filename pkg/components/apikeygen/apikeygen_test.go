@@ -19,7 +19,7 @@ func TestApiKeyGen(t *testing.T) {
 	keyInfo, err := Decode(result.ClientSecret)
 	require.NoError(t, err)
 
-	keyHashed, err := util.EncodePassword(keyInfo.Key, keyInfo.Name)
+	keyHashed, err := util.EncodeAPIKeySecret(keyInfo.Key, keyInfo.Name)
 	require.NoError(t, err)
 	assert.Equal(t, result.HashedKey, keyHashed)
 

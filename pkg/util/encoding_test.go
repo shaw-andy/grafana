@@ -28,10 +28,36 @@ func TestGetBasicAuthHeader_Encoding(t *testing.T) {
 func TestEncodePassword(t *testing.T) {
 	encodedPassword, err := EncodePassword("iamgod", "pepper")
 	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(encodedPassword, "pbkdf2-sha256$600000$"))
+
+	ok, needsRehash := VerifyPassword("iamgod", "pepper", encodedPassword)
+	assert.True(t, ok)
+	assert.False(t, needsRehash)
+
+	ok, _ = VerifyPassword("iamgod", "salt", encodedPassword)
+	assert.False(t, ok)
+	ok, _ = VerifyPassword("wrong", "pepper", encodedPassword)
+	assert.False(t, ok)
+}
+
+func TestVerifyPasswordLegacyHash(t *testing.T) {
+	legacy := "e59c568621e57756495a468f47c74e07c911b037084dd464bb2ed72410970dc849cabd71b48c394faf08a5405dae53741ce9"
+
+	ok, needsRehash := VerifyPassword("iamgod", "pepper", legacy)
+	assert.True(t, ok)
+	assert.True(t, needsRehash)
+
+	ok, _ = VerifyPassword("wrong", "pepper", legacy)
+	assert.False(t, ok)
+}
+
+func TestEncodeAPIKeySecret(t *testing.T) {
+	encoded, err := EncodeAPIKeySecret("iamgod", "pepper")
+	require.NoError(t, err)
 	assert.Equal(
 		t,
 		"e59c568621e57756495a468f47c74e07c911b037084dd464bb2ed72410970dc849cabd71b48c394faf08a5405dae53741ce9",
-		encodedPassword,
+		encoded,
 	)
 }
 

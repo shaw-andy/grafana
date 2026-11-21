@@ -4,11 +4,13 @@ import (
 	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"io"
 	"mime/quotedprintable"
+	"strconv"
 	"strings"
 )
 
@@ -48,13 +50,79 @@ func GetRandomString(n int, alphabets ...byte) (string, error) {
 	return string(bytes), nil
 }
 
-// EncodePassword encodes a password using PBKDF2.
+const (
+	passwordHashPrefix = "pbkdf2-sha256$"
+	// PasswordHashIterations follows the OWASP recommendation for PBKDF2-HMAC-SHA256.
+	PasswordHashIterations    = 600_000
+	maxPasswordHashIterations = 10_000_000
+	passwordHashKeyLen        = sha256.Size
+
+	legacyPasswordHashIterations = 10_000
+	legacyPasswordHashKeyLen     = 50
+)
+
+// EncodePassword hashes a login password with PBKDF2-HMAC-SHA256 and returns
+// "pbkdf2-sha256$<iterations>$<hex digest>". The salt is not part of the result.
+// Use VerifyPassword to check a password against the result.
 func EncodePassword(password string, salt string) (string, error) {
-	newPasswd, err := pbkdf2.Key(sha256.New, password, []byte(salt), 10000, 50)
+	digest, err := pbkdf2.Key(sha256.New, password, []byte(salt), PasswordHashIterations, passwordHashKeyLen)
 	if err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(newPasswd), nil
+	return passwordHashPrefix + strconv.Itoa(PasswordHashIterations) + "$" + hex.EncodeToString(digest), nil
+}
+
+// VerifyPassword reports whether password matches a stored hash produced by
+// EncodePassword, or by the 10000-iteration PBKDF2 encoding used before it.
+// needsRehash is true when the password matches but the stored hash is not
+// what EncodePassword produces today, and should be replaced.
+func VerifyPassword(password, salt, hash string) (ok bool, needsRehash bool) {
+	if rest, found := strings.CutPrefix(hash, passwordHashPrefix); found {
+		iterText, digestHex, found := strings.Cut(rest, "$")
+		if !found {
+			return false, false
+		}
+		iterations, err := strconv.Atoi(iterText)
+		if err != nil || iterations < 1 || iterations > maxPasswordHashIterations {
+			return false, false
+		}
+		digest, err := hex.DecodeString(digestHex)
+		if err != nil || len(digest) == 0 {
+			return false, false
+		}
+		if !pbkdf2Matches(password, salt, iterations, digest) {
+			return false, false
+		}
+		return true, iterations != PasswordHashIterations || len(digest) != passwordHashKeyLen
+	}
+
+	digest, err := hex.DecodeString(hash)
+	if err != nil || len(digest) != legacyPasswordHashKeyLen {
+		return false, false
+	}
+	if !pbkdf2Matches(password, salt, legacyPasswordHashIterations, digest) {
+		return false, false
+	}
+	return true, true
+}
+
+func pbkdf2Matches(password, salt string, iterations int, digest []byte) bool {
+	derived, err := pbkdf2.Key(sha256.New, password, []byte(salt), iterations, len(digest))
+	if err != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare(derived, digest) == 1
+}
+
+// EncodeAPIKeySecret hashes a server-generated random API key or service
+// account token secret. Stored values are looked up by this hash, so the
+// output must stay stable. Never use it for user-chosen passwords.
+func EncodeAPIKeySecret(secret string, salt string) (string, error) {
+	digest, err := pbkdf2.Key(sha256.New, secret, []byte(salt), legacyPasswordHashIterations, legacyPasswordHashKeyLen)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(digest), nil
 }
 
 // GetBasicAuthHeader returns a base64 encoded string from user and password.

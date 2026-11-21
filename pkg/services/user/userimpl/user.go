@@ -145,6 +145,11 @@ func (s *Service) Update(ctx context.Context, cmd *user.UpdateUserCommand) error
 	return s.legacyService.Update(ctx, cmd)
 }
 
+func (s *Service) RehashPassword(ctx context.Context, cmd *user.RehashPasswordCommand) error {
+	// Redirect to legacy service as support for passwords is not implemented in the k8s service
+	return s.legacyService.RehashPassword(ctx, cmd)
+}
+
 func (s *Service) UpdateLastSeenAt(ctx context.Context, cmd *user.UpdateUserLastSeenAtCommand) error {
 	if s.isKubernetesUserServiceEnabled(ctx) && !s.shouldFallbackToLegacy(ctx) {
 		return s.k8sService.UpdateLastSeenAt(s.k8sCtxWithIdentity(ctx), cmd)

@@ -102,6 +102,15 @@ type UpdateUserLastSeenAtCommand struct {
 	OrgID  int64
 }
 
+// RehashPasswordCommand re-encodes a user's current password with the current
+// password hashing parameters. It is applied only while the stored hash still
+// equals CurrentHash and Password still matches it.
+type RehashPasswordCommand struct {
+	UserID      int64
+	Password    Password
+	CurrentHash Password
+}
+
 type ListUserResult struct {
 	Users      []*User
 	ContinueID int64

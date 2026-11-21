@@ -35,6 +35,12 @@ func (p Password) Hash(salt string) (Password, error) {
 	return Password(hashed), nil
 }
 
+// Verify reports whether p matches the stored hash, and whether the stored hash
+// should be replaced with the output of Hash.
+func (p Password) Verify(salt string, hash Password) (ok bool, needsRehash bool) {
+	return util.VerifyPassword(string(p), salt, string(hash))
+}
+
 // ValidatePassword checks if a new password meets the required criteria based on the given configuration.
 // If BasicAuthStrongPasswordPolicy is disabled, it only checks for password length.
 // Otherwise, it ensures the password meets the minimum length requirement and contains at least one uppercase letter,

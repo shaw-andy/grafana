@@ -33,3 +33,6 @@ SET
   updated = {{ .Arg .Updated }}
 WHERE id = {{ .Arg .UserID }}
   AND is_service_account = FALSE
+{{ if .CurrentPasswordValue -}}
+  AND password = {{ .Arg .CurrentPasswordValue }}
+{{ end -}}

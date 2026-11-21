@@ -286,12 +286,7 @@ func (s *LegacyService) Update(ctx context.Context, cmd *user.UpdateUserCommand)
 	}
 
 	if cmd.OldPassword != nil {
-		old, err := cmd.OldPassword.Hash(usr.Salt)
-		if err != nil {
-			return err
-		}
-
-		if old != usr.Password {
+		if ok, _ := cmd.OldPassword.Verify(usr.Salt, usr.Password); !ok {
 			return user.ErrPasswordMissmatch.Errorf("old password does not match stored password")
 		}
 	}
@@ -301,12 +296,12 @@ func (s *LegacyService) Update(ctx context.Context, cmd *user.UpdateUserCommand)
 			return err
 		}
 
+		if same, _ := cmd.Password.Verify(usr.Salt, usr.Password); same {
+			return user.ErrNewPasswordSameAsOld.Errorf("new password cannot be the same as the current password")
+		}
 		hashed, err := cmd.Password.Hash(usr.Salt)
 		if err != nil {
 			return err
-		}
-		if hashed == usr.Password {
-			return user.ErrNewPasswordSameAsOld.Errorf("new password cannot be the same as the current password")
 		}
 		cmd.Password = &hashed
 	}
@@ -330,6 +325,35 @@ func (s *LegacyService) Update(ctx context.Context, cmd *user.UpdateUserCommand)
 	}
 
 	return s.store.Update(ctx, cmd)
+}
+
+func (s *LegacyService) RehashPassword(ctx context.Context, cmd *user.RehashPasswordCommand) error {
+	ctx, span := s.tracer.Start(ctx, "user.legacy.RehashPassword", trace.WithAttributes(
+		attribute.Int64("userID", cmd.UserID),
+	))
+	defer span.End()
+
+	usr, err := s.store.GetByID(ctx, cmd.UserID)
+	if err != nil {
+		return err
+	}
+	if usr.Password != cmd.CurrentHash {
+		return nil
+	}
+
+	ok, needsRehash := cmd.Password.Verify(usr.Salt, usr.Password)
+	if !ok {
+		return user.ErrPasswordMissmatch.Errorf("password does not match stored password")
+	}
+	if !needsRehash {
+		return nil
+	}
+
+	hashed, err := cmd.Password.Hash(usr.Salt)
+	if err != nil {
+		return err
+	}
+	return s.store.ReplacePasswordHash(ctx, usr.ID, usr.Password, hashed)
 }
 
 func (s *LegacyService) UpdateLastSeenAt(ctx context.Context, cmd *user.UpdateUserLastSeenAtCommand) error {
