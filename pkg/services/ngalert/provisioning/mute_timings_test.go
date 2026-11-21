@@ -1483,3 +1483,109 @@ func createConfigWithImportedIntervals(grafanaIntervals []v1.TimeInterval, impor
 
 	return &legacy_storage.ConfigRevision{Config: cfg}
 }
+
+// Names that are not one URL path segment must be rejected on create and update.
+// A name such as parent-directory segments followed by "logout?" is stored today and
+// later placed, unencoded, into the mute-timing export URL.
+func TestMuteTimingNameMustBeSinglePathSegment(t *testing.T) {
+	orgID := int64(1)
+	rejected := []string{
+		"../../../../logout?",
+		"../../../../../logout?",
+		"foo/bar",
+		"foo\\bar",
+		"foo?bar",
+		"foo#bar",
+		"..",
+		".",
+		"%2e%2e/%2e%2e/logout?",
+		"foo%2Fbar",
+		"foo\nbar",
+		"foo\rbar",
+	}
+	allowed := []string{
+		"business-hours",
+		"Some interval",
+		"weekends",
+	}
+
+	for _, name := range rejected {
+		t.Run("create rejects "+name, func(t *testing.T) {
+			sut, store, prov := createMuteTimingSvcSut()
+			saved := false
+			store.GetFn = func(ctx context.Context, orgID int64) (*legacy_storage.ConfigRevision, error) {
+				return &legacy_storage.ConfigRevision{Config: &v1.AMConfigV1{}}, nil
+			}
+			store.SaveFn = func(ctx context.Context, revision *legacy_storage.ConfigRevision) error {
+				saved = true
+				return nil
+			}
+			prov.EXPECT().SetProvenance(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+			_, err := sut.CreateMuteTiming(context.Background(), v1.TimeInterval{
+				ResourceMetadata: v1.ResourceMetadata{Provenance: models.ProvenanceNone},
+				Title:            name,
+			}, orgID)
+
+			require.Error(t, err)
+			require.Truef(t, ErrTimeIntervalInvalid.Base.Is(err), "expected ErrTimeIntervalInvalid but got %s", err)
+			require.False(t, saved, "rejected name must not be written")
+		})
+
+		t.Run("update rejects "+name, func(t *testing.T) {
+			sut, store, prov := createMuteTimingSvcSut()
+			const original = "business-hours"
+			saved := false
+			store.GetFn = func(ctx context.Context, orgID int64) (*legacy_storage.ConfigRevision, error) {
+				return &legacy_storage.ConfigRevision{Config: &v1.AMConfigV1{
+					AlertmanagerConfig: v1.PostableApiAlertingConfig{
+						Config: v1.Config{Route: &v1.Route{}},
+					},
+					TimeIntervals: map[v1.ResourceUID]v1.TimeInterval{
+						v1.TimeIntervalUID(original): v1.NewTimeInterval(original, nil, models.ProvenanceNone),
+					},
+				}}, nil
+			}
+			store.SaveFn = func(ctx context.Context, revision *legacy_storage.ConfigRevision) error {
+				saved = true
+				return nil
+			}
+			prov.EXPECT().GetProvenances(mock.Anything, mock.Anything, mock.Anything).Return(map[string]models.Provenance{
+				original: models.ProvenanceNone,
+			}, nil).Maybe()
+			prov.EXPECT().SetProvenance(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+			prov.EXPECT().DeleteProvenance(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+			prov.EXPECT().GetProvenance(mock.Anything, mock.Anything, mock.Anything).Return(models.ProvenanceNone, nil).Maybe()
+
+			_, err := sut.UpdateMuteTiming(context.Background(), v1.TimeInterval{
+				ResourceMetadata: v1.ResourceMetadata{
+					UID:        v1.TimeIntervalUID(original),
+					Provenance: models.ProvenanceNone,
+				},
+				Title: name,
+			}, orgID)
+
+			require.Error(t, err)
+			require.Truef(t, ErrTimeIntervalInvalid.Base.Is(err), "expected ErrTimeIntervalInvalid but got %s", err)
+			require.False(t, saved, "rejected name must not be written")
+		})
+	}
+
+	for _, name := range allowed {
+		t.Run("create allows "+name, func(t *testing.T) {
+			sut, store, prov := createMuteTimingSvcSut()
+			store.GetFn = func(ctx context.Context, orgID int64) (*legacy_storage.ConfigRevision, error) {
+				return &legacy_storage.ConfigRevision{Config: &v1.AMConfigV1{}}, nil
+			}
+			prov.EXPECT().SetProvenance(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+			created, err := sut.CreateMuteTiming(context.Background(), v1.TimeInterval{
+				ResourceMetadata: v1.ResourceMetadata{Provenance: models.ProvenanceNone},
+				Title:            name,
+			}, orgID)
+
+			require.NoError(t, err)
+			require.Equal(t, name, created.Title)
+		})
+	}
+}
