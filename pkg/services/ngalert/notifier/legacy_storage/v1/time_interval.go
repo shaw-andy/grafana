@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"net/url"
 	"slices"
 	"strings"
+	"unicode"
 	"unsafe"
 
 	"github.com/prometheus/alertmanager/timeinterval"
@@ -34,6 +36,9 @@ func (mt *TimeInterval) Validate() error {
 	if mt.Title == "" {
 		return errors.New("missing name in time interval")
 	}
+	if err := validateTimeIntervalName(mt.Title); err != nil {
+		return err
+	}
 
 	// For now, we rely on the upstream validation in marshallers, but we should eventually create local types and move
 	// the logic to explicit Validate() methods.
@@ -43,6 +48,28 @@ func (mt *TimeInterval) Validate() error {
 	}
 	if err = yaml.Unmarshal(s, &(mt.TimeIntervals)); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateTimeIntervalName ensures the name can be used as a single URL path segment, because clients
+// address individual time intervals by name in the path (e.g. the provisioning export endpoint).
+// Percent-decoded forms are checked too, since URL parsers treat "%2e" as "." in dot-segments.
+func validateTimeIntervalName(name string) error {
+	candidates := []string{name}
+	if decoded, err := url.PathUnescape(name); err == nil && decoded != name {
+		candidates = append(candidates, decoded)
+	}
+	for _, candidate := range candidates {
+		if candidate == "." || candidate == ".." {
+			return fmt.Errorf("invalid time interval name %q: name cannot be '.' or '..'", name)
+		}
+		if strings.ContainsAny(candidate, `/\?#`) {
+			return fmt.Errorf("invalid time interval name %q: name cannot contain '/', '\\', '?' or '#'", name)
+		}
+		if strings.ContainsFunc(candidate, unicode.IsControl) {
+			return fmt.Errorf("invalid time interval name %q: name cannot contain control characters", name)
+		}
 	}
 	return nil
 }
