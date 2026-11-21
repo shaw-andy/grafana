@@ -144,8 +144,14 @@ var tagsConverter = data.FieldConverter{
 			return nil, nil
 		}
 
+		// The column type comes from the query, so the cell may hold any JSON type.
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("unexpected type for trace tags, expected string but got %T", v)
+		}
+
 		m := map[string]any{}
-		err := json.Unmarshal([]byte(v.(string)), &m)
+		err := json.Unmarshal([]byte(s), &m)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unmarshal trace tags: %s", err)
 		}
