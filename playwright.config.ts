@@ -71,7 +71,7 @@ export default defineConfig<PluginOptions>({
       use: {
         user: {
           user: 'viewer',
-          password: 'password',
+          password: 'viewer-password',
           role: 'Viewer',
         },
       },
