@@ -28,9 +28,7 @@ enabled = false
 
 ## Password policy
 
-By default, Grafana’s password policy requires a minimum of four characters for basic auth users. For a stronger password policy, enable the `password_policy` configuration option.
-
-With the `password_policy` option enabled, new and updated passwords must meet the following criteria:
+Grafana’s password policy applies to new and updated passwords for basic auth users. The `password_policy` configuration option is enabled by default, and new and updated passwords must meet the following criteria:
 
 - At least 12 characters
 - At least one uppercase letter
@@ -38,9 +36,11 @@ With the `password_policy` option enabled, new and updated passwords must meet t
 - At least one number
 - At least one special character
 
+If you disable the `password_policy` option, Grafana still requires new and updated passwords to have at least 12 characters, but doesn't check for uppercase letters, lowercase letters, numbers, or special characters.
+
 ```bash
 [auth.basic]
-password_policy = true
+password_policy = false
 ```
 
 {{< admonition type="note" >}}

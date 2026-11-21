@@ -104,6 +104,14 @@ func (s *LegacyService) Create(ctx context.Context, cmd *user.CreateUserCommand)
 		return nil, user.ErrEmptyUsernameAndEmail.Errorf("user cannot be created with empty username and email")
 	}
 
+	// Validate before resolving the org: GetIDForNewUser may create one.
+	password := cmd.Password
+	if len(password) > 0 {
+		if err := password.Validate(s.cfg); err != nil {
+			return nil, err
+		}
+	}
+
 	// if the user is provisioned, use the org ID from the requester
 	var orgID int64
 	var err error
@@ -164,12 +172,8 @@ func (s *LegacyService) Create(ctx context.Context, cmd *user.CreateUserCommand)
 	}
 	usr.Rands = rands
 
-	if len(cmd.Password) > 0 {
-		if err := cmd.Password.Validate(s.cfg); err != nil {
-			return nil, err
-		}
-
-		usr.Password, err = cmd.Password.Hash(usr.Salt)
+	if len(password) > 0 {
+		usr.Password, err = password.Hash(usr.Salt)
 		if err != nil {
 			return nil, err
 		}

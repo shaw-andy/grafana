@@ -344,7 +344,7 @@ func doUserCRUDTestsUsingTheLegacyAPIs(t *testing.T, helper *apis.K8sTestHelper)
 			"name": "Legacy User 3",
 			"email": "legacyuser3@example",
 			"login": "legacyuser3",
-			"password": "password123"
+			"password": "Placeholder-Pw1"
 		}`
 
 		rsp := apis.DoRequest(helper, apis.RequestParams{

@@ -2178,7 +2178,7 @@ func readAuthSettings(iniFile *ini.File, cfg *Cfg) (err error) {
 	// basic auth
 	authBasic := iniFile.Section("auth.basic")
 	cfg.BasicAuthEnabled = authBasic.Key("enabled").MustBool(true)
-	cfg.BasicAuthStrongPasswordPolicy = authBasic.Key("password_policy").MustBool(false)
+	cfg.BasicAuthStrongPasswordPolicy = authBasic.Key("password_policy").MustBool(true)
 
 	// SSO Settings
 	ssoSettings := iniFile.Section("sso_settings")

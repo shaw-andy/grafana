@@ -487,7 +487,7 @@ func doTeamBindingCRUDTestsUsingTheLegacyAPIs(t *testing.T, helper *apis.K8sTest
 			"name": "Test User 2",
 			"email": "testuser2@example.com",
 			"login": "testuser2",
-			"password": "password123"
+			"password": "Placeholder-Pw1"
 		}`
 
 		type legacyUserResponse struct {
