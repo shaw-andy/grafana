@@ -857,9 +857,7 @@ func (b *APIBuilder) UpdateAPIGroupInfo(apiGroupInfo *genericapiserver.APIGroupI
 	connCombinedValidator := appadmission.NewCombinedValidator(connAdmissionValidator, connDeleteValidator)
 	b.admissionHandler.RegisterMutator(provisioning.ConnectionResourceInfo.GetName(), connection.NewAdmissionMutator(b.connectionFactory))
 	b.admissionHandler.RegisterValidator(provisioning.ConnectionResourceInfo.GetName(), connCombinedValidator)
-	// Jobs mutator and validator. The mutator attributes each job to the acting
-	// user at creation time (gated by the provisioning.userAttribution flag) and
-	// the validator enforces that the recorded author is immutable.
+	// Jobs mutator and validator are registered with the jobs connector below.
 	jobSupportedResources := make([]provisioning.SupportedResource, 0, len(b.supportedResources))
 	for _, r := range b.supportedResources {
 		jobSupportedResources = append(jobSupportedResources, provisioning.SupportedResource{
@@ -868,8 +866,6 @@ func (b *APIBuilder) UpdateAPIGroupInfo(apiGroupInfo *genericapiserver.APIGroupI
 			Disabled: !r.IsActive(),
 		})
 	}
-	b.admissionHandler.RegisterMutator(provisioning.JobResourceInfo.GetName(), appjobs.NewAdmissionMutator(userAttributionEnabled))
-	b.admissionHandler.RegisterValidator(provisioning.JobResourceInfo.GetName(), appjobs.NewAdmissionValidator(jobSupportedResources, performanceEnabled))
 	b.admissionHandler.RegisterValidator(provisioning.HistoricJobResourceInfo.GetName(), appjobs.NewHistoricJobAdmissionValidator())
 
 	jobStore, err := grafanaregistry.NewCompleteRegistryStore(opts.Scheme, provisioning.JobResourceInfo, opts.OptsGetter)
@@ -944,7 +940,20 @@ func (b *APIBuilder) UpdateAPIGroupInfo(apiGroupInfo *genericapiserver.APIGroupI
 	storage[provisioning.RepositoryResourceInfo.StoragePath("refs")] = WithTimeout(NewRefsConnector(b), 30*time.Second)
 	storage[provisioning.RepositoryResourceInfo.StoragePath("resources")] = WithTimeout(NewListConnector(b, b.resourceLister), 30*time.Second)
 	storage[provisioning.RepositoryResourceInfo.StoragePath("history")] = WithTimeout(NewHistorySubresource(b), 30*time.Second)
-	storage[provisioning.RepositoryResourceInfo.StoragePath("jobs")] = WithTimeout(NewJobsConnector(b, b, b, jobHistory, b.access, b.clients, b.folderMetadataEnabled, performanceEnabled), 30*time.Second)
+	jobsConn := NewJobsConnector(b, b, b, jobHistory, b.access, b.clients, b.folderMetadataEnabled, performanceEnabled)
+	storage[provisioning.RepositoryResourceInfo.StoragePath("jobs")] = WithTimeout(jobsConn, 30*time.Second)
+	// The job mutator attributes each job to the acting user at creation time (gated
+	// by the provisioning.userAttribution flag) and the validator enforces that the
+	// recorded author is immutable. Both are wrapped so that jobs written through the
+	// jobs resource get the same authorization as jobs created through the connector.
+	jobAdmission := newJobAuthorizationAdmission(
+		appjobs.NewAdmissionMutator(userAttributionEnabled),
+		appjobs.NewAdmissionValidator(jobSupportedResources, performanceEnabled),
+		jobsConn,
+		jobSupportedResources,
+	)
+	b.admissionHandler.RegisterMutator(provisioning.JobResourceInfo.GetName(), jobAdmission)
+	b.admissionHandler.RegisterValidator(provisioning.JobResourceInfo.GetName(), jobAdmission)
 
 	// Add any extra storage
 	for _, extra := range b.extras {

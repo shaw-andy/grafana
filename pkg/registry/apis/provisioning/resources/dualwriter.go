@@ -759,7 +759,7 @@ func (r *DualReadWriter) deleteFolder(ctx context.Context, opts DualWriteOptions
 		}
 	}
 
-	if err := r.authorizer.AuthorizeDeleteByPath(ctx, opts.Path); err != nil {
+	if _, err := r.authorizer.AuthorizeDeleteDirectory(ctx, opts.Path); err != nil {
 		return nil, fmt.Errorf("authorize delete folder: %w", err)
 	}
 

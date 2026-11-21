@@ -1126,6 +1126,8 @@ func TestDeleteWorker_ProcessWithPathDeduplication(t *testing.T) {
 	mockRepo := &mockReaderWriter{
 		MockRepository: repository.NewMockRepository(t),
 	}
+	// "main" is not the configured branch, so the directory is deleted without a sync.
+	mockRepo.On("Config").Return(&v0alpha1.Repository{})
 	mockProgress := jobs.NewMockJobProgressRecorder(t)
 	mockWrapFn := repository.NewMockWrapWithStageFn(t)
 

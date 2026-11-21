@@ -38,7 +38,8 @@ import (
 //   - Permissions on a parent folder grant at least that level of access to all children
 //   - Children can have elevated permissions, but never reduced permissions
 //   - Resource operations verify permissions based on the resource's actual location
-//   - Folder operations verify permissions on the folder itself, not recursively on contents
+//   - Folder operations verify permissions on the folder itself, not recursively on contents,
+//     except deletes: a folder grant does not include delete on the resources inside it
 //   - File metadata is user-controlled and not solely trusted for permission checks
 //
 // Example Hierarchy:
@@ -77,13 +78,20 @@ type Authorizer interface {
 
 	// AuthorizeDeleteByPath checks if the user has permission to delete the target
 	// at the specified path. Handles both files and directories:
-	//   - Directory paths: checks folder delete permission
+	//   - Directory paths: checks folder delete permission on the directory only
 	//   - File paths: reads the file to determine its resource type and checks
 	//     delete permission for that type on the parent folder
 	//
-	// For individual resource operations where the resource type is known,
-	// prefer AuthorizeResource instead.
+	// Deleting a directory deletes everything in it; operations that do so must use
+	// AuthorizeDeleteDirectory. For individual resource operations where the resource
+	// type is known, prefer AuthorizeResource instead.
 	AuthorizeDeleteByPath(ctx context.Context, path string) error
+
+	// AuthorizeDeleteDirectory checks folder delete permission on the directory and
+	// on every nested directory, and delete permission on every nested resource file,
+	// as found on the configured branch. It returns the DirectoryFingerprint of the
+	// contents it authorized.
+	AuthorizeDeleteDirectory(ctx context.Context, path string) (string, error)
 
 	// AuthorizeMoveByPath checks if the user has permission to move the source
 	// path to the target path. Handles both files and directories:
@@ -372,34 +380,140 @@ func (a *ProvisioningAuthorizer) AuthorizeCreateFolder(ctx context.Context, path
 	return a.authorizeFolder(ctx, parentPath, utils.VerbCreate)
 }
 
-// authorizeDeleteFolder checks if the user has permission to delete the folder at the
-// specified path.
+// AuthorizeDeleteDirectory checks if the user has permission to delete the directory at
+// path together with everything below it on the configured branch.
 //
-// Authorization is checked only against the folder itself. Permissions on the parent folder
-// grant at least that level of access to all children, so checking the folder is sufficient.
-// Individual nested resources are not checked separately.
+// Deleting a directory removes every nested file, and the sync that follows deletes the
+// resources those files provisioned. A folders:delete grant does not include delete on the
+// resources inside the folder, so each nested entry is checked like a delete of that entry
+// on its own:
+//   - the directory itself and every nested directory: folders:delete
+//   - every nested resource file: delete on its resource type in its parent folder
 //
-// When folder metadata is enabled, the folder ID is determined by reading _folder.json.
+// The returned fingerprint identifies the contents that were authorized (see
+// DirectoryFingerprint). Callers that delete the directory later must refuse to do so
+// when the directory no longer has that fingerprint.
 //
 // Example:
 //
-//	Deleting "team-a/project-x/" (containing dashboards A, B, C):
-//	- Checks: delete permission on "team-a/project-x"
-//	- Does NOT check: permissions on dashboard A, B, or C
-//	- Reason: Parent folder permissions apply to all contents
-func (a *ProvisioningAuthorizer) authorizeDeleteFolder(ctx context.Context, path string) error {
-	return a.authorizeFolder(ctx, path, utils.VerbDelete)
+//	Deleting "team-a/project-x/" (containing dashboards A, B and subfolder "y/"):
+//	- Checks: folders:delete on "team-a/project-x" and on "team-a/project-x/y"
+//	- Checks: dashboards:delete for A and B in their folders
+func (a *ProvisioningAuthorizer) AuthorizeDeleteDirectory(ctx context.Context, path string) (string, error) {
+	if !safepath.IsDir(path) {
+		return "", fmt.Errorf("path %q is not a directory", path)
+	}
+
+	if err := a.authorizeFolder(ctx, path, utils.VerbDelete); err != nil {
+		return "", err
+	}
+
+	tree, err := a.reader.ReadTree(ctx, "")
+	if err != nil {
+		return "", fmt.Errorf("read repository tree: %w", err)
+	}
+	nested := EntriesInDirectory(tree, path)
+
+	folderIDs := map[string]string{}
+	parentFolderID := func(filePath string) (string, error) {
+		parentPath := safepath.Dir(filePath)
+		if id, ok := folderIDs[parentPath]; ok {
+			return id, nil
+		}
+		id := RootFolder(a.repo)
+		if parentPath != "" {
+			var err error
+			if id, err = a.getFolderID(ctx, parentPath); err != nil {
+				return "", fmt.Errorf("get parent folder ID for %q: %w", filePath, err)
+			}
+		}
+		folderIDs[parentPath] = id
+		return id, nil
+	}
+	allTypesAllowed := map[string]bool{}
+
+	for _, entry := range nested {
+		if !entry.Blob {
+			if err := a.authorizeFolder(ctx, entry.Path, utils.VerbDelete); err != nil {
+				return "", fmt.Errorf("authorize delete of nested folder %q: %w", entry.Path, err)
+			}
+			continue
+		}
+
+		// Only resource files are synced into Grafana; removing anything else
+		// (README.md, _folder.json, ...) deletes no resource.
+		if IsPathSupported(entry.Path) != nil || IsFolderMetadataFile(entry.Path) {
+			continue
+		}
+
+		folderID, err := parentFolderID(entry.Path)
+		if err != nil {
+			return "", err
+		}
+		allowed, ok := allTypesAllowed[folderID]
+		if !ok {
+			allowed = a.authorizeAllResourceTypes(ctx, folderID, utils.VerbDelete) == nil
+			allTypesAllowed[folderID] = allowed
+		}
+		if allowed {
+			continue
+		}
+
+		if err := a.authorizeNestedFileDelete(ctx, entry.Path, folderID); err != nil {
+			return "", fmt.Errorf("authorize delete of nested file %q: %w", entry.Path, err)
+		}
+	}
+
+	return DirectoryFingerprint(nested), nil
+}
+
+// authorizeNestedFileDelete checks delete permission for the resource type stored in the
+// file at path. A file that cannot be resolved to a supported type may still back a
+// resource synced from an earlier version of it, so it requires delete on every type.
+func (a *ProvisioningAuthorizer) authorizeNestedFileDelete(ctx context.Context, path, folderID string) error {
+	gvr, err := a.resolveFileGVR(ctx, path)
+	if err != nil {
+		return a.authorizeAllResourceTypes(ctx, folderID, utils.VerbDelete)
+	}
+	return a.access.Check(ctx, authlib.CheckRequest{
+		Group:    gvr.Group,
+		Resource: gvr.Resource,
+		Verb:     utils.VerbDelete,
+	}, folderID)
+}
+
+// authorizeAllResourceTypes checks verb on every supported non-folder resource type in
+// the given folder.
+func (a *ProvisioningAuthorizer) authorizeAllResourceTypes(ctx context.Context, folderID, verb string) error {
+	for _, supported := range a.clients.SupportedResources() {
+		if supported.GroupKind == FolderKind.GroupKind() {
+			continue
+		}
+		_, gvr, err := a.clients.ForKind(ctx, schema.GroupVersionKind{Group: supported.Group, Kind: supported.Kind})
+		if err != nil {
+			return fmt.Errorf("resolve client for %s/%s: %w", supported.Group, supported.Kind, err)
+		}
+		if err := a.access.Check(ctx, authlib.CheckRequest{
+			Group:    gvr.Group,
+			Resource: gvr.Resource,
+			Verb:     verb,
+		}, folderID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // AuthorizeDeleteByPath checks if the user has permission to delete the target
 // at the specified path.
 //
 // For directory paths, checks folder delete permission in the parent folder context.
+// That does not cover the directory contents; see AuthorizeDeleteDirectory.
 // For file paths, reads the file to determine its resource type and checks delete
 // permission for that type on the parent folder.
 func (a *ProvisioningAuthorizer) AuthorizeDeleteByPath(ctx context.Context, path string) error {
 	if safepath.IsDir(path) {
-		return a.authorizeDeleteFolder(ctx, path)
+		return a.authorizeFolder(ctx, path, utils.VerbDelete)
 	}
 
 	parentPath := safepath.Dir(path)
