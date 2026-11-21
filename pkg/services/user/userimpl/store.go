@@ -29,6 +29,7 @@ type store interface {
 	Delete(context.Context, int64) error
 	LoginConflict(ctx context.Context, login, email string) error
 	Update(context.Context, *user.UpdateUserCommand) error
+	UpdatePasswordHash(ctx context.Context, userID int64, salt string, currentHash, newHash user.Password) error
 	UpdateLastSeenAt(context.Context, *user.UpdateUserLastSeenAtCommand) error
 	GetSignedInUser(context.Context, *user.GetSignedInUserQuery) (*user.SignedInUser, error)
 	GetProfile(context.Context, *user.GetUserProfileQuery) (*user.UserProfileDTO, error)
@@ -441,6 +442,47 @@ func (ss *sqlStore) Update(ctx context.Context, cmd *user.UpdateUserCommand) err
 		}
 
 		return nil
+	})
+}
+
+type updateUserPasswordHashQuery struct {
+	sqltemplate.SQLTemplate
+	UserTable       string
+	UserID          int64
+	Salt            string
+	CurrentPassword string
+	NewPassword     string
+}
+
+func (q updateUserPasswordHashQuery) Validate() error { return nil }
+
+// UpdatePasswordHash replaces the stored password hash only while the row still
+// has currentHash and salt, so a password change made in the meantime is kept.
+func (ss *sqlStore) UpdatePasswordHash(ctx context.Context, userID int64, salt string, currentHash, newHash user.Password) error {
+	if currentHash == "" || newHash == "" {
+		return fmt.Errorf("password hash must not be empty")
+	}
+
+	dbHelper, err := ss.sql(ctx)
+	if err != nil {
+		return fmt.Errorf("get legacy DB: %w", err)
+	}
+
+	return dbHelper.DB.WithDbSession(ctx, func(sess *db.Session) error {
+		query := updateUserPasswordHashQuery{
+			SQLTemplate:     sqltemplate.New(dbHelper.DialectForDriver()),
+			UserTable:       dbHelper.Table("user"),
+			UserID:          userID,
+			Salt:            salt,
+			CurrentPassword: string(currentHash),
+			NewPassword:     string(newHash),
+		}
+		rawSQL, err := renderUserQuery(updateUserPasswordHashTemplate, query)
+		if err != nil {
+			return err
+		}
+		_, err = sess.Exec(append([]any{rawSQL}, query.GetArgs()...)...)
+		return err
 	})
 }
 

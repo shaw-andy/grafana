@@ -2,14 +2,15 @@ package clients
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"net/mail"
 	"strconv"
+	"strings"
 
 	"go.opentelemetry.io/otel/trace"
 
 	claims "github.com/grafana/authlib/types"
+	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/services/authn"
 	"github.com/grafana/grafana/pkg/services/login"
 	"github.com/grafana/grafana/pkg/services/org"
@@ -21,14 +22,20 @@ import (
 var _ authn.ProxyClient = new(Grafana)
 var _ authn.PasswordClient = new(Grafana)
 
+// dummyPasswordHash never matches. Verifying against it when there is no stored
+// hash to check costs the same as a real check, so response time does not tell
+// whether the user exists or has a password.
+var dummyPasswordHash = "pbkdf2-sha256$600000$" + strings.Repeat("0", 64)
+
 func ProvideGrafana(cfg *setting.Cfg, userService user.Service, tracer trace.Tracer) *Grafana {
-	return &Grafana{cfg, userService, tracer}
+	return &Grafana{cfg, userService, tracer, log.New("authn.grafana")}
 }
 
 type Grafana struct {
 	cfg         *setting.Cfg
 	userService user.Service
 	tracer      trace.Tracer
+	log         log.Logger
 }
 
 func (c *Grafana) String() string {
@@ -103,6 +110,7 @@ func (c *Grafana) AuthenticatePassword(ctx context.Context, r *authn.Request, us
 	usr, err := c.userService.GetByLoginWithPassword(ctx, &user.GetUserByLoginQuery{LoginOrEmail: username})
 	if err != nil {
 		if errors.Is(err, user.ErrUserNotFound) {
+			util.VerifyPassword(password, "", dummyPasswordHash)
 			return nil, errIdentityNotFound.Errorf("no user found: %w", err)
 		}
 		return nil, err
@@ -111,8 +119,25 @@ func (c *Grafana) AuthenticatePassword(ctx context.Context, r *authn.Request, us
 	// user was found so set auth module in req metadata
 	r.SetMeta(authn.MetaKeyAuthModule, "grafana")
 
-	if ok := comparePassword(password, usr.Salt, string(usr.Password)); !ok {
+	if usr.Password == "" {
+		util.VerifyPassword(password, "", dummyPasswordHash)
 		return nil, errInvalidPassword.Errorf("invalid password")
+	}
+
+	match, needsRehash := user.Password(password).Verify(usr.Salt, usr.Password)
+	if !match {
+		return nil, errInvalidPassword.Errorf("invalid password")
+	}
+
+	if needsRehash {
+		if err := c.userService.RehashPassword(ctx, &user.RehashPasswordCommand{
+			UserID:      usr.ID,
+			Salt:        usr.Salt,
+			Password:    user.Password(password),
+			CurrentHash: usr.Password,
+		}); err != nil {
+			c.log.FromContext(ctx).Warn("Failed to upgrade stored password hash", "userID", usr.ID, "error", err)
+		}
 	}
 
 	return &authn.Identity{
@@ -122,10 +147,4 @@ func (c *Grafana) AuthenticatePassword(ctx context.Context, r *authn.Request, us
 		ClientParams:    authn.ClientParams{FetchSyncedUser: true, SyncPermissions: true},
 		AuthenticatedBy: login.PasswordAuthModule,
 	}, nil
-}
-
-func comparePassword(password, salt, hash string) bool {
-	// It is ok to ignore the error here because util.EncodePassword can never return a error
-	hashedPassword, _ := util.EncodePassword(password, salt)
-	return subtle.ConstantTimeCompare([]byte(hashedPassword), []byte(hash)) == 1
 }

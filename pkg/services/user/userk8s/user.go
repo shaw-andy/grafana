@@ -514,6 +514,10 @@ func (s *UserK8sService) Update(ctx context.Context, cmd *user.UpdateUserCommand
 	return nil
 }
 
+func (s *UserK8sService) RehashPassword(_ context.Context, _ *user.RehashPasswordCommand) error {
+	return errors.New("not implemented")
+}
+
 func (s *UserK8sService) UpdateLastSeenAt(ctx context.Context, cmd *user.UpdateUserLastSeenAtCommand) error {
 	ctx, span := s.tracer.Start(ctx, "user.updateLastSeenAt", trace.WithAttributes(
 		attribute.Int64("userID", cmd.UserID),

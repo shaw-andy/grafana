@@ -2,10 +2,15 @@ package clients
 
 import (
 	"context"
+	"crypto/pbkdf2"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	claims "github.com/grafana/authlib/types"
 	"github.com/grafana/grafana/pkg/infra/tracing"
@@ -181,6 +186,60 @@ func TestGrafana_AuthenticatePassword(t *testing.T) {
 			identity, err := c.AuthenticatePassword(context.Background(), &authn.Request{OrgID: 1}, tt.username, tt.password)
 			assert.ErrorIs(t, err, tt.expectedErr)
 			assert.EqualValues(t, tt.expectedIdentity, identity)
+		})
+	}
+}
+
+func TestGrafana_AuthenticatePassword_RehashesOutdatedHash(t *testing.T) {
+	legacy, err := pbkdf2.Key(sha256.New, "password", []byte("salt"), 10000, 50)
+	require.NoError(t, err)
+	current, err := util.EncodePassword("password", "salt")
+	require.NoError(t, err)
+
+	tests := []struct {
+		desc          string
+		stored        string
+		password      string
+		rehashErr     error
+		expectErr     error
+		expectRehash  bool
+		expectSuccess bool
+	}{
+		{desc: "legacy hash is rehashed after a successful login", stored: hex.EncodeToString(legacy), password: "password", expectRehash: true, expectSuccess: true},
+		{desc: "login still succeeds if the rehash fails", stored: hex.EncodeToString(legacy), password: "password", rehashErr: errors.New("db unavailable"), expectRehash: true, expectSuccess: true},
+		{desc: "legacy hash is not rehashed on a wrong password", stored: hex.EncodeToString(legacy), password: "wrong", expectErr: errInvalidPassword},
+		{desc: "current hash is not rehashed", stored: current, password: "password", expectSuccess: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			var rehashed *user.RehashPasswordCommand
+			userService := &usertest.FakeUserService{
+				ExpectedUser: &user.User{ID: 1, Password: user.Password(tt.stored), Salt: "salt"},
+				RehashPasswordFn: func(_ context.Context, cmd *user.RehashPasswordCommand) error {
+					rehashed = cmd
+					return tt.rehashErr
+				},
+			}
+
+			c := ProvideGrafana(setting.NewCfg(), userService, tracing.InitializeTracerForTest())
+			identity, err := c.AuthenticatePassword(context.Background(), &authn.Request{OrgID: 1}, "user", tt.password)
+			if tt.expectSuccess {
+				require.NoError(t, err)
+				require.Equal(t, "1", identity.ID)
+			} else {
+				require.ErrorIs(t, err, tt.expectErr)
+			}
+
+			if !tt.expectRehash {
+				require.Nil(t, rehashed)
+				return
+			}
+			require.Equal(t, &user.RehashPasswordCommand{
+				UserID:      1,
+				Salt:        "salt",
+				Password:    user.Password(tt.password),
+				CurrentHash: user.Password(tt.stored),
+			}, rehashed)
 		})
 	}
 }

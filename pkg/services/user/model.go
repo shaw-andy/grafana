@@ -97,6 +97,18 @@ type UpdateUserCommand struct {
 	ExternalAuthInfo []ExternalAuthInfo `json:"-"`
 }
 
+// RehashPasswordCommand replaces a stored password hash with the current
+// encoding of the same password, after the password was verified against it.
+type RehashPasswordCommand struct {
+	UserID int64
+	Salt   string
+	// Password is the plaintext that was verified against CurrentHash.
+	Password Password
+	// CurrentHash is the stored hash that Password was verified against. Nothing
+	// is written if the user's stored hash or salt has changed since.
+	CurrentHash Password
+}
+
 type UpdateUserLastSeenAtCommand struct {
 	UserID int64
 	OrgID  int64

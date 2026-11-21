@@ -214,6 +214,19 @@ func TestTemplates(t *testing.T) {
 					},
 				},
 			},
+			updateUserPasswordHashTemplate: {
+				{
+					Name: "rehash",
+					Data: &updateUserPasswordHashQuery{
+						SQLTemplate:     queryTemplate(),
+						UserTable:       dbHelper.Table("user"),
+						UserID:          42,
+						Salt:            "salt",
+						CurrentPassword: "current-hash",
+						NewPassword:     "new-hash",
+					},
+				},
+			},
 		},
 	})
 }
