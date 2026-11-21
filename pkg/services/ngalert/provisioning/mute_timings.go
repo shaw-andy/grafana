@@ -135,6 +135,9 @@ func (svc *MuteTimingService) CreateMuteTiming(ctx context.Context, mt v1.TimeIn
 	if err := mt.Validate(); err != nil {
 		return v1.TimeInterval{}, MakeErrTimeIntervalInvalid(err)
 	}
+	if err := mt.ValidateNewTitle(); err != nil {
+		return v1.TimeInterval{}, MakeErrTimeIntervalInvalid(err)
+	}
 
 	if err := svc.validator(ctx, models.ProvenanceNone, mt.Provenance); err != nil {
 		return v1.TimeInterval{}, err
@@ -192,6 +195,9 @@ func (svc *MuteTimingService) UpdateMuteTiming(ctx context.Context, mt v1.TimeIn
 	}
 
 	if existing.Title != mt.Title { // if mute timing is renamed, check if this name is already taken
+		if err := mt.ValidateNewTitle(); err != nil {
+			return v1.TimeInterval{}, MakeErrTimeIntervalInvalid(err)
+		}
 		if _, ok := revision.GetTimeIntervalWithTitle(mt.Title); ok {
 			return v1.TimeInterval{}, ErrTimeIntervalExists.Errorf("")
 		}
