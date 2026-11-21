@@ -885,7 +885,6 @@ func (c *K8sTestHelper) CreateUser(name string, orgName string, basicRole org.Ro
 
 	u, err := c.userSvc.Create(context.Background(), &user.CreateUserCommand{
 		DefaultOrgRole: string(basicRole),
-		Password:       user.Password(name),
 		Login:          login,
 		OrgID:          orgId,
 		IsAdmin:        isGrafanaAdmin,
@@ -893,6 +892,7 @@ func (c *K8sTestHelper) CreateUser(name string, orgName string, basicRole org.Ro
 		Email:          fmt.Sprintf("%s@example.com", login),
 	})
 	require.NoError(c.t, err)
+	testinfra.SetUserPassword(c.t, c.env.SQLStore, u, user.Password(name))
 
 	// for tests to work we need to add grafana admins to every org
 	if isGrafanaAdmin {

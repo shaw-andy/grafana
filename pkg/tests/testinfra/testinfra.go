@@ -1265,7 +1265,28 @@ func CreateUser(t *testing.T, store db.DB, cfg *setting.Cfg, cmd user.CreateUser
 
 	cmd.OrgID = o.ID
 
+	password := cmd.Password
+	cmd.Password = ""
 	u, err := usrSvc.Create(context.Background(), &cmd)
 	require.NoError(t, err)
+	SetUserPassword(t, store, u, password)
 	return u
+}
+
+// SetUserPassword stores the password hash directly, without user.ValidatePassword,
+// because test fixtures use short passwords that the user service rejects.
+func SetUserPassword(t *testing.T, store db.DB, u *user.User, password user.Password) {
+	t.Helper()
+
+	if password == "" {
+		return
+	}
+	hashed, err := password.Hash(u.Salt)
+	require.NoError(t, err)
+	err = store.WithDbSession(context.Background(), func(sess *db.Session) error {
+		_, err := sess.Table("user").Where("id = ?", u.ID).Update(map[string]any{"password": string(hashed)})
+		return err
+	})
+	require.NoError(t, err)
+	u.Password = hashed
 }
