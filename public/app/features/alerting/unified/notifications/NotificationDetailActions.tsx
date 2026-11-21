@@ -12,6 +12,7 @@ import { useGlobalContactPointAbility } from '../hooks/abilities/alertmanager/us
 import { useGlobalSilenceAbility } from '../hooks/abilities/alertmanager/useSilenceAbility';
 import { ContactPointAction, SilenceAction } from '../hooks/abilities/types';
 import { isLocalDevEnv, isOpenSourceEdition, makeLabelBasedSilenceLink } from '../utils/misc';
+import { rulesNav } from '../utils/navigation';
 import { createRelativeUrl } from '../utils/url';
 
 type NotificationEntry = CreateNotificationqueryNotificationEntry;
@@ -29,7 +30,7 @@ export function NotificationActionsMenu({ notification }: NotificationActionsMen
 
   const hasSilenceableLabels = notification.groupLabels && Object.keys(notification.groupLabels).length > 0;
 
-  const ruleUIDs = notification.ruleUIDs ?? [];
+  const ruleViewPaths = (notification.ruleUIDs ?? []).flatMap((uid) => rulesNav.grafanaRuleViewPath(uid) ?? []);
 
   const menuItems = (
     <>
@@ -53,22 +54,22 @@ export function NotificationActionsMenu({ notification }: NotificationActionsMen
           />
         </Tooltip>
       )}
-      {ruleUIDs.length === 1 && (
+      {ruleViewPaths.length === 1 && (
         <Menu.Item
           label={t('alerting.notification-detail.menu-view-rule', 'View alert rule')}
           icon="bell"
-          url={`/alerting/grafana/${ruleUIDs[0]}/view`}
+          url={ruleViewPaths[0]}
         />
       )}
-      {ruleUIDs.length > 1 &&
-        ruleUIDs.map((uid, index) => (
+      {ruleViewPaths.length > 1 &&
+        ruleViewPaths.map((ruleViewPath, index) => (
           <Menu.Item
-            key={uid}
+            key={ruleViewPath}
             label={t('alerting.notification-detail.menu-view-rule-n', 'View alert rule ({{n}})', {
               n: index + 1,
             })}
             icon="bell"
-            url={`/alerting/grafana/${uid}/view`}
+            url={ruleViewPath}
           />
         ))}
       <Menu.Divider />

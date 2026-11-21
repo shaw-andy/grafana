@@ -204,7 +204,9 @@ export function useStartInvestigation({
     const isResolved =
       alertState === GrafanaAlertState.Normal || (alertState == null && Boolean(alertEndsAt) && !alertStartsAt);
     const status = isResolved ? 'resolved' : 'firing';
-    const generatorURL = rule?.uid ? createAbsoluteUrl(`/alerting/grafana/${rule.uid}/view`) : undefined;
+    const generatorURL = rule?.uid
+      ? createAbsoluteUrl(`/alerting/grafana/${encodeURIComponent(rule.uid)}/view`)
+      : undefined;
     // Prefer state-history resolve time; fall back to now so Assistant always gets
     // a non-zero endsAt for resolved alerts (required for downstream context).
     const endsAt = isResolved ? (alertEndsAt ?? new Date().toISOString()) : undefined;

@@ -31,7 +31,7 @@ import { AITriageButtonComponent } from '../../../enterprise-components/AI/AIGen
 import { usePagination } from '../../../hooks/usePagination';
 import { useSlowQuery } from '../../../hooks/useSlowQuery';
 import { combineMatcherStrings } from '../../../utils/alertmanager';
-import { GRAFANA_RULES_SOURCE_NAME } from '../../../utils/datasource';
+import { rulesNav } from '../../../utils/navigation';
 import { createRelativeUrl } from '../../../utils/url';
 import { CollapseToggle } from '../../CollapseToggle';
 import { type LogRecord } from '../state-history/common';
@@ -282,7 +282,11 @@ function AlertRuleName({ labels, ruleUID }: AlertRuleNameProps) {
       </Text>
     );
   }
-  const ruleViewUrl = createRelativeUrl(`/alerting/${GRAFANA_RULES_SOURCE_NAME}/${ruleUID}/view`, {
+  const ruleViewPath = rulesNav.grafanaRuleViewPath(ruleUID);
+  if (!ruleViewPath) {
+    return <Text truncate>{alertRuleName}</Text>;
+  }
+  const ruleViewUrl = createRelativeUrl(ruleViewPath, {
     tab: 'history',
     returnTo,
   });

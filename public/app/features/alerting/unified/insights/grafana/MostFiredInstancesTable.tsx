@@ -9,9 +9,10 @@ import {
   SceneQueryRunner,
 } from '@grafana/scenes';
 import { type DataSourceRef, TableCellDisplayMode } from '@grafana/schema';
-import { type CustomCellRendererProps, TextLink } from '@grafana/ui';
+import { type CustomCellRendererProps, Text, TextLink } from '@grafana/ui';
 
 import { PANEL_STYLES } from '../../home/Insights';
+import { rulesNav } from '../../utils/navigation';
 import { createRelativeUrl } from '../../utils/url';
 import { InsightsMenuButton } from '../InsightsMenuButton';
 
@@ -122,10 +123,14 @@ export function getMostFiredInstancesScene(datasource: DataSourceRef, panelTitle
 
 function RuleLink({ value, frame, rowIndex }: CustomCellRendererProps) {
   const ruleUIDs = frame.fields.find((field) => field.name === RULE_UID_FIELD_NAME);
-  const ruleUID = ruleUIDs?.values[rowIndex];
+  const ruleViewPath = rulesNav.grafanaRuleViewPath(ruleUIDs?.values[rowIndex]);
+
+  if (!ruleViewPath) {
+    return <Text>{String(value)}</Text>;
+  }
 
   return (
-    <TextLink color="primary" external href={createRelativeUrl(`/alerting/grafana/${ruleUID}/view`)} inline={false}>
+    <TextLink color="primary" external href={createRelativeUrl(ruleViewPath)} inline={false}>
       {String(value)}
     </TextLink>
   );

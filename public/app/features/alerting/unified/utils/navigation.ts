@@ -135,7 +135,20 @@ export const groups = {
   },
 };
 
+// Mirrors util.ValidateUID in pkg/util/shortid_generator.go, which every Grafana-managed rule UID passes.
+const GRAFANA_RULE_UID_PATTERN = /^[a-zA-Z0-9_-]{1,40}$/;
+
+export function isValidGrafanaRuleUid(uid: unknown): uid is string {
+  return typeof uid === 'string' && GRAFANA_RULE_UID_PATTERN.test(uid);
+}
+
 export const rulesNav = {
+  /**
+   * Returns the path (without sub path) of a Grafana-managed rule's view page, or undefined when the UID is not a
+   * valid rule UID. UIDs often come from log lines or labels, so never interpolate them into a path directly.
+   */
+  grafanaRuleViewPath: (uid: unknown): RelativeUrl | undefined =>
+    isValidGrafanaRuleUid(uid) ? `/alerting/grafana/${encodeURIComponent(uid)}/view` : undefined,
   /**
    * Creates a link to the details page of a rule. Encodes the rules source name and rule identifier.
    */

@@ -47,6 +47,7 @@ import { prometheusExpressionBuilder } from '../triage/scene/expressionBuilder';
 import { INTEGRATION_ICONS } from '../types/contact-points';
 import { parsePromQLStyleMatcherLooseSafe } from '../utils/matchers';
 import { stringifyErrorLike } from '../utils/misc';
+import { rulesNav } from '../utils/navigation';
 import { createRelativeUrl } from '../utils/url';
 
 import { isNotificationOutcome, isNotificationStatus, matcherToAPIFormat } from './NotificationsRuntimeDataSource';
@@ -343,7 +344,7 @@ function NotificationDetails({ record }: NotificationDetailsProps) {
     const alertName = alert.labels?.alertname || 'Alert';
     const folderName = alert.labels?.grafana_folder || '';
     const linkText = folderName ? `${folderName} / ${alertName}` : alertName;
-    const ruleLink = ruleUid ? `/alerting/grafana/${ruleUid}/view` : undefined;
+    const ruleLink = rulesNav.grafanaRuleViewPath(ruleUid);
 
     // Filter out labels that are already in groupLabels
     // Also filter out grafana_folder as it's redundant and always the same for a single alert

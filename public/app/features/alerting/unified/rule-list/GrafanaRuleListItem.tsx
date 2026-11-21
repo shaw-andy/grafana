@@ -46,7 +46,7 @@ export function GrafanaRuleListItem({
     group: groupIdentifier.groupName,
     groupUrl,
     namespace: namespaceName,
-    href: createRelativeUrl(`/alerting/grafana/${uid}/view`),
+    href: createRelativeUrl(`/alerting/grafana/${encodeURIComponent(uid)}/view`),
     health: rule?.health,
     error: rule?.lastError,
     labels: labels,
