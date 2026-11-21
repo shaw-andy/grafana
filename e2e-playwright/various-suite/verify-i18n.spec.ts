@@ -1,7 +1,7 @@
 import { test, expect } from '@grafana/plugin-e2e';
 
 const I18N_USER = 'i18n-test';
-const I18N_PASSWORD = 'i18n-test';
+const I18N_PASSWORD = 'i18n-test-password';
 
 // Separate user to isolate changes from other tests
 test.use({

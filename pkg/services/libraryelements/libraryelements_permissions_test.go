@@ -449,7 +449,10 @@ func createUserInOrg(t *testing.T, db db.DB, cfg *setting.Cfg, cmd user.CreateUs
 	)
 	require.NoError(t, err)
 
+	password := cmd.Password
+	cmd.Password = ""
 	u, err := usrSvc.Create(context.Background(), &cmd)
 	require.NoError(t, err)
+	testinfra.SetUserPassword(t, db, u, password)
 	return u.ID
 }

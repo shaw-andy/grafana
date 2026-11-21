@@ -235,44 +235,44 @@ func TestService_Update(t *testing.T) {
 
 	t.Run("should return error if new password matches current password", func(t *testing.T) {
 		service := setup(func(svc *LegacyService) {
-			stored, err := user.Password("test").Hash("salt")
+			stored, err := user.Password("test-password").Hash("salt")
 			require.NoError(t, err)
 			svc.cfg = setting.NewCfg()
 			svc.store = &FakeUserStore{ExpectedUser: &user.User{Password: stored, Salt: "salt"}}
 		})
 
 		err := service.Update(context.Background(), &user.UpdateUserCommand{
-			OldPassword: passwordPtr("test"),
-			Password:    passwordPtr("test"),
+			OldPassword: passwordPtr("test-password"),
+			Password:    passwordPtr("test-password"),
 		})
 		require.ErrorIs(t, err, user.ErrNewPasswordSameAsOld)
 	})
 
 	t.Run("should return error if new password matches stored password without old password", func(t *testing.T) {
 		service := setup(func(svc *LegacyService) {
-			stored, err := user.Password("test").Hash("salt")
+			stored, err := user.Password("test-password").Hash("salt")
 			require.NoError(t, err)
 			svc.cfg = setting.NewCfg()
 			svc.store = &FakeUserStore{ExpectedUser: &user.User{Password: stored, Salt: "salt"}}
 		})
 
 		err := service.Update(context.Background(), &user.UpdateUserCommand{
-			Password: passwordPtr("test"),
+			Password: passwordPtr("test-password"),
 		})
 		require.ErrorIs(t, err, user.ErrNewPasswordSameAsOld)
 	})
 
 	t.Run("should update password when new password differs from current", func(t *testing.T) {
 		service := setup(func(svc *LegacyService) {
-			stored, err := user.Password("test").Hash("salt")
+			stored, err := user.Password("test-password").Hash("salt")
 			require.NoError(t, err)
 			svc.cfg = setting.NewCfg()
 			svc.store = &FakeUserStore{ExpectedUser: &user.User{Password: stored, Salt: "salt"}}
 		})
 
 		err := service.Update(context.Background(), &user.UpdateUserCommand{
-			OldPassword: passwordPtr("test"),
-			Password:    passwordPtr("newpassword"),
+			OldPassword: passwordPtr("test-password"),
+			Password:    passwordPtr("new-test-password"),
 		})
 		require.NoError(t, err)
 	})

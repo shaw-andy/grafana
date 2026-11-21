@@ -173,12 +173,15 @@ func (c TestContext) createUser(cmd user.CreateUserCommand) User {
 	)
 	require.NoError(c.t, err)
 
+	password := cmd.Password
+	cmd.Password = ""
 	user, err := usrSvc.Create(context.Background(), &cmd)
 	require.NoError(c.t, err)
+	testinfra.SetUserPassword(c.t, store, user, password)
 
 	return User{
 		User:     *user,
-		password: cmd.Password,
+		password: password,
 	}
 }
 

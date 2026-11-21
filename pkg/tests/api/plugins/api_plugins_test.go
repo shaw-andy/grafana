@@ -209,8 +209,11 @@ func createUser(t *testing.T, db db.DB, cfg *setting.Cfg, cmd user.CreateUserCom
 	)
 	require.NoError(t, err)
 
-	_, err = usrSvc.Create(context.Background(), &cmd)
+	password := cmd.Password
+	cmd.Password = ""
+	u, err := usrSvc.Create(context.Background(), &cmd)
 	require.NoError(t, err)
+	testinfra.SetUserPassword(t, db, u, password)
 }
 
 func makePostRequest(t *testing.T, URL string) (int, map[string]interface{}) {

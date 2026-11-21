@@ -36,6 +36,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/user/userimpl"
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/storage/legacysql"
+	"github.com/grafana/grafana/pkg/tests/testinfra"
 	"github.com/grafana/grafana/pkg/util"
 )
 
@@ -1654,8 +1655,11 @@ func createUser(t *testing.T, db db.DB, cfg *setting.Cfg, cmd user.CreateUserCom
 	)
 	require.NoError(t, err)
 
+	password := cmd.Password
+	cmd.Password = ""
 	u, err := usrSvc.Create(context.Background(), &cmd)
 	require.NoError(t, err)
+	testinfra.SetUserPassword(t, db, u, password)
 	return u.ID
 }
 
