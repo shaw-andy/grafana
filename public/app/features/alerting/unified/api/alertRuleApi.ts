@@ -1,3 +1,4 @@
+import { PathValidationError } from '@grafana/data';
 import { t } from '@grafana/i18n';
 import { type AlertmanagerAlert, type Matcher } from 'app/plugins/datasource/alertmanager/types';
 import { type RuleIdentifier, type RuleNamespace, type RulerDataSourceConfig } from 'app/types/unified-alerting';
@@ -32,6 +33,15 @@ import { type FetchRulerRulesFilter, rulerUrlBuilder } from './ruler';
 export type PreviewResponse = Array<
   Pick<AlertmanagerAlert, 'annotations' | 'endsAt' | 'startsAt' | 'generatorURL' | 'labels'>
 >;
+
+function encodePathSegment(value: string): string {
+  const segment = encodeURIComponent(value);
+  // encodeURIComponent leaves "." unescaped, so these would still be resolved as dot segments by the browser
+  if (segment === '.' || segment === '..') {
+    throw new PathValidationError();
+  }
+  return segment;
+}
 
 export const PREVIEW_URL = '/api/v1/rule/test/grafana';
 export const PROM_RULES_URL = 'api/prometheus/grafana/api/v1/rules';
@@ -404,7 +414,7 @@ export const alertRuleApi = alertingApi.injectEndpoints({
     }),
     exportMuteTiming: build.query<string, { format: ExportFormats; muteTiming: string }>({
       query: ({ format, muteTiming }) => ({
-        url: `/api/v1/provisioning/mute-timings/${muteTiming}/export/`,
+        url: `/api/v1/provisioning/mute-timings/${encodePathSegment(muteTiming)}/export/`,
         params: { format: format },
         responseType: 'text',
       }),

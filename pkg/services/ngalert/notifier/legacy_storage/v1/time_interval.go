@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"net/url"
 	"slices"
 	"strings"
+	"unicode"
 	"unsafe"
 
 	"github.com/prometheus/alertmanager/timeinterval"
@@ -43,6 +45,34 @@ func (mt *TimeInterval) Validate() error {
 	}
 	if err = yaml.Unmarshal(s, &(mt.TimeIntervals)); err != nil {
 		return err
+	}
+	return nil
+}
+
+// ValidateNewTitle checks that the title can be used as a single URL path segment. Clients build
+// per-interval URLs from the title, so a title that a browser resolves into several segments
+// (or a dot segment) would send those requests to another route.
+// It is applied to new titles only so that existing intervals with such titles remain editable.
+func (mt *TimeInterval) ValidateNewTitle() error {
+	if err := validatePathSegment(mt.Title); err != nil {
+		return err
+	}
+	// Browsers also treat percent-encoded dots as dot segments, and servers decode %2F into a separator.
+	if decoded, err := url.PathUnescape(mt.Title); err == nil && decoded != mt.Title {
+		return validatePathSegment(decoded)
+	}
+	return nil
+}
+
+func validatePathSegment(title string) error {
+	if title == "" {
+		return errors.New("missing name in time interval")
+	}
+	if title == "." || title == ".." {
+		return fmt.Errorf("time interval name cannot be %q", title)
+	}
+	if strings.ContainsAny(title, `/\?#`) || strings.ContainsFunc(title, unicode.IsControl) {
+		return errors.New(`time interval name cannot contain '/', '\', '?', '#' or control characters`)
 	}
 	return nil
 }
