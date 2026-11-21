@@ -206,28 +206,28 @@ func TestService_Update(t *testing.T) {
 
 	t.Run("should return error if old password does not match stored password", func(t *testing.T) {
 		service := setup(func(svc *LegacyService) {
-			stored, err := user.Password("test").Hash("salt")
+			stored, err := user.Password("testpassword").Hash("salt")
 			require.NoError(t, err)
 
 			svc.store = &FakeUserStore{ExpectedUser: &user.User{Password: stored, Salt: "salt"}}
 		})
 
 		err := service.Update(context.Background(), &user.UpdateUserCommand{
-			OldPassword: passwordPtr("test123"),
+			OldPassword: passwordPtr("testpassword123"),
 		})
 		assert.ErrorIs(t, err, user.ErrPasswordMissmatch)
 	})
 
 	t.Run("should return error new password is not valid", func(t *testing.T) {
 		service := setup(func(svc *LegacyService) {
-			stored, err := user.Password("test").Hash("salt")
+			stored, err := user.Password("testpassword").Hash("salt")
 			require.NoError(t, err)
 			svc.cfg = setting.NewCfg()
 			svc.store = &FakeUserStore{ExpectedUser: &user.User{Password: stored, Salt: "salt"}}
 		})
 
 		err := service.Update(context.Background(), &user.UpdateUserCommand{
-			OldPassword: passwordPtr("test"),
+			OldPassword: passwordPtr("testpassword"),
 			Password:    passwordPtr("asd"),
 		})
 		require.ErrorIs(t, err, user.ErrPasswordTooShort)
@@ -235,44 +235,44 @@ func TestService_Update(t *testing.T) {
 
 	t.Run("should return error if new password matches current password", func(t *testing.T) {
 		service := setup(func(svc *LegacyService) {
-			stored, err := user.Password("test").Hash("salt")
+			stored, err := user.Password("testpassword").Hash("salt")
 			require.NoError(t, err)
 			svc.cfg = setting.NewCfg()
 			svc.store = &FakeUserStore{ExpectedUser: &user.User{Password: stored, Salt: "salt"}}
 		})
 
 		err := service.Update(context.Background(), &user.UpdateUserCommand{
-			OldPassword: passwordPtr("test"),
-			Password:    passwordPtr("test"),
+			OldPassword: passwordPtr("testpassword"),
+			Password:    passwordPtr("testpassword"),
 		})
 		require.ErrorIs(t, err, user.ErrNewPasswordSameAsOld)
 	})
 
 	t.Run("should return error if new password matches stored password without old password", func(t *testing.T) {
 		service := setup(func(svc *LegacyService) {
-			stored, err := user.Password("test").Hash("salt")
+			stored, err := user.Password("testpassword").Hash("salt")
 			require.NoError(t, err)
 			svc.cfg = setting.NewCfg()
 			svc.store = &FakeUserStore{ExpectedUser: &user.User{Password: stored, Salt: "salt"}}
 		})
 
 		err := service.Update(context.Background(), &user.UpdateUserCommand{
-			Password: passwordPtr("test"),
+			Password: passwordPtr("testpassword"),
 		})
 		require.ErrorIs(t, err, user.ErrNewPasswordSameAsOld)
 	})
 
 	t.Run("should update password when new password differs from current", func(t *testing.T) {
 		service := setup(func(svc *LegacyService) {
-			stored, err := user.Password("test").Hash("salt")
+			stored, err := user.Password("testpassword").Hash("salt")
 			require.NoError(t, err)
 			svc.cfg = setting.NewCfg()
 			svc.store = &FakeUserStore{ExpectedUser: &user.User{Password: stored, Salt: "salt"}}
 		})
 
 		err := service.Update(context.Background(), &user.UpdateUserCommand{
-			OldPassword: passwordPtr("test"),
-			Password:    passwordPtr("newpassword"),
+			OldPassword: passwordPtr("testpassword"),
+			Password:    passwordPtr("newpassword123"),
 		})
 		require.NoError(t, err)
 	})

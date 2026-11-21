@@ -2,6 +2,7 @@ package user
 
 import (
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/grafana/grafana/pkg/apimachinery/errutil"
 	"github.com/grafana/grafana/pkg/setting"
@@ -36,17 +37,18 @@ func (p Password) Hash(salt string) (Password, error) {
 }
 
 // ValidatePassword checks if a new password meets the required criteria based on the given configuration.
-// If BasicAuthStrongPasswordPolicy is disabled, it only checks for password length.
-// Otherwise, it ensures the password meets the minimum length requirement and contains at least one uppercase letter,
-// one lowercase letter, one number, and one symbol.
+// Every password must be at least MinPasswordLength characters long. If BasicAuthStrongPasswordPolicy is
+// enabled, the password must also contain at least one uppercase letter, one lowercase letter, one number,
+// and one symbol.
 func ValidatePassword(newPassword string, config *setting.Cfg) error {
+	length := utf8.RuneCountInString(newPassword)
 	if !config.BasicAuthStrongPasswordPolicy {
-		if len(newPassword) < 4 {
+		if length < MinPasswordLength {
 			return ErrPasswordTooShort.Errorf("new password is too short")
 		}
 		return nil
 	}
-	if len(newPassword) < MinPasswordLength {
+	if length < MinPasswordLength {
 		return ErrPasswordPolicyInfringe.Errorf("new password is too short for the strong password policy")
 	}
 
