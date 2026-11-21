@@ -9,7 +9,6 @@ import { Collapse, TabContent, useStyles2 } from '@grafana/ui';
 import { type GeomapLayerHover } from 'app/plugins/panel/geomap/event';
 
 import { DataHoverRow } from './DataHoverRow';
-import { renderValue } from './renderValue';
 
 type Props = {
   layers: GeomapLayerHover[];
@@ -87,7 +86,7 @@ export const generateLabel = (feature: FeatureLike, idx: number): string | React
   if (first) {
     return (
       <span>
-        {first}: {renderValue(props[first])}
+        {first}: <span>{props[first]}</span>
       </span>
     );
   }
@@ -97,7 +96,7 @@ export const generateLabel = (feature: FeatureLike, idx: number): string | React
     if (isString(v)) {
       return (
         <span>
-          {k}: {renderValue(v)}
+          {k}: <span>{v}</span>
         </span>
       );
     }

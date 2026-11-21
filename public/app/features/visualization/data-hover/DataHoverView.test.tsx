@@ -3,43 +3,11 @@ import { render, screen } from '@testing-library/react';
 import { arrayToDataFrame, createDataFrame, FieldType } from '@grafana/data';
 
 import { DataHoverView, getDisplayValuesAndLinks } from './DataHoverView';
-import { isHttpUrl, renderValue } from './renderValue';
 
 jest.mock('@grafana/ui', () => ({
   ...jest.requireActual('@grafana/ui'),
   getFieldDisplayLinks: jest.fn().mockReturnValue([]),
 }));
-
-describe('isHttpUrl', () => {
-  it.each([
-    { url: 'https://example.com/path', expected: true },
-    { url: 'http://localhost:3000', expected: true },
-    { url: 'ftp://files.example.com', expected: false },
-    { url: 'not a url', expected: false },
-  ])('"$url" returns $expected', ({ url, expected }) => {
-    expect(isHttpUrl(url)).toBe(expected);
-  });
-});
-
-describe('renderValue', () => {
-  it('returns the string unchanged for non-URL values', () => {
-    expect(renderValue('hello world')).toBe('hello world');
-  });
-
-  it('renders an anchor element for http URLs', () => {
-    render(<>{renderValue('http://example.com')}</>);
-    const link = screen.getByRole('link');
-    expect(link).toHaveAttribute('href', 'http://example.com');
-    expect(link).toHaveAttribute('target', '_blank');
-    expect(link).toHaveTextContent('http://example.com');
-  });
-
-  it('renders an anchor element for https URLs', () => {
-    render(<>{renderValue('https://grafana.com')}</>);
-    const link = screen.getByRole('link');
-    expect(link).toHaveAttribute('href', 'https://grafana.com');
-  });
-});
 
 describe('getDisplayValuesAndLinks', () => {
   it('returns null when all fields are hidden from tooltip', () => {
@@ -89,6 +57,19 @@ describe('getDisplayValuesAndLinks', () => {
 
     getFieldDisplayLinks.mockReturnValue([]);
   });
+
+  it('drops links that would sign the viewer out of this server', () => {
+    const { getFieldDisplayLinks } = jest.requireMock('@grafana/ui');
+    getFieldDisplayLinks.mockReturnValue([
+      { title: 'Sign out', href: '/logout', target: '_self' },
+      { title: 'Docs', href: 'https://grafana.com/docs', target: '_blank' },
+    ]);
+
+    const result = getDisplayValuesAndLinks(arrayToDataFrame([{ a: 1 }]), 0);
+    expect(result!.links.map((link) => link.title)).toEqual(['Docs']);
+
+    getFieldDisplayLinks.mockReturnValue([]);
+  });
 });
 
 describe('DataHoverView component', () => {
@@ -96,6 +77,13 @@ describe('DataHoverView component', () => {
     const data = arrayToDataFrame([{ foo: 'bar' }]);
     render(<DataHoverView data={data} rowIndex={0} />);
     expect(screen.getByText('bar')).toBeInTheDocument();
+  });
+
+  it('renders an http field value as text instead of a link', () => {
+    const data = arrayToDataFrame([{ url: 'https://grafana.com' }]);
+    render(<DataHoverView data={data} rowIndex={0} />);
+    expect(screen.getByText('https://grafana.com').closest('a')).toBeNull();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
 
   it('returns null when data is undefined', () => {
