@@ -79,7 +79,7 @@ func (s *SocialOkta) Validate(ctx context.Context, newSettings ssoModels.SSOSett
 		oldInfo = &social.OAuthInfo{}
 	}
 
-	err = validateInfo(info, oldInfo, requester)
+	err = s.validateInfo(ctx, info, oldInfo, requester)
 	if err != nil {
 		return err
 	}

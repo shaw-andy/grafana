@@ -1453,6 +1453,12 @@ func TestSocialAzureAD_Reload_ExtraFields(t *testing.T) {
 	}
 }
 
+func workloadIdentityCfg(tokenFile string) *setting.Cfg {
+	cfg := setting.NewCfg()
+	cfg.Raw.Section("auth." + social.AzureADProviderName).Key("workload_identity_token_file").SetValue(tokenFile)
+	return cfg
+}
+
 func TestSocialAzureAD_TokenSource_WorkloadIdentity(t *testing.T) {
 	info := &social.OAuthInfo{
 		ClientId:                    "some-client-id",
@@ -1466,7 +1472,7 @@ func TestSocialAzureAD_TokenSource_WorkloadIdentity(t *testing.T) {
 		err := os.WriteFile(workloadFile, []byte("mock-client-assertion"), 0600)
 		require.NoError(t, err)
 
-		s := mustNewAzureADProvider(t, info, setting.NewCfg(), nil, ssosettingstests.NewFakeService(), featuremgmt.WithFeatures(), remotecache.FakeCacheStorage{})
+		s := mustNewAzureADProvider(t, info, workloadIdentityCfg(workloadFile), nil, ssosettingstests.NewFakeService(), featuremgmt.WithFeatures(), remotecache.FakeCacheStorage{})
 		s.info.WorkloadIdentityTokenFile = workloadFile
 
 		// Mock the token endpoint
@@ -1523,7 +1529,7 @@ func TestSocialAzureAD_TokenSource_WorkloadIdentity(t *testing.T) {
 	})
 
 	t.Run("error when workload token file does not exist", func(t *testing.T) {
-		s := mustNewAzureADProvider(t, info, setting.NewCfg(), nil, ssosettingstests.NewFakeService(), featuremgmt.WithFeatures(), remotecache.FakeCacheStorage{})
+		s := mustNewAzureADProvider(t, info, workloadIdentityCfg("/non/existent/file"), nil, ssosettingstests.NewFakeService(), featuremgmt.WithFeatures(), remotecache.FakeCacheStorage{})
 		s.info.WorkloadIdentityTokenFile = "/non/existent/file"
 
 		token := &oauth2.Token{
@@ -1543,7 +1549,7 @@ func TestSocialAzureAD_TokenSource_WorkloadIdentity(t *testing.T) {
 		err := os.WriteFile(workloadFile, []byte("mock-client-assertion"), 0600)
 		require.NoError(t, err)
 
-		s := mustNewAzureADProvider(t, info, setting.NewCfg(), nil, ssosettingstests.NewFakeService(), featuremgmt.WithFeatures(), remotecache.FakeCacheStorage{})
+		s := mustNewAzureADProvider(t, info, workloadIdentityCfg(workloadFile), nil, ssosettingstests.NewFakeService(), featuremgmt.WithFeatures(), remotecache.FakeCacheStorage{})
 		s.info.WorkloadIdentityTokenFile = workloadFile
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1570,7 +1576,7 @@ func TestSocialAzureAD_TokenSource_WorkloadIdentity(t *testing.T) {
 		err := os.WriteFile(workloadFile, []byte("mock-client-assertion"), 0600)
 		require.NoError(t, err)
 
-		s := mustNewAzureADProvider(t, info, setting.NewCfg(), nil, ssosettingstests.NewFakeService(), featuremgmt.WithFeatures(), remotecache.FakeCacheStorage{})
+		s := mustNewAzureADProvider(t, info, workloadIdentityCfg(workloadFile), nil, ssosettingstests.NewFakeService(), featuremgmt.WithFeatures(), remotecache.FakeCacheStorage{})
 		s.info.WorkloadIdentityTokenFile = workloadFile
 
 		// No RefreshToken
@@ -1590,7 +1596,7 @@ func TestSocialAzureAD_TokenSource_WorkloadIdentity(t *testing.T) {
 		err := os.WriteFile(workloadFile, []byte("mock-client-assertion"), 0600)
 		require.NoError(t, err)
 
-		s := mustNewAzureADProvider(t, info, setting.NewCfg(), nil, ssosettingstests.NewFakeService(), featuremgmt.WithFeatures(), remotecache.FakeCacheStorage{})
+		s := mustNewAzureADProvider(t, info, workloadIdentityCfg(workloadFile), nil, ssosettingstests.NewFakeService(), featuremgmt.WithFeatures(), remotecache.FakeCacheStorage{})
 		s.info.WorkloadIdentityTokenFile = workloadFile
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -241,6 +240,7 @@ func (s *SocialAzureAD) TokenSource(ctx context.Context, t *oauth2.Token) oauth2
 			token:                     t,
 			clientId:                  s.info.ClientId,
 			workloadIdentityTokenFile: s.info.WorkloadIdentityTokenFile,
+			cfgProvider:               s.cfgProvider,
 		}
 	case social.ManagedIdentity:
 		return &azureADManagedIdentityTokenSource{
@@ -264,6 +264,7 @@ type azureADTokenSource struct {
 	token                     *oauth2.Token
 	clientId                  string
 	workloadIdentityTokenFile string
+	cfgProvider               configprovider.ConfigProvider
 }
 
 type azureADManagedIdentityTokenSource struct {
@@ -289,9 +290,9 @@ func (s *azureADTokenSource) Token() (*oauth2.Token, error) {
 	}
 
 	// refresh the expired token using the refresh token
-	federatedToken, err := os.ReadFile(s.workloadIdentityTokenFile)
+	federatedToken, err := ReadWorkloadIdentityToken(s.ctx, s.cfgProvider, social.AzureADProviderName, s.workloadIdentityTokenFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read workload identity token file: %w", err)
+		return nil, err
 	}
 
 	v := url.Values{}
@@ -299,7 +300,7 @@ func (s *azureADTokenSource) Token() (*oauth2.Token, error) {
 	v.Set("grant_type", "refresh_token")
 	v.Set("refresh_token", s.token.RefreshToken)
 	v.Set("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer")
-	v.Set("client_assertion", strings.TrimSpace(string(federatedToken)))
+	v.Set("client_assertion", federatedToken)
 
 	token, err := fetchAzureADToken(s.ctx, s.log, s.conf.Endpoint.TokenURL, v)
 	if err != nil {
@@ -468,7 +469,7 @@ func (s *SocialAzureAD) Validate(ctx context.Context, newSettings ssoModels.SSOS
 		oldInfo = &social.OAuthInfo{}
 	}
 
-	err = validateInfo(info, oldInfo, requester)
+	err = s.validateInfo(ctx, info, oldInfo, requester)
 	if err != nil {
 		return err
 	}

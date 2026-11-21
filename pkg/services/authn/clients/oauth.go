@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 
 	"go.opentelemetry.io/otel/trace"
@@ -159,14 +158,14 @@ func (c *OAuth) Authenticate(ctx context.Context, r *authn.Request) (*authn.Iden
 
 	// exchange auth code to a valid token
 	if oauthCfg.ClientAuthentication == social.WorkloadIdentity {
-		federatedToken, err := os.ReadFile(oauthCfg.WorkloadIdentityTokenFile)
+		federatedToken, err := connectors.ReadWorkloadIdentityToken(ctx, c.cfgProvider, c.providerName, oauthCfg.WorkloadIdentityTokenFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read workload identity token file: %w", err)
+			return nil, errOAuthInternal.Errorf("failed to read workload identity token: %w", err)
 		}
 
 		opts = append(opts,
 			oauth2.SetAuthURLParam("client_id", oauthCfg.ClientId),
-			oauth2.SetAuthURLParam("client_assertion", strings.TrimSpace(string(federatedToken))),
+			oauth2.SetAuthURLParam("client_assertion", federatedToken),
 			oauth2.SetAuthURLParam("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"),
 		)
 	}
