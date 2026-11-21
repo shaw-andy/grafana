@@ -5,6 +5,7 @@ import (
 
 	"github.com/grafana/grafana-app-sdk/resource"
 	v0alpha1 "github.com/grafana/grafana/apps/correlations/pkg/apis/correlation/v0alpha1"
+	correlationsApp "github.com/grafana/grafana/apps/correlations/pkg/app"
 	"github.com/grafana/grafana/pkg/api/routing"
 	"github.com/grafana/grafana/pkg/bus"
 	"github.com/grafana/grafana/pkg/infra/db"
@@ -41,6 +42,7 @@ func ProvideService(ctx context.Context, sqlStore db.DB, routeRegister routing.R
 			clientGen:         clientGen,
 			k8sClient:         k8sHandler,
 			DataSourceService: ds,
+			grafanaHost:       rootURLHost(cfg),
 		}
 
 		s.registerAPIEndpoints()
@@ -55,6 +57,7 @@ func ProvideService(ctx context.Context, sqlStore db.DB, routeRegister routing.R
 			DataSourceService: ds,
 			AccessControl:     ac,
 			QuotaService:      qs,
+			grafanaHost:       rootURLHost(cfg),
 		}
 
 		s.registerAPIEndpoints()
@@ -76,6 +79,13 @@ func ProvideService(ctx context.Context, sqlStore db.DB, routeRegister routing.R
 
 		return s, nil
 	}
+}
+
+func rootURLHost(cfg *setting.Cfg) string {
+	if cfg == nil {
+		return ""
+	}
+	return correlationsApp.HostFromURL(cfg.AppURL)
 }
 
 // this is for K8s to call through if the dual write mode requires writing to legacy

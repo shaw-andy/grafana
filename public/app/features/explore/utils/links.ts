@@ -22,7 +22,7 @@ import {
   DataFrameType,
 } from '@grafana/data';
 import { t } from '@grafana/i18n';
-import { getTemplateSrv, reportInteraction, type VariableInterpolation } from '@grafana/runtime';
+import { config, getTemplateSrv, reportInteraction, type VariableInterpolation } from '@grafana/runtime';
 import { type DataQuery } from '@grafana/schema';
 import { contextSrv } from 'app/core/services/context_srv';
 import { getTransformationVars } from 'app/features/correlations/transformations';
@@ -69,6 +69,9 @@ export const exploreDataLinkPostProcessorFactory = (
     const { valueRowIndex: rowIndex } = options.config;
 
     if (rowIndex === undefined) {
+      if (link.origin === DataLinkConfigOrigin.Correlations && !link.internal && !isExternalHref(linkModel.href)) {
+        return undefined;
+      }
       return linkModel;
     }
 
@@ -209,6 +212,9 @@ export const getFieldLinksForExplore = (options: {
             getTemplateSrv().replace(value, { ...vars, ...allVars, ...scopedVars });
 
           const linkModel = getLinkSrv().getDataLinkUIModel(link, replace, field);
+          if (link.origin === DataLinkConfigOrigin.Correlations && !isExternalHref(linkModel.href)) {
+            return undefined;
+          }
           if (!linkModel.title) {
             linkModel.title = getTitleFromHref(linkModel.href);
           }
@@ -245,6 +251,28 @@ export const getFieldLinksForExplore = (options: {
   }
   return [];
 };
+
+/**
+ * External correlation URLs are written by correlation authors and interpolated with query results, then
+ * followed with the viewer's session. They must resolve to an http(s) URL on a host other than Grafana's,
+ * otherwise a link could point at session changing pages such as /logout or /profile/switch-org/:id.
+ */
+function isExternalHref(href: string): boolean {
+  const url = parseUrl(href, window.location.href);
+  if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) {
+    return false;
+  }
+  const grafanaHostnames = [window.location.hostname, parseUrl(config.appUrl)?.hostname];
+  return !grafanaHostnames.includes(url.hostname);
+}
+
+function parseUrl(href: string, base?: string): URL | undefined {
+  try {
+    return new URL(href, base);
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * @internal

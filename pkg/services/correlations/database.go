@@ -3,6 +3,7 @@ package correlations
 import (
 	"context"
 
+	correlationsApp "github.com/grafana/grafana/apps/correlations/pkg/app"
 	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/services/datasources"
 	"github.com/grafana/grafana/pkg/services/quota"
@@ -29,6 +30,12 @@ func (s CorrelationsService) createCorrelation(ctx context.Context, cmd CreateCo
 		correlation.Type = CorrelationType("query")
 	} else if correlation.Config.Type != "" {
 		return correlation, ErrConfigTypeDeprecated
+	}
+
+	if correlation.Type == external {
+		if err := correlationsApp.ValidateExternalTarget(correlation.Config.Target, s.grafanaHost, cmd.RequestHost); err != nil {
+			return Correlation{}, err
+		}
 	}
 
 	err := s.SQLStore.WithTransactionalDbSession(ctx, func(session *db.Session) error {
@@ -215,6 +222,22 @@ func (s CorrelationsService) updateCorrelation(ctx context.Context, cmd UpdateCo
 			}
 			if cmd.Config.Transformations != nil {
 				correlation.Config.Transformations = cmd.Config.Transformations
+			}
+		}
+
+		// on the app platform path the row was read into foundCorrelation instead of correlation
+		resultType, resultTarget := correlation.Type, correlation.Config.Target
+		if foundCorrelation.UID != "" {
+			if cmd.Type == nil {
+				resultType = foundCorrelation.Type
+			}
+			if cmd.Config == nil || cmd.Config.Target == nil {
+				resultTarget = foundCorrelation.Config.Target
+			}
+		}
+		if resultType == external {
+			if err := correlationsApp.ValidateExternalTarget(resultTarget, s.grafanaHost, cmd.RequestHost); err != nil {
+				return err
 			}
 		}
 

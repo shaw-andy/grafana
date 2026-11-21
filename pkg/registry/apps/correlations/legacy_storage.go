@@ -3,10 +3,12 @@ package correlations
 import (
 	"context"
 	b64 "encoding/base64"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -167,6 +169,12 @@ func (s *legacyStorage) Create(ctx context.Context,
 		return nil, fmt.Errorf("expected correlation")
 	}
 
+	if createValidation != nil {
+		if err := createValidation(ctx, obj); err != nil {
+			return nil, err
+		}
+	}
+
 	cmd, err := correlations.ToCreateCorrelationCommand(resource)
 	if err != nil {
 		return nil, err
@@ -174,7 +182,7 @@ func (s *legacyStorage) Create(ctx context.Context,
 
 	out, err := s.service.CreateCorrelation(ctx, *cmd)
 	if err != nil {
-		return nil, err
+		return nil, toAPIError(err)
 	}
 	return s.Get(ctx, out.UID, &metav1.GetOptions{})
 }
@@ -201,6 +209,12 @@ func (s *legacyStorage) Update(ctx context.Context,
 		return nil, false, fmt.Errorf("expected correlation")
 	}
 
+	if updateValidation != nil {
+		if err := updateValidation(ctx, obj, before); err != nil {
+			return nil, false, err
+		}
+	}
+
 	cmd, err := correlations.ToUpdateCorrelationCommand(resource)
 	if err != nil {
 		return nil, false, err
@@ -208,7 +222,7 @@ func (s *legacyStorage) Update(ctx context.Context,
 
 	out, err := s.service.UpdateCorrelation(ctx, *cmd)
 	if err != nil {
-		return nil, false, err
+		return nil, false, toAPIError(err)
 	}
 	obj, err = s.Get(ctx, out.UID, &metav1.GetOptions{})
 	return obj, false, err
@@ -271,6 +285,13 @@ func (s *legacyStorage) DeleteCollection(ctx context.Context, deleteValidation r
 	} else {
 		return nil, s.service.DeleteCorrelationsByTargetUID(ctx, correlations.DeleteCorrelationsByTargetUIDCommand{TargetUID: datasourceToDelete["name"], TargetType: datasourceToDelete["group"], OrgId: orgID})
 	}
+}
+
+func toAPIError(err error) error {
+	if errors.Is(err, correlations.ErrInvalidExternalTarget) {
+		return apierrors.NewBadRequest(err.Error())
+	}
+	return err
 }
 
 type continueToken struct {

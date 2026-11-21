@@ -9,6 +9,12 @@ correlationsv0alpha1: {
 			"UPDATE",
 		]
 	}
+	validation: {
+		operations: [
+			"CREATE",
+			"UPDATE",
+		]
+	}
 	schema: {
 		spec: {
 			type:         CorrelationType

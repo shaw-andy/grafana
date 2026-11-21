@@ -80,6 +80,7 @@ const decorateDataFrameWithInternalDataLinks = (dataFrame: DataFrame, correlatio
           const externalTarget = correlation.config.target;
           field.config.links!.push({
             url: externalTarget.url,
+            targetBlank: true,
             title: correlation.label || 'External URL',
             origin: DataLinkConfigOrigin.Correlations,
             meta: { transformations: correlation.config?.transformations },

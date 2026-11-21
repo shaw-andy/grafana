@@ -15,7 +15,19 @@ import (
 	correlationsv0alpha1 "github.com/grafana/grafana/apps/correlations/pkg/apis/correlation/v0alpha1"
 )
 
+// Config carries the app-specific configuration for the correlations app.
+type Config struct {
+	// AppURL is Grafana's configured root URL (root_url). External correlation
+	// targets on its host are rejected.
+	AppURL string
+}
+
 func New(cfg app.Config) (app.App, error) {
+	var grafanaHost string
+	if specificConfig, ok := cfg.SpecificConfig.(*Config); ok && specificConfig != nil {
+		grafanaHost = HostFromURL(specificConfig.AppURL)
+	}
+
 	simpleConfig := simple.AppConfig{
 		Name:       "correlation",
 		KubeConfig: cfg.KubeConfig,
@@ -28,8 +40,9 @@ func New(cfg app.Config) (app.App, error) {
 		},
 		ManagedKinds: []simple.AppManagedKind{
 			{
-				Kind:    correlationsv0alpha1.CorrelationKind(),
-				Mutator: DataSourceMutator(),
+				Kind:      correlationsv0alpha1.CorrelationKind(),
+				Mutator:   DataSourceMutator(),
+				Validator: ExternalTargetValidator(grafanaHost),
 			},
 		},
 	}
@@ -68,6 +81,21 @@ const (
 	// We use this because field selectors cannot use annotations from the metadata, and we derive the provisioned boolean from that
 	SourceRefProvLabelKey = "correlations.grafana.app/sourceDSProv-ref"
 )
+
+func ExternalTargetValidator(grafanaHosts ...string) *simple.Validator {
+	return &simple.Validator{
+		ValidateFunc: func(ctx context.Context, req *app.AdmissionRequest) error {
+			c, ok := req.Object.(*correlationsv0alpha1.Correlation)
+			if !ok || c == nil {
+				return fmt.Errorf("expected Correlation object, got %T", req.Object)
+			}
+			if c.Spec.Type != correlationsv0alpha1.CorrelationCorrelationTypeExternal {
+				return nil
+			}
+			return ValidateExternalTarget(c.Spec.Config.Target, grafanaHosts...)
+		},
+	}
+}
 
 func DataSourceMutator() *simple.Mutator {
 	return &simple.Mutator{
