@@ -1,6 +1,9 @@
 package util
 
 import (
+	"crypto/pbkdf2"
+	"crypto/sha256"
+	"encoding/hex"
 	"math"
 	"strings"
 	"testing"
@@ -30,9 +33,53 @@ func TestEncodePassword(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(
 		t,
-		"e59c568621e57756495a468f47c74e07c911b037084dd464bb2ed72410970dc849cabd71b48c394faf08a5405dae53741ce9",
+		"pbkdf2-sha256$600000$7030cd4c513080a6ec1ca9f087adc8fa79bf471a19534286156f995593f55f74",
 		encodedPassword,
 	)
+}
+
+func TestVerifyPassword(t *testing.T) {
+	current, err := EncodePassword("iamgod", "pepper")
+	require.NoError(t, err)
+	const legacy = "e59c568621e57756495a468f47c74e07c911b037084dd464bb2ed72410970dc849cabd71b48c394faf08a5405dae53741ce9"
+	lowIterations := "pbkdf2-sha256$10000$" + hex.EncodeToString(mustPBKDF2(t, "iamgod", "pepper", 10000, 32))
+
+	tests := []struct {
+		desc        string
+		password    string
+		salt        string
+		encoded     string
+		match       bool
+		needsRehash bool
+	}{
+		{desc: "current encoding", password: "iamgod", salt: "pepper", encoded: current, match: true},
+		{desc: "current encoding, wrong password", password: "iamgoD", salt: "pepper", encoded: current},
+		{desc: "current encoding, wrong salt", password: "iamgod", salt: "salt", encoded: current},
+		{desc: "legacy hex encoding", password: "iamgod", salt: "pepper", encoded: legacy, match: true, needsRehash: true},
+		{desc: "legacy hex encoding, wrong password", password: "iamgoD", salt: "pepper", encoded: legacy},
+		{desc: "fewer iterations than current", password: "iamgod", salt: "pepper", encoded: lowIterations, match: true, needsRehash: true},
+		{desc: "empty", password: "", salt: "pepper", encoded: ""},
+		{desc: "legacy hex of wrong length", password: "iamgod", salt: "pepper", encoded: legacy[:64]},
+		{desc: "missing digest", password: "iamgod", salt: "pepper", encoded: "pbkdf2-sha256$600000"},
+		{desc: "non-numeric iterations", password: "iamgod", salt: "pepper", encoded: "pbkdf2-sha256$x$" + strings.Repeat("0", 64)},
+		{desc: "too many iterations", password: "iamgod", salt: "pepper", encoded: "pbkdf2-sha256$10000001$" + strings.Repeat("0", 64)},
+		{desc: "zero iterations", password: "iamgod", salt: "pepper", encoded: "pbkdf2-sha256$0$" + strings.Repeat("0", 64)},
+		{desc: "short digest", password: "iamgod", salt: "pepper", encoded: current[:len(current)-2]},
+	}
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			match, needsRehash := VerifyPassword(tt.password, tt.salt, tt.encoded)
+			assert.Equal(t, tt.match, match)
+			assert.Equal(t, tt.needsRehash, needsRehash)
+		})
+	}
+}
+
+func mustPBKDF2(t *testing.T, password, salt string, iterations, keyLength int) []byte {
+	t.Helper()
+	key, err := pbkdf2.Key(sha256.New, password, []byte(salt), iterations, keyLength)
+	require.NoError(t, err)
+	return key
 }
 
 func TestDecodeQuotedPrintable(t *testing.T) {

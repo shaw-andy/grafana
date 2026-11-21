@@ -24,6 +24,7 @@ type FakeUserService struct {
 	ExpectedUsageStats         map[string]any
 
 	UpdateFn            func(ctx context.Context, cmd *user.UpdateUserCommand) error
+	RehashPasswordFn    func(ctx context.Context, cmd *user.RehashPasswordCommand) error
 	DeleteFn            func(ctx context.Context, cmd *user.DeleteUserCommand) error
 	GetSignedInUserFn   func(ctx context.Context, query *user.GetSignedInUserQuery) (*user.SignedInUser, error)
 	CreateFn            func(ctx context.Context, cmd *user.CreateUserCommand) (*user.User, error)
@@ -97,6 +98,13 @@ func (f *FakeUserService) GetByEmail(ctx context.Context, query *user.GetUserByE
 func (f *FakeUserService) Update(ctx context.Context, cmd *user.UpdateUserCommand) error {
 	if f.UpdateFn != nil {
 		return f.UpdateFn(ctx, cmd)
+	}
+	return f.ExpectedError
+}
+
+func (f *FakeUserService) RehashPassword(ctx context.Context, cmd *user.RehashPasswordCommand) error {
+	if f.RehashPasswordFn != nil {
+		return f.RehashPasswordFn(ctx, cmd)
 	}
 	return f.ExpectedError
 }

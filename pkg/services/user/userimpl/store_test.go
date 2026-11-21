@@ -2,6 +2,9 @@ package userimpl
 
 import (
 	"context"
+	"crypto/pbkdf2"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"testing"
@@ -1063,6 +1066,85 @@ func TestIntegrationUserUpdate(t *testing.T) {
 		result, err := userStore.GetByID(context.Background(), users[1].ID)
 		require.NoError(t, err)
 		require.Equal(t, "Renamed", result.Name)
+	})
+}
+
+func TestIntegrationRehashPassword(t *testing.T) {
+	testutil.SkipIntegrationTestInShortMode(t)
+
+	ss, cfg := db.InitTestDBWithCfg(t) //nolint:staticcheck // legacy shared-DB test setup; migrate to NewTestStore
+	userStore := ProvideStore(legacysql.NewDatabaseProvider(ss), cfg)
+	_, usrSvc := createOrgAndUserSvc(t, ss, cfg)
+	ctx := context.Background()
+
+	const (
+		oldPassword = user.Password("placeholder-old")
+		newPassword = user.Password("placeholder-new")
+	)
+
+	createWithLegacyHash := func(t *testing.T, login string) *user.User {
+		t.Helper()
+		created, err := usrSvc.Create(ctx, &user.CreateUserCommand{Login: login, Email: login + "@test.com", Password: oldPassword})
+		require.NoError(t, err)
+		digest, err := pbkdf2.Key(sha256.New, string(oldPassword), []byte(created.Salt), 10000, 50)
+		require.NoError(t, err)
+		legacy := user.Password(hex.EncodeToString(digest))
+		require.NoError(t, userStore.Update(ctx, &user.UpdateUserCommand{UserID: created.ID, Password: &legacy}))
+		stored, err := userStore.GetByID(ctx, created.ID)
+		require.NoError(t, err)
+		require.Equal(t, legacy, stored.Password)
+		return stored
+	}
+
+	requireStoredPassword := func(t *testing.T, userID int64, password user.Password) {
+		t.Helper()
+		stored, err := userStore.GetByID(ctx, userID)
+		require.NoError(t, err)
+		match, needsRehash := password.Verify(stored.Salt, stored.Password)
+		require.True(t, match)
+		require.False(t, needsRehash)
+	}
+
+	t.Run("replaces a legacy hash", func(t *testing.T) {
+		stored := createWithLegacyHash(t, "rehash-legacy")
+		require.NoError(t, usrSvc.RehashPassword(ctx, &user.RehashPasswordCommand{
+			UserID: stored.ID, Salt: stored.Salt, Password: oldPassword, CurrentHash: stored.Password,
+		}))
+		requireStoredPassword(t, stored.ID, oldPassword)
+	})
+
+	t.Run("keeps a password changed after the legacy hash was read", func(t *testing.T) {
+		stale := createWithLegacyHash(t, "rehash-changed")
+		next := newPassword
+		require.NoError(t, usrSvc.Update(ctx, &user.UpdateUserCommand{UserID: stale.ID, Password: &next}))
+
+		require.NoError(t, usrSvc.RehashPassword(ctx, &user.RehashPasswordCommand{
+			UserID: stale.ID, Salt: stale.Salt, Password: oldPassword, CurrentHash: stale.Password,
+		}))
+		requireStoredPassword(t, stale.ID, newPassword)
+	})
+
+	t.Run("refuses a password that does not match the hash being replaced", func(t *testing.T) {
+		stored := createWithLegacyHash(t, "rehash-mismatch")
+		err := usrSvc.RehashPassword(ctx, &user.RehashPasswordCommand{
+			UserID: stored.ID, Salt: stored.Salt, Password: newPassword, CurrentHash: stored.Password,
+		})
+		require.ErrorIs(t, err, user.ErrPasswordMissmatch)
+
+		unchanged, err := userStore.GetByID(ctx, stored.ID)
+		require.NoError(t, err)
+		require.Equal(t, stored.Password, unchanged.Password)
+	})
+
+	t.Run("password change accepts a legacy old password and rejects reusing it", func(t *testing.T) {
+		stored := createWithLegacyHash(t, "rehash-change")
+		old := oldPassword
+		err := usrSvc.Update(ctx, &user.UpdateUserCommand{UserID: stored.ID, OldPassword: &old, Password: &old})
+		require.ErrorIs(t, err, user.ErrNewPasswordSameAsOld)
+
+		next := newPassword
+		require.NoError(t, usrSvc.Update(ctx, &user.UpdateUserCommand{UserID: stored.ID, OldPassword: &old, Password: &next}))
+		requireStoredPassword(t, stored.ID, newPassword)
 	})
 }
 

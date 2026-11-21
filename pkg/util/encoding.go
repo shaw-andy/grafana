@@ -4,11 +4,13 @@ import (
 	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"io"
 	"mime/quotedprintable"
+	"strconv"
 	"strings"
 )
 
@@ -48,13 +50,62 @@ func GetRandomString(n int, alphabets ...byte) (string, error) {
 	return string(bytes), nil
 }
 
-// EncodePassword encodes a password using PBKDF2.
+const (
+	passwordHashPrefix = "pbkdf2-sha256$"
+	// passwordIterations follows the OWASP recommendation for PBKDF2-HMAC-SHA256.
+	passwordIterations = 600_000
+	// maxPasswordIterations bounds the work a stored hash can ask for at login.
+	maxPasswordIterations = 10_000_000
+
+	legacyPasswordIterations = 10_000
+	legacyPasswordKeyLength  = 50
+)
+
+// EncodePassword hashes a login password with PBKDF2-HMAC-SHA256 and returns
+// it as pbkdf2-sha256$<iterations>$<hex digest>. Use VerifyPassword to check a
+// password against the result.
 func EncodePassword(password string, salt string) (string, error) {
-	newPasswd, err := pbkdf2.Key(sha256.New, password, []byte(salt), 10000, 50)
+	digest, err := pbkdf2.Key(sha256.New, password, []byte(salt), passwordIterations, sha256.Size)
 	if err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(newPasswd), nil
+	return passwordHashPrefix + strconv.Itoa(passwordIterations) + "$" + hex.EncodeToString(digest), nil
+}
+
+// VerifyPassword reports whether password matches a hash stored by
+// EncodePassword, or by the hex PBKDF2 encoding used before it. needsRehash is
+// true when the password matches but the hash should be replaced with the
+// result of EncodePassword.
+func VerifyPassword(password string, salt string, encoded string) (match bool, needsRehash bool) {
+	if rest, ok := strings.CutPrefix(encoded, passwordHashPrefix); ok {
+		iterText, digestHex, ok := strings.Cut(rest, "$")
+		if !ok {
+			return false, false
+		}
+		iterations, err := strconv.Atoi(iterText)
+		if err != nil || iterations < 1 || iterations > maxPasswordIterations {
+			return false, false
+		}
+		digest, err := hex.DecodeString(digestHex)
+		if err != nil || len(digest) != sha256.Size {
+			return false, false
+		}
+		derived, err := pbkdf2.Key(sha256.New, password, []byte(salt), iterations, len(digest))
+		if err != nil || subtle.ConstantTimeCompare(derived, digest) != 1 {
+			return false, false
+		}
+		return true, iterations != passwordIterations
+	}
+
+	digest, err := hex.DecodeString(encoded)
+	if err != nil || len(digest) != legacyPasswordKeyLength {
+		return false, false
+	}
+	derived, err := pbkdf2.Key(sha256.New, password, []byte(salt), legacyPasswordIterations, legacyPasswordKeyLength)
+	if err != nil || subtle.ConstantTimeCompare(derived, digest) != 1 {
+		return false, false
+	}
+	return true, true
 }
 
 // GetBasicAuthHeader returns a base64 encoded string from user and password.
