@@ -11,7 +11,7 @@ import {
 import { Trans } from '@grafana/i18n';
 import { TextLink, getFieldDisplayLinks, useStyles2 } from '@grafana/ui';
 
-import { renderValue } from './renderValue';
+import { getSessionSafeLink } from './sessionSafeLink';
 
 export interface Props {
   data?: DataFrame; // source data
@@ -44,7 +44,11 @@ export function getDisplayValuesAndLinks(data: DataFrame, rowIndex: number, colu
     const value = field.values[rowIndex];
     const fieldDisplay = field.display ? field.display(value) : { text: `${value}`, numeric: +value };
 
-    getFieldDisplayLinks(field, rowIndex).forEach((link) => {
+    getFieldDisplayLinks(field, rowIndex).forEach((fieldLink) => {
+      const link = getSessionSafeLink(fieldLink);
+      if (!link) {
+        return;
+      }
       const key = `${link.title}/${link.href}`;
       if (!linkLookup.has(key)) {
         links.push(link);
@@ -89,7 +93,7 @@ export const DataHoverView = ({ data, rowIndex, header, padding = 0 }: Props) =>
           {displayValues.map((displayValue, i) => (
             <tr key={`${i}/${rowIndex}`}>
               <th>{displayValue.name}</th>
-              <td>{renderValue(displayValue.valueString)}</td>
+              <td>{displayValue.valueString}</td>
             </tr>
           ))}
           {links.map((link, i) => (
