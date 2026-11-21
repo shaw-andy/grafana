@@ -60,7 +60,7 @@ func TestIntegrationUserServiceGet(t *testing.T) {
 				User:   helper.Org1.Admin,
 				Method: "POST",
 				Path:   "/api/admin/users",
-				Body:   []byte(`{"name": "First User", "email": "first@example.com", "login": "first-user", "password": "password123"}`),
+				Body:   []byte(`{"name": "First User", "email": "first@example.com", "login": "first-user", "password": "Placeholder-Pw1"}`),
 			}, &createUserResponse{})
 
 			require.NotNil(t, firstUser)
@@ -71,7 +71,7 @@ func TestIntegrationUserServiceGet(t *testing.T) {
 				User:   helper.Org1.Admin,
 				Method: "POST",
 				Path:   "/api/admin/users",
-				Body:   []byte(`{"name": "Second User", "email": "second@example.com", "login": "second-user", "password": "password123"}`),
+				Body:   []byte(`{"name": "Second User", "email": "second@example.com", "login": "second-user", "password": "Placeholder-Pw1"}`),
 			}, &createUserResponse{})
 
 			require.NotNil(t, secondUser)
@@ -166,7 +166,7 @@ func TestIntegrationUserServiceUpdate(t *testing.T) {
 				User:   helper.Org1.Admin,
 				Method: "POST",
 				Path:   "/api/admin/users",
-				Body:   []byte(`{"name": "Original Name", "email": "update-test-user@example.com", "login": "update-test-user", "password": "password123"}`),
+				Body:   []byte(`{"name": "Original Name", "email": "update-test-user@example.com", "login": "update-test-user", "password": "Placeholder-Pw1"}`),
 			}, &createUserResponse{})
 
 			require.NotNil(t, createRsp)
@@ -246,7 +246,7 @@ func TestIntegrationUserService(t *testing.T) {
 				User:   helper.Org1.Admin,
 				Method: "POST",
 				Path:   "/api/admin/users",
-				Body:   []byte(`{"name": "K8s Service User", "email": "k8s-service-user@example.com", "login": "k8s-service-user", "password": "password123"}`),
+				Body:   []byte(`{"name": "K8s Service User", "email": "k8s-service-user@example.com", "login": "k8s-service-user", "password": "Placeholder-Pw1"}`),
 			}, &createUserResponse{})
 
 			require.NotNil(t, createRsp)
@@ -328,7 +328,7 @@ func TestIntegrationUserServiceDelete(t *testing.T) {
 				User:   helper.Org1.Admin,
 				Method: "POST",
 				Path:   "/api/admin/users",
-				Body:   []byte(`{"name": "Delete Test User", "email": "delete-test@example.com", "login": "delete-test-user", "password": "password123"}`),
+				Body:   []byte(`{"name": "Delete Test User", "email": "delete-test@example.com", "login": "delete-test-user", "password": "Placeholder-Pw1"}`),
 			}, &createUserResponse{})
 			require.Equal(t, 200, createRsp.Response.StatusCode, "body: %s", string(createRsp.Body))
 			require.NotZero(t, createRsp.Result.ID)
@@ -415,7 +415,7 @@ func TestIntegrationUserServiceSearch(t *testing.T) {
 				User:   helper.Org1.Admin,
 				Method: "POST",
 				Path:   "/api/admin/users",
-				Body:   []byte(`{"name": "Alpha User", "email": "alpha@example.com", "login": "alpha-user", "password": "password123"}`),
+				Body:   []byte(`{"name": "Alpha User", "email": "alpha@example.com", "login": "alpha-user", "password": "Placeholder-Pw1"}`),
 			}, &createUserResponse{})
 			require.Equal(t, 200, alphaUser.Response.StatusCode, "body: %s", string(alphaUser.Body))
 			require.NotEmpty(t, alphaUser.Result.UID)
@@ -425,7 +425,7 @@ func TestIntegrationUserServiceSearch(t *testing.T) {
 				User:   helper.Org1.Admin,
 				Method: "POST",
 				Path:   "/api/admin/users",
-				Body:   []byte(`{"name": "Beta User", "email": "beta@example.com", "login": "beta-user", "password": "password123"}`),
+				Body:   []byte(`{"name": "Beta User", "email": "beta@example.com", "login": "beta-user", "password": "Placeholder-Pw1"}`),
 			}, &createUserResponse{})
 			require.Equal(t, 200, betaUser.Response.StatusCode, "body: %s", string(betaUser.Body))
 			require.NotEmpty(t, betaUser.Result.UID)
@@ -651,7 +651,7 @@ func TestIntegrationUserServiceOrgUsers(t *testing.T) {
 				User:   helper.Org1.Admin,
 				Method: "POST",
 				Path:   "/api/admin/users",
-				Body:   []byte(`{"name": "Org User One", "email": "org-user-one@example.com", "login": "org-user-one", "password": "password123"}`),
+				Body:   []byte(`{"name": "Org User One", "email": "org-user-one@example.com", "login": "org-user-one", "password": "Placeholder-Pw1"}`),
 			}, &createUserResponse{})
 			require.Equal(t, 200, firstUser.Response.StatusCode, "body: %s", string(firstUser.Body))
 			require.NotEmpty(t, firstUser.Result.UID)
@@ -660,7 +660,7 @@ func TestIntegrationUserServiceOrgUsers(t *testing.T) {
 				User:   helper.Org1.Admin,
 				Method: "POST",
 				Path:   "/api/admin/users",
-				Body:   []byte(`{"name": "Org User Two", "email": "org-user-two@example.com", "login": "org-user-two", "password": "password123"}`),
+				Body:   []byte(`{"name": "Org User Two", "email": "org-user-two@example.com", "login": "org-user-two", "password": "Placeholder-Pw1"}`),
 			}, &createUserResponse{})
 			require.Equal(t, 200, secondUser.Response.StatusCode, "body: %s", string(secondUser.Body))
 			require.NotEmpty(t, secondUser.Result.UID)
@@ -754,7 +754,7 @@ func TestIntegrationUserServiceSearchAuthorization(t *testing.T) {
 				User:   helper.Org1.Admin,
 				Method: "POST",
 				Path:   "/api/admin/users",
-				Body:   []byte(`{"name": "alpha-authz", "email": "alpha-authz@example.com", "login": "alpha-authz", "password": "password123"}`),
+				Body:   []byte(`{"name": "alpha-authz", "email": "alpha-authz@example.com", "login": "alpha-authz", "password": "Placeholder-Pw1"}`),
 			}, &createUserResponse{})
 			require.Equal(t, 200, alphaResp.Response.StatusCode, "body: %s", string(alphaResp.Body))
 			require.NotZero(t, alphaResp.Result.ID, "alpha create returned zero ID; body=%s", string(alphaResp.Body))
@@ -764,7 +764,7 @@ func TestIntegrationUserServiceSearchAuthorization(t *testing.T) {
 				User:   helper.Org1.Admin,
 				Method: "POST",
 				Path:   "/api/admin/users",
-				Body:   []byte(`{"name": "beta-authz", "email": "beta-authz@example.com", "login": "beta-authz", "password": "password123"}`),
+				Body:   []byte(`{"name": "beta-authz", "email": "beta-authz@example.com", "login": "beta-authz", "password": "Placeholder-Pw1"}`),
 			}, &createUserResponse{})
 			require.Equal(t, 200, betaResp.Response.StatusCode, "body: %s", string(betaResp.Body))
 

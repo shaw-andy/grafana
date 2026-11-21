@@ -1265,7 +1265,25 @@ func CreateUser(t *testing.T, store db.DB, cfg *setting.Cfg, cmd user.CreateUser
 
 	cmd.OrgID = o.ID
 
+	return CreateUserWithService(t, store, cfg, usrSvc, cmd)
+}
+
+// CreateUserWithService creates the user through usrSvc and then stores the hash of cmd.Password
+// directly, so test fixtures can keep short credentials that the password policy rejects.
+func CreateUserWithService(t *testing.T, store db.DB, cfg *setting.Cfg, usrSvc user.Service, cmd user.CreateUserCommand) *user.User {
+	t.Helper()
+
+	password := cmd.Password
+	cmd.Password = ""
 	u, err := usrSvc.Create(context.Background(), &cmd)
 	require.NoError(t, err)
+
+	if password != "" {
+		hashed, err := password.Hash(u.Salt)
+		require.NoError(t, err)
+		userStore := userimpl.ProvideStore(legacysql.NewDatabaseProvider(store), cfg)
+		require.NoError(t, userStore.Update(context.Background(), &user.UpdateUserCommand{UserID: u.ID, Password: &hashed}))
+		u.Password = hashed
+	}
 	return u
 }

@@ -173,8 +173,7 @@ func (c TestContext) createUser(cmd user.CreateUserCommand) User {
 	)
 	require.NoError(c.t, err)
 
-	user, err := usrSvc.Create(context.Background(), &cmd)
-	require.NoError(c.t, err)
+	user := testinfra.CreateUserWithService(c.t, store, c.env.Cfg, usrSvc, cmd)
 
 	return User{
 		User:     *user,
