@@ -704,10 +704,6 @@ func (hs *HTTPServer) addMiddlewaresAndStaticRoutes() {
 	hs.mapStatic(m, hs.Cfg.StaticRootPath, "robots.txt", "robots.txt")
 	hs.mapStatic(m, hs.Cfg.StaticRootPath, "mockServiceWorker.js", "mockServiceWorker.js")
 
-	if hs.Cfg.ImageUploadProvider == "local" {
-		hs.mapStatic(m, hs.Cfg.ImagesDir, "", "/public/img/attachments")
-	}
-
 	if len(hs.Cfg.CustomResponseHeaders) > 0 {
 		m.Use(middleware.AddCustomResponseHeaders(hs.Cfg))
 	}
