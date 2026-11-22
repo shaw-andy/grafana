@@ -65,22 +65,32 @@ func (m *PluginInstaller) Add(ctx context.Context, pluginID, version string, opt
 		m.installing.Delete(pluginID)
 	}()
 
-	archive, err := m.install(ctx, pluginID, version, opts)
+	pending, err := m.fetch(ctx, pluginID, version, opts)
 	if err != nil {
 		return err
 	}
 
-	for _, dep := range archive.Dependencies {
+	// Dependencies are installed before this plugin's archive is extracted or any existing version
+	// is removed, so a dependency that is refused leaves this plugin as it was.
+	for _, dep := range pending.manifest.Dependencies {
 		m.log.Info(fmt.Sprintf("Fetching %s dependency %s...", pluginID, dep.ID))
 
-		err = m.Add(ctx, dep.ID, "", plugins.NewAddOpts(opts.GrafanaVersion(), opts.OS(), opts.Arch(), ""))
+		depOpts := plugins.NewAddOpts(opts.GrafanaVersion(), opts.OS(), opts.Arch(), "").
+			WithPermissionsAuthorizer(opts.PermissionsAuthorizer())
+		err = m.Add(ctx, dep.ID, "", depOpts)
 		if err != nil {
 			if _, ok := errors.AsType[plugins.DuplicateError](err); ok {
 				m.log.Info("Dependency already installed", "pluginId", dep.ID)
 				continue
 			}
+			pending.close(m.log)
 			return fmt.Errorf("%v: %w", fmt.Sprintf("failed to download plugin %s from repository", dep.ID), err)
 		}
+	}
+
+	archive, err := m.install(ctx, pluginID, version, pending)
+	if err != nil {
+		return err
 	}
 
 	_, err = m.pluginLoader.Load(ctx, sources.NewLocalSource(plugins.ClassExternal, []string{archive.Path}))
@@ -92,13 +102,30 @@ func (m *PluginInstaller) Add(ctx context.Context, pluginID, version string, opt
 	return nil
 }
 
-func (m *PluginInstaller) install(ctx context.Context, pluginID, version string, opts plugins.AddOpts) (*storage.ExtractedPluginArchive, error) {
+// pendingInstall is a downloaded archive that has been authorized but not yet written to disk.
+type pendingInstall struct {
+	archive  *repo.PluginArchive
+	manifest *storage.ArchiveManifest
+	// existing is the installed version this archive replaces, if any.
+	existing *plugins.Plugin
+}
+
+func (p *pendingInstall) close(logger log.Logger) {
+	if err := p.archive.File.Close(); err != nil {
+		logger.Warn("Failed to close plugin archive", "error", err)
+	}
+}
+
+// fetch downloads the archive for pluginID and authorizes the permissions it requests. It changes
+// nothing on disk and leaves any installed version in place.
+func (m *PluginInstaller) fetch(ctx context.Context, pluginID, version string, opts plugins.AddOpts) (*pendingInstall, error) {
 	var pluginArchive *repo.PluginArchive
 	compatOpts, err := RepoCompatOpts(opts)
 	if err != nil {
 		return nil, err
 	}
-	if plugin, exists := m.plugin(ctx, pluginID, version); exists {
+	plugin, exists := m.plugin(ctx, pluginID, version)
+	if exists {
 		if plugin.IsCorePlugin() {
 			return nil, plugins.ErrInstallCorePlugin
 		}
@@ -117,7 +144,6 @@ func (m *PluginInstaller) install(ctx context.Context, pluginID, version string,
 			return nil, err
 		}
 	} else {
-		var err error
 		if opts.URL() != "" {
 			pluginArchive, err = m.pluginRepo.GetPluginArchiveByURL(ctx, opts.URL(), compatOpts)
 		} else {
@@ -126,10 +152,41 @@ func (m *PluginInstaller) install(ctx context.Context, pluginID, version string,
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	pending := &pendingInstall{archive: pluginArchive, existing: plugin}
+
+	// The manifest is read from the same open archive that install extracts, so what is
+	// authorized here is exactly what reaches the plugins directory.
+	pending.manifest, err = storage.ReadArchiveManifest(pluginID, m.pluginStorageDirFunc, pluginArchive.File)
+	if err != nil {
+		pending.close(m.log)
+		return nil, err
+	}
+
+	if authorize := opts.PermissionsAuthorizer(); authorize != nil {
+		if err := authorize(ctx, pluginID, pending.manifest.Permissions); err != nil {
+			pending.close(m.log)
+			return nil, err
+		}
+	}
+
+	return pending, nil
+}
+
+// install replaces any existing version of the plugin with the pending archive.
+func (m *PluginInstaller) install(ctx context.Context, pluginID, version string, pending *pendingInstall) (*storage.ExtractedPluginArchive, error) {
+	if pending.existing != nil {
+		// remove existing installation of plugin
+		if err := m.Remove(ctx, pending.existing.ID, pending.existing.Info.Version); err != nil {
+			pending.close(m.log)
+			return nil, err
+		}
+	} else {
 		m.log.Info("Installing plugin", "pluginId", pluginID, "version", version)
 	}
 
-	extractedArchive, err := m.pluginStorage.Extract(ctx, pluginID, m.pluginStorageDirFunc, pluginArchive.File)
+	extractedArchive, err := m.pluginStorage.Extract(ctx, pluginID, m.pluginStorageDirFunc, pending.archive.File)
 	if err != nil {
 		return nil, err
 	}
@@ -149,12 +206,6 @@ func (m *PluginInstaller) install(ctx context.Context, pluginID, version string,
 
 func (m *PluginInstaller) updateFromURL(ctx context.Context, plugin *plugins.Plugin, url string, compatOpts repo.CompatOpts) (*repo.PluginArchive, error) {
 	m.log.Info("Updating plugin", "pluginId", plugin.ID, "from", plugin.Info.Version, "url", url)
-
-	// remove existing installation of plugin
-	err := m.Remove(ctx, plugin.ID, plugin.Info.Version)
-	if err != nil {
-		return nil, err
-	}
 
 	return m.pluginRepo.GetPluginArchiveByURL(ctx, url, compatOpts)
 }
@@ -177,12 +228,6 @@ func (m *PluginInstaller) updateFromCatalog(ctx context.Context, plugin *plugins
 
 	if pluginArchiveInfo.URL == "" && pluginArchiveInfo.Version == "" {
 		return nil, fmt.Errorf("could not determine update options for %s", plugin.ID)
-	}
-
-	// remove existing installation of plugin
-	err = m.Remove(ctx, plugin.ID, plugin.Info.Version)
-	if err != nil {
-		return nil, err
 	}
 
 	if pluginArchiveInfo.URL != "" {

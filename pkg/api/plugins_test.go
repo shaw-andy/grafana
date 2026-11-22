@@ -808,68 +808,56 @@ func createPlugin(jd plugins.JSONData, class plugins.Class, files plugins.FS) *p
 	}
 }
 
-func TestHTTPServer_hasPluginRequestedPermissions(t *testing.T) {
-	pluginReg := pluginstore.Plugin{
-		JSONData: plugins.JSONData{
-			ID: "grafana-test-app",
-			IAM: &auth.IAM{
-				Permissions: []auth.Permission{{Action: ac.ActionUsersRead, Scope: ac.ScopeUsersAll}, {Action: ac.ActionUsersCreate}},
-			},
-		},
-	}
+func TestHTTPServer_pluginPermissionsAuthorizer(t *testing.T) {
+	requested := []auth.Permission{{Action: ac.ActionUsersRead, Scope: ac.ScopeUsersAll}, {Action: ac.ActionUsersCreate}}
 
 	tests := []struct {
 		name        string
-		plugin      pluginstore.Plugin
+		requested   []auth.Permission
 		orgID       int64
 		singleOrg   bool
 		permissions map[int64]map[string][]string
-		warnCount   int
+		refused     bool
 	}{
 		{
-			name: "no warn if plugin has no registration",
-			plugin: pluginstore.Plugin{
-				JSONData: plugins.JSONData{
-					ID: "grafana-test-app",
-				},
-			},
-			warnCount: 0,
+			name:    "allow if plugin requests no permissions",
+			refused: false,
 		},
 		{
-			name:   "warn if user does not have plugin permissions globally",
-			plugin: pluginReg,
-			orgID:  1,
+			name:      "refuse if user does not have plugin permissions globally",
+			requested: requested,
+			orgID:     1,
 			permissions: map[int64]map[string][]string{
 				1: {ac.ActionUsersRead: {ac.ScopeUsersAll}, ac.ActionUsersCreate: {}},
 			},
-			warnCount: 1,
+			refused: true,
 		},
 		{
-			name:   "no warn if user has plugin permissions globally",
-			plugin: pluginReg,
-			orgID:  0,
+			name:      "allow if user has plugin permissions globally",
+			requested: requested,
+			orgID:     0,
 			permissions: map[int64]map[string][]string{
 				0: {ac.ActionUsersRead: {ac.ScopeUsersAll}, ac.ActionUsersCreate: {}},
 			},
-			warnCount: 0,
+			refused: false,
 		},
 		{
-			name:      "no warn if user has plugin permissions in single organization",
-			plugin:    pluginReg,
+			name:      "allow if user has plugin permissions in single organization",
+			requested: requested,
 			singleOrg: true,
 			orgID:     1,
 			permissions: map[int64]map[string][]string{
 				1: {ac.ActionUsersRead: {ac.ScopeUsersAll}, ac.ActionUsersCreate: {}},
 			},
-			warnCount: 0,
+			refused: false,
 		},
 		{
-			name:        "warn if user does not have all plugin permissions",
-			plugin:      pluginReg,
+			name:        "refuse if user does not have all plugin permissions",
+			requested:   requested,
 			singleOrg:   true,
 			orgID:       1,
 			permissions: map[int64]map[string][]string{1: {ac.ActionUsersCreate: {}}},
-			warnCount:   1,
+			refused:     true,
 		},
 	}
 	for _, tt := range tests {
@@ -881,9 +869,6 @@ func TestHTTPServer_hasPluginRequestedPermissions(t *testing.T) {
 
 			hs.Cfg = setting.NewCfg()
 			hs.Cfg.RBAC.SingleOrganization = tt.singleOrg
-			hs.pluginStore = &pluginstore.FakePluginStore{
-				PluginList: []pluginstore.Plugin{tt.plugin},
-			}
 			hs.log = logger
 			hs.accesscontrolService = actest.FakeService{}
 			hs.AccessControl = acimpl.ProvideAccessControl(featuremgmt.WithFeatures())
@@ -900,9 +885,13 @@ func TestHTTPServer_hasPluginRequestedPermissions(t *testing.T) {
 				Context:      &web.Context{Req: httpReq},
 				SignedInUser: &user.SignedInUser{OrgID: tt.orgID, Permissions: tt.permissions},
 			}
-			hs.hasPluginRequestedPermissions(c, "grafana-test-app")
+			err = hs.pluginPermissionsAuthorizer(c)(context.Background(), "grafana-test-app", tt.requested)
 
-			assert.Equal(t, tt.warnCount, logger.WarnLogs.Calls)
+			if tt.refused {
+				require.ErrorIs(t, err, errPluginPermissionsNotHeld)
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
 }

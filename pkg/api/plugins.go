@@ -479,9 +479,18 @@ func (hs *HTTPServer) InstallPlugin(c *contextmodel.ReqContext) response.Respons
 	}
 
 	compatOpts := plugins.NewAddOpts(hs.Cfg.BuildVersion, runtime.GOOS, runtime.GOARCH, "")
+	//nolint:staticcheck // not yet migrated to OpenFeature
+	if hs.Cfg.ManagedServiceAccountsEnabled && hs.Features.IsEnabledGlobally(featuremgmt.FlagExternalServiceAccounts) {
+		// Plugin service accounts are registered with the permissions the archive requests as soon
+		// as it is loaded, so they must be authorized before the installer writes it to disk.
+		compatOpts = compatOpts.WithPermissionsAuthorizer(hs.pluginPermissionsAuthorizer(c))
+	}
 	ctx := repo.WithRequestOrigin(c.Req.Context(), "api")
 	err := hs.pluginInstaller.Add(ctx, pluginID, dto.Version, compatOpts)
 	if err != nil {
+		if errors.Is(err, errPluginPermissionsNotHeld) {
+			return response.Error(http.StatusForbidden, "Plugin requests permissions that the installer does not have", err)
+		}
 		if _, ok := errors.AsType[plugins.DuplicateError](err); ok {
 			return response.Error(http.StatusConflict, "Plugin already installed", err)
 		}
@@ -493,14 +502,6 @@ func (hs *HTTPServer) InstallPlugin(c *contextmodel.ReqContext) response.Respons
 		}
 
 		return response.ErrOrFallback(http.StatusInternalServerError, "Failed to install plugin", err)
-	}
-
-	//nolint:staticcheck // not yet migrated to OpenFeature
-	if hs.Cfg.ManagedServiceAccountsEnabled && hs.Features.IsEnabled(c.Req.Context(), featuremgmt.FlagExternalServiceAccounts) {
-		// This is a non-blocking function that verifies that the installer has
-		// the permissions that the plugin requests to have on Grafana.
-		// If we want to make this blocking, the check will have to happen before or during the installation.
-		hs.hasPluginRequestedPermissions(c, pluginID)
 	}
 
 	return response.JSON(http.StatusOK, []byte{})
@@ -557,31 +558,28 @@ func (hs *HTTPServer) pluginMarkdown(ctx context.Context, pluginID, pluginVersio
 	return md.Content, nil
 }
 
-// hasPluginRequestedPermissions logs if the plugin installer does not have the permissions that the plugin requests to have on Grafana.
-func (hs *HTTPServer) hasPluginRequestedPermissions(c *contextmodel.ReqContext, pluginID string) {
-	plugin, ok := hs.pluginStore.Plugin(c.Req.Context(), pluginID)
-	if !ok {
-		hs.log.Debug("plugin has not been installed", "pluginID", pluginID)
-		return
-	}
+var errPluginPermissionsNotHeld = errors.New("plugin installer does not have the permissions the plugin requests")
 
-	// No registration => Early return
-	if plugin.IAM == nil || len(plugin.IAM.Permissions) == 0 {
-		hs.log.Debug("plugin did not request permissions on Grafana", "pluginID", pluginID)
-		return
-	}
+// pluginPermissionsAuthorizer refuses to install a plugin that requests permissions on Grafana
+// which the installer does not have.
+func (hs *HTTPServer) pluginPermissionsAuthorizer(c *contextmodel.ReqContext) plugins.PermissionsAuthorizer {
+	return func(_ context.Context, pluginID string, requested []auth.Permission) error {
+		if len(requested) == 0 {
+			return nil
+		}
 
-	hs.log.Debug("check installer's permissions, plugin wants to register an external service")
-	evaluator := evalAllPermissions(plugin.IAM.Permissions)
-	hasAccess := ac.HasGlobalAccess(hs.AccessControl, hs.authnService, c)
-	if hs.Cfg.RBAC.SingleOrganization {
-		// In a single organization setup, no need for a global check
-		hasAccess = ac.HasAccess(hs.AccessControl, c)
-	}
+		evaluator := evalAllPermissions(requested)
+		hasAccess := ac.HasGlobalAccess(hs.AccessControl, hs.authnService, c)
+		if hs.Cfg.RBAC.SingleOrganization {
+			// In a single organization setup, no need for a global check
+			hasAccess = ac.HasAccess(hs.AccessControl, c)
+		}
 
-	// Log a warning if the user does not have the plugin requested permissions
-	if !hasAccess(evaluator) {
-		hs.log.Warn("Plugin installer has less permission than what the plugin requires.", "Permissions", evaluator.String())
+		if !hasAccess(evaluator) {
+			hs.log.Warn("Refusing to install plugin that requests permissions the installer does not have", "pluginID", pluginID, "permissions", evaluator.String())
+			return fmt.Errorf("%w: %s requests %s", errPluginPermissionsNotHeld, pluginID, evaluator.String())
+		}
+		return nil
 	}
 }
 

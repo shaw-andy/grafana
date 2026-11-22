@@ -2,7 +2,9 @@ package manager
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -36,9 +38,7 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 		pluginV1 := createPlugin(t, pluginID, plugins.ClassExternal, true, true, func(plugin *plugins.Plugin) {
 			plugin.Info.Version = v1
 		})
-		mockZipV1 := &zip.ReadCloser{Reader: zip.Reader{File: []*zip.File{{
-			FileHeader: zip.FileHeader{Name: zipNameV1},
-		}}}}
+		mockZipV1 := testPluginZip(t, pluginID, v1)
 
 		loader := &pluginfakes.FakeLoader{
 			LoadFunc: func(ctx context.Context, src plugins.PluginSource) ([]*plugins.Plugin, error) {
@@ -110,9 +110,7 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 				plugin.Info.Version = v2
 			})
 
-			mockZipV2 := &zip.ReadCloser{Reader: zip.Reader{File: []*zip.File{{
-				FileHeader: zip.FileHeader{Name: zipNameV2},
-			}}}}
+			mockZipV2 := testPluginZip(t, pluginID, v2)
 			loader.LoadFunc = func(ctx context.Context, src plugins.PluginSource) ([]*plugins.Plugin, error) {
 				require.Equal(t, plugins.ClassExternal, src.PluginClass(ctx))
 				return []*plugins.Plugin{pluginV2}, nil
@@ -149,9 +147,7 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 				plugin.Info.Version = v2
 			})
 
-			mockZipV2 := &zip.ReadCloser{Reader: zip.Reader{File: []*zip.File{{
-				FileHeader: zip.FileHeader{Name: zipNameV2},
-			}}}}
+			mockZipV2 := testPluginZip(t, pluginID, v2)
 			loader.LoadFunc = func(ctx context.Context, src plugins.PluginSource) ([]*plugins.Plugin, error) {
 				require.Equal(t, plugins.ClassExternal, src.PluginClass(ctx))
 				return []*plugins.Plugin{pluginV2}, nil
@@ -253,11 +249,10 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 			},
 		}
 
+		dependencies := map[string][]string{p2: {p1}, p3: {p2}}
 		pluginRepo := &pluginfakes.FakePluginRepo{
 			GetPluginArchiveFunc: func(_ context.Context, id, version string, _ repo.CompatOpts) (*repo.PluginArchive, error) {
-				return &repo.PluginArchive{File: &zip.ReadCloser{Reader: zip.Reader{File: []*zip.File{{
-					FileHeader: zip.FileHeader{Name: fmt.Sprintf("%s.zip", id)},
-				}}}}}, nil
+				return &repo.PluginArchive{File: testPluginZip(t, id, version, dependencies[id]...)}, nil
 			},
 		}
 
@@ -271,15 +266,13 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 					}, nil
 				case p2:
 					return &storage.ExtractedPluginArchive{
-						ID:           p2,
-						Dependencies: []*storage.Dependency{{ID: p1}},
-						Path:         p2Zip,
+						ID:   p2,
+						Path: p2Zip,
 					}, nil
 				case p3:
 					return &storage.ExtractedPluginArchive{
-						ID:           p3,
-						Dependencies: []*storage.Dependency{{ID: p2}},
-						Path:         p3Zip,
+						ID:   p3,
+						Path: p3Zip,
 					}, nil
 				default:
 					return nil, fmt.Errorf("unknown plugin %s", id)
@@ -310,11 +303,10 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 			},
 		}
 
+		dependencies := map[string][]string{p1: {p2}, p2: {p1}}
 		pluginRepo := &pluginfakes.FakePluginRepo{
 			GetPluginArchiveFunc: func(_ context.Context, id, version string, _ repo.CompatOpts) (*repo.PluginArchive, error) {
-				return &repo.PluginArchive{File: &zip.ReadCloser{Reader: zip.Reader{File: []*zip.File{{
-					FileHeader: zip.FileHeader{Name: fmt.Sprintf("%s.zip", id)},
-				}}}}}, nil
+				return &repo.PluginArchive{File: testPluginZip(t, id, version, dependencies[id]...)}, nil
 			},
 		}
 
@@ -323,15 +315,13 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 				switch id {
 				case p1:
 					return &storage.ExtractedPluginArchive{
-						ID:           p1,
-						Dependencies: []*storage.Dependency{{ID: p2}},
-						Path:         p1Zip,
+						ID:   p1,
+						Path: p1Zip,
 					}, nil
 				case p2:
 					return &storage.ExtractedPluginArchive{
-						ID:           p2,
-						Dependencies: []*storage.Dependency{{ID: p1}},
-						Path:         p2Zip,
+						ID:   p2,
+						Path: p2Zip,
 					}, nil
 				default:
 					return nil, fmt.Errorf("unknown plugin %s", id)
@@ -366,9 +356,7 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 
 		pluginRepo := &pluginfakes.FakePluginRepo{
 			GetPluginArchiveFunc: func(_ context.Context, id, version string, _ repo.CompatOpts) (*repo.PluginArchive, error) {
-				return &repo.PluginArchive{File: &zip.ReadCloser{Reader: zip.Reader{File: []*zip.File{{
-					FileHeader: zip.FileHeader{Name: fmt.Sprintf("%s.zip", id)},
-				}}}}}, nil
+				return &repo.PluginArchive{File: testPluginZip(t, id, version, pluginDependencyID)}, nil
 			},
 		}
 
@@ -377,9 +365,8 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 				switch id {
 				case testPluginID:
 					return &storage.ExtractedPluginArchive{
-						ID:           testPluginID,
-						Dependencies: []*storage.Dependency{{ID: pluginDependencyID}},
-						Path:         "test-plugin.zip",
+						ID:   testPluginID,
+						Path: "test-plugin.zip",
 					}, nil
 				default:
 					return nil, fmt.Errorf("unknown plugin %s", id)
@@ -419,16 +406,12 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 			GetPluginArchiveByURLFunc: func(_ context.Context, url string, _ repo.CompatOpts) (*repo.PluginArchive, error) {
 				urlMethodCalled = true
 				require.Equal(t, parentURL, url, "URL method should only be called for parent plugin")
-				return &repo.PluginArchive{File: &zip.ReadCloser{Reader: zip.Reader{File: []*zip.File{{
-					FileHeader: zip.FileHeader{Name: "parent-plugin.zip"},
-				}}}}}, nil
+				return &repo.PluginArchive{File: testPluginZip(t, parentPluginID, "", depPluginID)}, nil
 			},
 			GetPluginArchiveFunc: func(_ context.Context, id, version string, _ repo.CompatOpts) (*repo.PluginArchive, error) {
 				catalogMethodCalled = true
 				require.Equal(t, depPluginID, id, "Catalog method should only be called for dependency plugin")
-				return &repo.PluginArchive{File: &zip.ReadCloser{Reader: zip.Reader{File: []*zip.File{{
-					FileHeader: zip.FileHeader{Name: "dependency-plugin.zip"},
-				}}}}}, nil
+				return &repo.PluginArchive{File: testPluginZip(t, depPluginID, "")}, nil
 			},
 		}
 
@@ -437,9 +420,8 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 				switch id {
 				case parentPluginID:
 					return &storage.ExtractedPluginArchive{
-						ID:           parentPluginID,
-						Dependencies: []*storage.Dependency{{ID: depPluginID}},
-						Path:         "parent-plugin.zip",
+						ID:   parentPluginID,
+						Path: "parent-plugin.zip",
 					}, nil
 				case depPluginID:
 					return &storage.ExtractedPluginArchive{
@@ -490,6 +472,33 @@ func createPlugin(t *testing.T, pluginID string, class plugins.Class, managed, b
 
 func testCompatOpts() plugins.AddOpts {
 	return plugins.NewAddOpts("10.0.0", runtime.GOOS, runtime.GOARCH, "")
+}
+
+// testPluginZip returns an archive holding only the plugin.json of pluginID.
+func testPluginZip(t *testing.T, pluginID, version string, dependencyIDs ...string) *zip.ReadCloser {
+	t.Helper()
+
+	jsonData := plugins.JSONData{ID: pluginID, Type: plugins.TypeDataSource, Name: pluginID, Info: plugins.Info{Version: version}}
+	for _, dep := range dependencyIDs {
+		jsonData.Dependencies.Plugins = append(jsonData.Dependencies.Plugins, plugins.Dependency{ID: dep, Type: string(plugins.TypeDataSource), Name: dep})
+	}
+	raw, err := json.Marshal(jsonData)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create(pluginID + "/plugin.json")
+	require.NoError(t, err)
+	_, err = w.Write(raw)
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+
+	archivePath := filepath.Join(t.TempDir(), pluginID+".zip")
+	require.NoError(t, os.WriteFile(archivePath, buf.Bytes(), 0600))
+	rc, err := zip.OpenReader(archivePath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rc.Close() })
+	return rc
 }
 
 func TestPluginInstaller_Removal(t *testing.T) {
