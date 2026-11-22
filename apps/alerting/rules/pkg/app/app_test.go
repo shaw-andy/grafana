@@ -22,6 +22,7 @@ import (
 	"github.com/grafana/grafana/apps/alerting/rules/pkg/app/recordingrule"
 	"github.com/grafana/grafana/apps/alerting/rules/pkg/app/rulesequence"
 	"github.com/grafana/grafana/apps/alerting/rules/pkg/app/validation"
+	"github.com/grafana/grafana/pkg/setting"
 )
 
 func alertRuleValidator(t *testing.T, cfg config.RuntimeConfig) *simple.Validator {
@@ -78,6 +79,51 @@ func makeDefaultRuntimeConfig() config.RuntimeConfig {
 			return errors.New("validation error")
 		},
 	}
+}
+
+func TestAlertRuleValidation_RejectsRunbookLogout(t *testing.T) {
+	previousAppURL := setting.AppUrl
+	previousAppSubURL := setting.AppSubUrl
+	setting.AppUrl = "http://grafana.example:3000/grafana/"
+	setting.AppSubUrl = "/grafana"
+	t.Cleanup(func() {
+		setting.AppUrl = previousAppURL
+		setting.AppSubUrl = previousAppSubURL
+	})
+
+	rejected := []string{
+		"/logout",
+		"/grafana/logout",
+		"//grafana.example:3000/grafana/logout",
+		"http://grafana.example:3000/grafana/logout",
+		"http://grafana.example:3000/grafana/logout?orgId=1",
+		"http://grafana.example:3000/grafana/log%6Fut",
+	}
+	for _, runbook := range rejected {
+		t.Run(runbook, func(t *testing.T) {
+			err := alertRuleValidator(t, makeDefaultRuntimeConfig()).Validate(context.Background(), &appsdk.AdmissionRequest{
+				Action: resource.AdmissionActionCreate,
+				Object: alertRuleWithRunbook(runbook),
+			})
+			require.Error(t, err)
+		})
+	}
+
+	t.Run("external https runbook is accepted", func(t *testing.T) {
+		err := alertRuleValidator(t, makeDefaultRuntimeConfig()).Validate(context.Background(), &appsdk.AdmissionRequest{
+			Action: resource.AdmissionActionCreate,
+			Object: alertRuleWithRunbook("https://runbooks.example/oncall"),
+		})
+		require.NoError(t, err)
+	})
+}
+
+func alertRuleWithRunbook(runbook string) *v1.AlertRule {
+	rule := baseAlertRule()
+	rule.Spec.Annotations = map[string]v1.AlertRuleTemplateString{
+		"runbook_url": v1.AlertRuleTemplateString(runbook),
+	}
+	return rule
 }
 
 func TestAlertRuleValidation_Success(t *testing.T) {

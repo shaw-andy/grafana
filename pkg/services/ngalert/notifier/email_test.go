@@ -3,7 +3,9 @@ package notifier
 import (
 	"context"
 	"net/url"
+	"regexp"
 	"testing"
+	"time"
 
 	alertingImages "github.com/grafana/alerting/images"
 	"github.com/grafana/alerting/receivers"
@@ -183,6 +185,70 @@ func TestEmailNotifierIntegration(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The default notification email places the saved runbook annotation in a
+// "View runbook" anchor, for both firing and resolved alerts. That anchor must
+// not be this Grafana server's logout URL, a protocol-relative URL, or a
+// site-relative path. An external https runbook must still be linked.
+func TestEmailRunbookLinkRejectsSameOriginLogout(t *testing.T) {
+	ns := createEmailSender(t)
+	emailTmpl := alertingTemplates.ForTests(t)
+	externalURL, err := url.Parse("http://grafana.example:3000/grafana")
+	require.NoError(t, err)
+	emailTmpl.ExternalURL = externalURL
+
+	viewRunbookHref := regexp.MustCompile(`<a href="([^"]*)"[^>]*> View runbook </a>`)
+
+	rejected := []string{
+		"/logout",
+		"/grafana/logout",
+		"//grafana.example:3000/grafana/logout",
+		"http://grafana.example:3000/grafana/logout",
+		"http://grafana.example:3000/grafana/logout?orgId=1",
+		"http://grafana.example:3000/grafana/log%6Fut",
+	}
+	for _, runbook := range rejected {
+		t.Run(runbook, func(t *testing.T) {
+			notifyRunbook(t, ns, emailTmpl, runbook)
+			html := sentHTML(t, ns)
+			require.NotRegexp(t, viewRunbookHref, html)
+		})
+	}
+
+	t.Run("external https runbook stays linked", func(t *testing.T) {
+		const runbook = "https://runbooks.example/oncall"
+		notifyRunbook(t, ns, emailTmpl, runbook)
+		html := sentHTML(t, ns)
+		matches := viewRunbookHref.FindAllStringSubmatch(html, -1)
+		require.NotEmpty(t, matches)
+		for _, match := range matches {
+			require.Equal(t, runbook, match[1])
+		}
+	})
+}
+
+func notifyRunbook(t *testing.T, ns *emailSender, emailTmpl *alertingTemplates.Template, runbook string) {
+	t.Helper()
+	emailNotifier := createSut(t, "", "", emailTmpl, ns)
+	firing := &types.Alert{Alert: model.Alert{
+		Labels:      model.LabelSet{"alertname": "CPUHigh"},
+		Annotations: model.LabelSet{"runbook_url": model.LabelValue(runbook)},
+	}}
+	resolved := &types.Alert{Alert: model.Alert{
+		Labels:      model.LabelSet{"alertname": "CPUHigh"},
+		Annotations: model.LabelSet{"runbook_url": model.LabelValue(runbook)},
+		EndsAt:      time.Now().Add(-time.Hour),
+	}}
+	ok, err := emailNotifier.Notify(context.Background(), firing, resolved)
+	require.NoError(t, err)
+	require.True(t, ok)
+}
+
+func sentHTML(t *testing.T, ns *emailSender) string {
+	t.Helper()
+	sent := getSingleSentMessage(t, ns)
+	return sent.Body["text/html"]
 }
 
 func createSut(t *testing.T, messageTmpl string, subjectTmpl string, emailTmpl *alertingTemplates.Template, ns receivers.EmailSender) *alertingEmail.Notifier {
