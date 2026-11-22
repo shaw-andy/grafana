@@ -1,5 +1,4 @@
 import { type ProxyTarget } from '@locker/near-membrane-shared';
-import DOMPurify from 'dompurify';
 import { cloneDeep, isFunction } from 'lodash';
 
 import { type Monaco } from '@grafana/ui';
@@ -7,6 +6,21 @@ import { type Monaco } from '@grafana/ui';
 import { loadScriptIntoSandbox } from './codeLoader';
 import { forbiddenElements } from './constants';
 import { recursivePatchObjectAsLiveTarget } from './documentSandbox';
+import {
+  documentParser,
+  findForbiddenInsertedElement,
+  ForbiddenElementError,
+  getElementLocalName,
+  getFragmentParser,
+  getParentNode,
+  getShadowRootHost,
+  isElementNode,
+  isHTMLScriptElement,
+  isInHTMLDocument,
+  isNode,
+  sanitizeMarkup,
+  sanitizeTree,
+} from './domSafety';
 import { type SandboxEnvironment, type SandboxPluginMeta } from './types';
 import { logWarning, unboxRegexesFromMembraneProxy } from './utils';
 
@@ -61,10 +75,12 @@ import { logWarning, unboxRegexesFromMembraneProxy } from './utils';
  * The code in this file defines that generalDistortionMap.
  */
 
-type DistortionMap = Map<
-  unknown,
-  (originalAttrOrMethod: unknown, pluginMeta: SandboxPluginMeta, sandboxEnv?: SandboxEnvironment) => unknown
->;
+type Distortion = (
+  originalAttrOrMethod: unknown,
+  pluginMeta: SandboxPluginMeta,
+  sandboxEnv?: SandboxEnvironment
+) => unknown;
+type DistortionMap = Map<unknown, Distortion>;
 const generalDistortionMap: DistortionMap = new Map();
 
 const SANDBOX_LIVE_API_PATCHED = Symbol.for('@SANDBOX_LIVE_API_PATCHED');
@@ -75,7 +91,6 @@ export function getGeneralSandboxDistortionMap() {
     distortIframeAttributes(generalDistortionMap);
     distortConsole(generalDistortionMap);
     distortAlert(generalDistortionMap);
-    distortAppend(generalDistortionMap);
     distortInsert(generalDistortionMap);
     distortInnerHTML(generalDistortionMap);
     distortCreateElement(generalDistortionMap);
@@ -182,223 +197,369 @@ function distortAlert(distortions: DistortionMap) {
   }
 }
 
+function logForbiddenElement(pluginId: string, element: string, attrOrMethod: string) {
+  logWarning(`Plugin ${pluginId} tried to use ${element} in ${attrOrMethod}`, {
+    pluginId,
+    attrOrMethod,
+    param: element,
+    entity: 'HTMLElement',
+  });
+}
+
+// Markup is converted to a string exactly once, and that string is checked, sanitized and handed
+// to the browser, so a value whose toString changes between calls cannot pass the check and parse differently.
+function toMarkupString(value: unknown): string {
+  return value === null || value === undefined ? '' : String(value);
+}
+
+function sanitizeMarkupForPlugin(
+  markup: string,
+  parser: ReturnType<typeof getFragmentParser>,
+  pluginId: string,
+  attrOrMethod: string
+): string {
+  try {
+    return sanitizeMarkup(markup, parser);
+  } catch (e) {
+    if (e instanceof ForbiddenElementError) {
+      logForbiddenElement(pluginId, e.element, attrOrMethod);
+    }
+    throw e;
+  }
+}
+
+function sanitizeParsedTreeForPlugin(result: unknown, pluginId: string, attrOrMethod: string) {
+  if (!isNode(result)) {
+    return;
+  }
+  const { forbiddenElement } = sanitizeTree(result);
+  if (forbiddenElement) {
+    logForbiddenElement(pluginId, forbiddenElement, attrOrMethod);
+    throw new ForbiddenElementError(forbiddenElement);
+  }
+}
+
+type FragmentContext = (target: unknown, args: unknown[]) => Element | null;
+
+function contextElement(node: unknown): Element | null {
+  return isElementNode(node) ? node : null;
+}
+
+// innerHTML of a shadow root is parsed with its host as context
+const targetContext: FragmentContext = (target) => getShadowRootHost(target) ?? contextElement(target);
+const parentContext: FragmentContext = (target) => (isNode(target) ? contextElement(getParentNode(target)) : null);
+const insertAdjacentContext: FragmentContext = (target, args) => {
+  // the browser must receive the same position the context was chosen for
+  const position = toMarkupString(args[0]);
+  args[0] = position;
+  const lowerCasePosition = position.toLowerCase();
+  const context =
+    lowerCasePosition === 'beforebegin' || lowerCasePosition === 'afterend'
+      ? parentContext(target, args)
+      : contextElement(target);
+  // insertAdjacentHTML parses with a <body> context in place of <html>
+  return context && getElementLocalName(context) === 'html' ? null : context;
+};
+
 function distortInnerHTML(distortions: DistortionMap) {
-  function getInnerHTMLDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
-    const pluginId = meta.id;
-    return function innerHTMLDistortion(this: HTMLElement, ...args: string[]) {
-      for (let i = 0; i < args.length; i++) {
-        const arg = args[i];
-        // NOTE: DOMPurify anti-tamper mechanism requires us to clone the string
-        // calling any method whatsoever on a string will cause the string to be tampered
-        // and DOMPurify will return empty strings
-        const lowerCase = String(arg || '').toLowerCase();
-        for (const forbiddenElement of forbiddenElements) {
-          if (lowerCase.includes('<' + forbiddenElement)) {
-            logWarning(`Plugin ${pluginId} tried to set ${forbiddenElement} in innerHTML`, {
-              pluginId,
-              attrOrMethod: 'innerHTML',
-              param: forbiddenElement,
-              entity: 'HTMLElement',
-            });
-
-            throw new Error('<' + forbiddenElement + '> is not allowed in sandboxed plugins');
-          }
+  // sinks that parse markup into a node that is, or can later become, part of the live document
+  function getHTMLSinkDistortion(
+    attrOrMethod: string,
+    markupArgIndex: number,
+    getContext: FragmentContext,
+    allowsDeclarativeShadowRoots = false
+  ) {
+    return function (originalMethod: unknown, meta: SandboxPluginMeta) {
+      const pluginId = meta.id;
+      return function htmlSinkDistortion(this: unknown, ...args: unknown[]) {
+        if (!isFunction(originalMethod)) {
+          return undefined;
         }
-        // prevent some dom operations that use direct callbacks
-        if (lowerCase.match(/onerror|onload|onsuccess|onbeforeunload/)) {
-          logWarning(`Plugin ${pluginId} tried to set forbidden attribute in innerHTML`, {
+        const markup = toMarkupString(args[markupArgIndex]);
+        // XML documents parse fragments with the XML parser and never have a browsing context,
+        // so their result is cleaned after parsing instead
+        const isXmlTarget = !isInHTMLDocument(this);
+        if (!isXmlTarget || allowsDeclarativeShadowRoots) {
+          args[markupArgIndex] = sanitizeMarkupForPlugin(
+            markup,
+            getFragmentParser(getContext(this, args)),
             pluginId,
-            attrOrMethod: 'innerHTML',
-            param: arg,
-            entity: 'HTMLElement',
-          });
-          args[i] = DOMPurify.sanitize(args[i]);
+            attrOrMethod
+          );
+        } else {
+          args[markupArgIndex] = markup;
         }
-      }
-
-      if (isFunction(originalMethod)) {
-        return originalMethod.apply(this, args);
-      }
+        const parent = isXmlTarget && isNode(this) ? getParentNode(this) : null;
+        const result = originalMethod.apply(this, args);
+        if (isXmlTarget) {
+          sanitizeParsedTreeForPlugin(parent ?? this, pluginId, attrOrMethod);
+        }
+        return result;
+      };
     };
   }
-  const descriptors = [
-    Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML'),
-    Object.getOwnPropertyDescriptor(Element.prototype, 'outerHTML'),
-    Object.getOwnPropertyDescriptor(Element.prototype, 'insertAdjacentHTML'),
-    Object.getOwnPropertyDescriptor(DOMParser.prototype, 'parseFromString'),
-  ];
 
-  for (const descriptor of descriptors) {
-    if (descriptor?.set) {
-      distortions.set(descriptor.set, getInnerHTMLDistortion);
-    }
+  // static Document parsers that return a new document
+  function getDocumentParserDistortion(attrOrMethod: string) {
+    return function (originalMethod: unknown, meta: SandboxPluginMeta) {
+      const pluginId = meta.id;
+      return function documentParserDistortion(this: unknown, ...args: unknown[]) {
+        if (!isFunction(originalMethod)) {
+          return undefined;
+        }
+        args[0] = sanitizeMarkupForPlugin(toMarkupString(args[0]), documentParser, pluginId, attrOrMethod);
+        const result = originalMethod.apply(this, args);
+        sanitizeParsedTreeForPlugin(result, pluginId, attrOrMethod);
+        return result;
+      };
+    };
+  }
+
+  // parsers that return a detached document or fragment, which is cleaned before the plugin gets it
+  function getParserDistortion(attrOrMethod: string, markupArgIndex?: number) {
+    return function (originalMethod: unknown, meta: SandboxPluginMeta) {
+      const pluginId = meta.id;
+      return function parserDistortion(this: unknown, ...args: unknown[]) {
+        if (!isFunction(originalMethod)) {
+          return undefined;
+        }
+        if (markupArgIndex !== undefined) {
+          args[markupArgIndex] = toMarkupString(args[markupArgIndex]);
+        }
+        const result = originalMethod.apply(this, args);
+        sanitizeParsedTreeForPlugin(result, pluginId, attrOrMethod);
+        return result;
+      };
+    };
+  }
+
+  // documents parsed from a network response
+  function getResponseDocumentDistortion(attrOrMethod: string) {
+    return function (originalGetter: unknown, meta: SandboxPluginMeta) {
+      const pluginId = meta.id;
+      return function responseDocumentDistortion(this: unknown) {
+        if (!isFunction(originalGetter)) {
+          return undefined;
+        }
+        const result = originalGetter.call(this);
+        if (isNode(result) && result.nodeType === Node.DOCUMENT_NODE) {
+          const { forbiddenElement } = sanitizeTree(result);
+          if (forbiddenElement) {
+            logForbiddenElement(pluginId, forbiddenElement, attrOrMethod);
+          }
+        }
+        return result;
+      };
+    };
+  }
+
+  function getExecCommandDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
+    const pluginId = meta.id;
+    return function execCommandDistortion(this: Document, ...args: unknown[]) {
+      if (!isFunction(originalMethod)) {
+        return undefined;
+      }
+      const command = toMarkupString(args[0]);
+      args[0] = command;
+      if (command.toLowerCase() === 'inserthtml') {
+        args[2] = sanitizeMarkupForPlugin(toMarkupString(args[2]), getFragmentParser(null), pluginId, 'execCommand');
+      }
+      return originalMethod.apply(this, args);
+    };
+  }
+
+  const shadowRootProto = typeof ShadowRoot === 'undefined' ? undefined : ShadowRoot.prototype;
+  const sinks: Array<[object | undefined, string, Distortion]> = [
+    [Element.prototype, 'innerHTML', getHTMLSinkDistortion('innerHTML', 0, targetContext)],
+    [Element.prototype, 'outerHTML', getHTMLSinkDistortion('outerHTML', 0, parentContext)],
+    [Element.prototype, 'insertAdjacentHTML', getHTMLSinkDistortion('insertAdjacentHTML', 1, insertAdjacentContext)],
+    [Element.prototype, 'setHTMLUnsafe', getHTMLSinkDistortion('setHTMLUnsafe', 0, targetContext, true)],
+    [Element.prototype, 'setHTML', getHTMLSinkDistortion('setHTML', 0, targetContext, true)],
+    [shadowRootProto, 'innerHTML', getHTMLSinkDistortion('innerHTML', 0, targetContext)],
+    [shadowRootProto, 'setHTMLUnsafe', getHTMLSinkDistortion('setHTMLUnsafe', 0, targetContext, true)],
+    [shadowRootProto, 'setHTML', getHTMLSinkDistortion('setHTML', 0, targetContext, true)],
+    [Document, 'parseHTMLUnsafe', getDocumentParserDistortion('parseHTMLUnsafe')],
+    [Document, 'parseHTML', getDocumentParserDistortion('parseHTML')],
+    [Document.prototype, 'execCommand', getExecCommandDistortion],
+    [DOMParser.prototype, 'parseFromString', getParserDistortion('parseFromString', 0)],
+    [Range.prototype, 'createContextualFragment', getParserDistortion('createContextualFragment', 0)],
+    [XMLHttpRequest.prototype, 'responseXML', getResponseDocumentDistortion('responseXML')],
+    [XMLHttpRequest.prototype, 'response', getResponseDocumentDistortion('response')],
+  ];
+  if (typeof XSLTProcessor !== 'undefined') {
+    sinks.push(
+      [XSLTProcessor.prototype, 'transformToFragment', getParserDistortion('transformToFragment')],
+      [XSLTProcessor.prototype, 'transformToDocument', getParserDistortion('transformToDocument')]
+    );
+  }
+
+  for (const [proto, property, distortion] of sinks) {
+    const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, property) : undefined;
     if (descriptor?.value) {
-      distortions.set(descriptor.value, getInnerHTMLDistortion);
+      distortions.set(descriptor.value, distortion);
+    }
+    // getters are only distorted for response documents, other sinks only need their setter
+    if (descriptor?.get && property.startsWith('response')) {
+      distortions.set(descriptor.get, distortion);
+    }
+    if (descriptor?.set) {
+      distortions.set(descriptor.set, distortion);
     }
   }
 }
 
 function distortCreateElement(distortions: DistortionMap) {
-  function getCreateElementDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
-    const pluginId = meta.id;
-    return function createElementDistortion(this: HTMLElement, arg?: string, options?: unknown) {
-      if (arg && forbiddenElements.includes(arg)) {
-        logWarning(`Plugin ${pluginId} tried to create ${arg}`, {
-          pluginId,
-          attrOrMethod: 'createElement',
-          param: arg,
-          entity: 'document',
-        });
-        return document.createDocumentFragment();
-      }
-      if (isFunction(originalMethod)) {
-        return originalMethod.apply(this, [arg, options]);
-      }
+  function getCreateElementDistortion(attrOrMethod: string) {
+    return function (originalMethod: unknown, meta: SandboxPluginMeta) {
+      const pluginId = meta.id;
+      return function createElementDistortion(this: Document, ...args: unknown[]) {
+        if (!isFunction(originalMethod)) {
+          return undefined;
+        }
+        // the check runs on the created element itself, which is inert until inserted
+        const element = originalMethod.apply(this, args);
+        const nodeName = isElementNode(element) ? getElementLocalName(element) : '';
+        if (forbiddenElements.includes(nodeName)) {
+          logWarning(`Plugin ${pluginId} tried to create ${nodeName}`, {
+            pluginId,
+            attrOrMethod,
+            param: nodeName,
+            entity: 'document',
+          });
+          return document.createDocumentFragment();
+        }
+        return element;
+      };
     };
   }
-  const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'createElement');
-  if (descriptor?.value) {
-    distortions.set(descriptor.value, getCreateElementDistortion);
+  for (const method of ['createElement', 'createElementNS']) {
+    const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, method);
+    if (descriptor?.value) {
+      distortions.set(descriptor.value, getCreateElementDistortion(method));
+    }
   }
+}
+
+// if the node is a script, load it into the sandbox
+// this allows webpack chunks to be loaded into the sandbox
+// loadScriptIntoSandbox has restrictions on what scripts can be loaded
+function loadScriptNodeIntoSandbox(script: HTMLScriptElement, sandboxEnv: SandboxEnvironment) {
+  loadScriptIntoSandbox(script.src, sandboxEnv)
+    .then(() => {
+      script.onload?.call(script, new Event('load'));
+    })
+    .catch((err) => {
+      script.onerror?.call(script, new ErrorEvent('error', { error: err }));
+    });
+}
+
+// the whole subtree is checked because a forbidden element can be nested in a fragment or parent element
+function isForbiddenInsertedNode(node: unknown, pluginId: string, attrOrMethod: string): boolean {
+  if (!isNode(node)) {
+    // not a node: the browser inserts it as text or rejects it
+    return false;
+  }
+  const forbiddenElement = findForbiddenInsertedElement(node);
+  if (forbiddenElement) {
+    logWarning(`Plugin ${pluginId} tried to insert ${forbiddenElement}`, {
+      pluginId,
+      attrOrMethod,
+      param: forbiddenElement,
+      entity: 'HTMLElement',
+    });
+    return true;
+  }
+  return false;
 }
 
 function distortInsert(distortions: DistortionMap) {
-  function getInsertDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
-    const pluginId = meta.id;
-    return function insertChildDistortion(this: HTMLElement, node?: Node, ref?: Node) {
-      const nodeType = node?.nodeName?.toLowerCase() || '';
-
-      if (node && forbiddenElements.includes(nodeType)) {
-        logWarning(`Plugin ${pluginId} tried to insert ${nodeType}`, {
-          pluginId,
-          attrOrMethod: 'insertChild',
-          param: nodeType,
-          entity: 'HTMLElement',
-        });
-        return document.createDocumentFragment();
-      }
-      if (isFunction(originalMethod)) {
-        return originalMethod.call(this, node, ref);
-      }
+  // methods that insert the single node found at `nodeArgIndex`
+  function getInsertNodeDistortion(attrOrMethod: string, nodeArgIndex: number) {
+    return function (originalMethod: unknown, meta: SandboxPluginMeta, sandboxEnv?: SandboxEnvironment) {
+      const pluginId = meta.id;
+      return function insertNodeDistortion(this: unknown, ...args: unknown[]) {
+        const node = args[nodeArgIndex];
+        if (isHTMLScriptElement(node)) {
+          if (sandboxEnv) {
+            loadScriptNodeIntoSandbox(node, sandboxEnv);
+          }
+          return attrOrMethod === 'appendChild' ? undefined : node;
+        }
+        if (isForbiddenInsertedNode(node, pluginId, attrOrMethod)) {
+          return document.createDocumentFragment();
+        }
+        if (isFunction(originalMethod)) {
+          return originalMethod.apply(this, args);
+        }
+      };
     };
   }
 
-  function getinsertAdjacentElementDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
-    const pluginId = meta.id;
-    return function insertAdjacentElementDistortion(this: HTMLElement, position?: string, node?: Node) {
-      const nodeType = node?.nodeName?.toLowerCase() || '';
-      if (node && forbiddenElements.includes(nodeType)) {
-        logWarning(`Plugin ${pluginId} tried to insert ${nodeType}`, {
-          pluginId,
-          attrOrMethod: 'insertAdjacentElement',
-          param: nodeType,
-          entity: 'HTMLElement',
-        });
-
-        return document.createDocumentFragment();
-      }
-      if (isFunction(originalMethod)) {
-        return originalMethod.call(this, position, node);
-      }
-    };
-  }
-
-  const descriptors = [
-    Object.getOwnPropertyDescriptor(Node.prototype, 'insertBefore'),
-    Object.getOwnPropertyDescriptor(Node.prototype, 'replaceChild'),
-  ];
-
-  for (const descriptor of descriptors) {
-    if (descriptor?.value) {
-      distortions.set(descriptor.set, getInsertDistortion);
-    }
-  }
-
-  const descriptorAdjacent = Object.getOwnPropertyDescriptor(Element.prototype, 'insertAdjacentElement');
-  if (descriptorAdjacent?.value) {
-    distortions.set(descriptorAdjacent.set, getinsertAdjacentElementDistortion);
-  }
-}
-
-// set distortions to append elements to the document
-function distortAppend(distortions: DistortionMap) {
-  // append accepts an array of nodes to append https://developer.mozilla.org/en-US/docs/Web/API/Node/append
-  function getAppendDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
-    const pluginId = meta.id;
-    return function appendDistortion(this: HTMLElement, ...args: Node[]) {
-      let acceptedNodes = args;
-      const filteredAcceptedNodes = args?.filter((node) => !forbiddenElements.includes(node.nodeName.toLowerCase()));
-      acceptedNodes = filteredAcceptedNodes;
-
-      if (acceptedNodes.length !== filteredAcceptedNodes.length) {
-        logWarning(`Plugin ${pluginId} tried to append fobiddenElements`, {
-          pluginId,
-          attrOrMethod: 'append',
-          param: args?.filter((node) => forbiddenElements.includes(node.nodeName.toLowerCase()))?.join(',') || '',
-          entity: 'HTMLElement',
-        });
-      }
-
-      if (isFunction(originalMethod)) {
-        originalMethod.apply(this, acceptedNodes);
-      }
-      // https://developer.mozilla.org/en-US/docs/Web/API/Element/append#return_value
-      return undefined;
-    };
-  }
-
-  // appendChild accepts a single node to add https://developer.mozilla.org/en-US/docs/Web/API/Node/appendChild
-  function getAppendChildDistortion(originalMethod: unknown, meta: SandboxPluginMeta, sandboxEnv?: SandboxEnvironment) {
-    const pluginId = meta.id;
-    return function appendChildDistortion(this: HTMLElement, arg?: Node) {
-      const nodeType = arg?.nodeName?.toLowerCase() || '';
-      if (arg && forbiddenElements.includes(nodeType)) {
-        logWarning(`Plugin ${pluginId} tried to append ${nodeType}`, {
-          pluginId,
-          attrOrMethod: 'appendChild',
-          param: nodeType,
-          entity: 'HTMLElement',
-        });
-
-        return document.createDocumentFragment();
-      }
-      // if the node is a script, load it into the sandbox
-      // this allows webpack chunks to be loaded into the sandbox
-      // loadScriptIntoSandbox has restrictions on what scripts can be loaded
-      if (sandboxEnv && arg && nodeType === 'script' && arg instanceof HTMLScriptElement) {
-        loadScriptIntoSandbox(arg.src, sandboxEnv)
-          .then(() => {
-            arg.onload?.call(arg, new Event('load'));
-          })
-          .catch((err) => {
-            arg.onerror?.call(arg, new ErrorEvent('error', { error: err }));
-          });
+  // methods that insert any number of nodes or strings https://developer.mozilla.org/en-US/docs/Web/API/Element/append
+  function getInsertNodesDistortion(attrOrMethod: string) {
+    return function (originalMethod: unknown, meta: SandboxPluginMeta, sandboxEnv?: SandboxEnvironment) {
+      const pluginId = meta.id;
+      return function insertNodesDistortion(this: unknown, ...args: unknown[]) {
+        const acceptedNodes: unknown[] = [];
+        for (const node of args) {
+          if (isHTMLScriptElement(node)) {
+            if (sandboxEnv) {
+              loadScriptNodeIntoSandbox(node, sandboxEnv);
+            }
+          } else if (!isForbiddenInsertedNode(node, pluginId, attrOrMethod)) {
+            acceptedNodes.push(node);
+          }
+        }
+        if (isFunction(originalMethod)) {
+          originalMethod.apply(this, acceptedNodes);
+        }
         return undefined;
-      }
-      if (isFunction(originalMethod)) {
-        return originalMethod.call(this, arg);
-      }
+      };
     };
   }
 
-  const descriptors = [
-    Object.getOwnPropertyDescriptor(Element.prototype, 'append'),
-    Object.getOwnPropertyDescriptor(Element.prototype, 'prepend'),
-    Object.getOwnPropertyDescriptor(Element.prototype, 'after'),
-    Object.getOwnPropertyDescriptor(Element.prototype, 'before'),
-    Object.getOwnPropertyDescriptor(Document.prototype, 'append'),
-    Object.getOwnPropertyDescriptor(Document.prototype, 'prepend'),
+  const protoOf = (ctor: { prototype: object } | undefined) => ctor?.prototype;
+  const singleNodeMethods: Array<[object | undefined, string, number]> = [
+    [Node.prototype, 'appendChild', 0],
+    [Node.prototype, 'insertBefore', 0],
+    [Node.prototype, 'replaceChild', 0],
+    [Element.prototype, 'insertAdjacentElement', 1],
+    [Element.prototype, 'moveBefore', 0],
+    [Document.prototype, 'moveBefore', 0],
+    [DocumentFragment.prototype, 'moveBefore', 0],
+    [Range.prototype, 'insertNode', 0],
+    [Range.prototype, 'surroundContents', 0],
+    [Document.prototype, 'body', 0],
+    [protoOf(globalThis.HTMLTableElement), 'caption', 0],
+    [protoOf(globalThis.HTMLTableElement), 'tHead', 0],
+    [protoOf(globalThis.HTMLTableElement), 'tFoot', 0],
+    [protoOf(globalThis.HTMLSelectElement), 'add', 0],
+    [protoOf(globalThis.HTMLOptionsCollection), 'add', 0],
   ];
-
-  for (const descriptor of descriptors) {
+  for (const [proto, method, nodeArgIndex] of singleNodeMethods) {
+    const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, method) : undefined;
     if (descriptor?.value) {
-      distortions.set(descriptor.value, getAppendDistortion);
+      distortions.set(descriptor.value, getInsertNodeDistortion(method, nodeArgIndex));
+    }
+    if (descriptor?.set) {
+      distortions.set(descriptor.set, getInsertNodeDistortion(method, nodeArgIndex));
     }
   }
 
-  const appendChildDescriptor = Object.getOwnPropertyDescriptor(Node.prototype, 'appendChild');
-  if (appendChildDescriptor?.value) {
-    distortions.set(appendChildDescriptor.value, getAppendChildDistortion);
+  const multiNodeProtos = [
+    Element.prototype,
+    Document.prototype,
+    DocumentFragment.prototype,
+    CharacterData.prototype,
+    DocumentType.prototype,
+  ];
+  for (const proto of multiNodeProtos) {
+    for (const method of ['append', 'prepend', 'after', 'before', 'replaceWith', 'replaceChildren']) {
+      const descriptor = Object.getOwnPropertyDescriptor(proto, method);
+      if (descriptor?.value) {
+        distortions.set(descriptor.value, getInsertNodesDistortion(method));
+      }
+    }
   }
 }
 
@@ -436,7 +597,7 @@ function distortDocument(distortions: DistortionMap) {
     });
   }
 
-  const documentForbiddenMethods = ['write'];
+  const documentForbiddenMethods = ['write', 'writeln'];
   for (const method of documentForbiddenMethods) {
     const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, method);
     if (descriptor?.set) {
