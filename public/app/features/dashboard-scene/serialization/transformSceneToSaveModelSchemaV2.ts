@@ -52,6 +52,7 @@ import {
   defaultFieldConfig,
   defaultDataQueryKind,
   type SwitchVariableKind,
+  type VariableKind,
   defaultDashboardLinkType,
   defaultDashboardLink,
   type Preferences,
@@ -842,22 +843,45 @@ export function trimDashboardForSnapshot(title: string, time: TimeRange, dash: D
   }
 
   if (spec.variables) {
-    spec.variables.forEach((variable) => {
-      if ('query' in variable.spec) {
-        variable.spec.query = '';
-      }
-      if ('options' in variable.spec && 'current' in variable.spec) {
-        variable.spec.options =
-          variable.spec.current && !isEmptyObject(variable.spec.current) ? [variable.spec.current] : [];
-      }
-
-      if ('refresh' in variable.spec) {
-        variable.spec.refresh = 'never';
-      }
-    });
+    trimVariablesForSnapshot(spec.variables);
   }
 
+  trimSectionVariablesForSnapshot(spec.layout);
+
   return spec;
+}
+
+function trimVariablesForSnapshot(variables: VariableKind[]) {
+  variables.forEach((variable) => {
+    if ('query' in variable.spec) {
+      variable.spec.query = '';
+    }
+    if ('definition' in variable.spec) {
+      variable.spec.definition = '';
+    }
+    if ('options' in variable.spec && 'current' in variable.spec) {
+      variable.spec.options =
+        variable.spec.current && !isEmptyObject(variable.spec.current) ? [variable.spec.current] : [];
+    }
+
+    if ('refresh' in variable.spec) {
+      variable.spec.refresh = 'never';
+    }
+  });
+}
+
+// Rows and tabs can declare their own variables and nest further layouts, so every section in the
+// tree has to be visited for their queries to be stripped like dashboard-level ones.
+function trimSectionVariablesForSnapshot(layout: DashboardV2Spec['layout']) {
+  const sections =
+    layout.kind === 'RowsLayout' ? layout.spec.rows : layout.kind === 'TabsLayout' ? layout.spec.tabs : [];
+
+  for (const section of sections) {
+    if (section.spec.variables) {
+      trimVariablesForSnapshot(section.spec.variables);
+    }
+    trimSectionVariablesForSnapshot(section.spec.layout);
+  }
 }
 
 // Function to know if the dashboard transformed is a valid DashboardV2Spec
