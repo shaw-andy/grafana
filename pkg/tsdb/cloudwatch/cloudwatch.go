@@ -36,6 +36,9 @@ const (
 	// headerFromAlert is used by datasources to identify alert queries
 	headerFromAlert = "FromAlert"
 
+	// headerFromPublicDashboard is set by Grafana on queries it runs for a public dashboard
+	headerFromPublicDashboard = "X-Grafana-From-Public-Dashboard"
+
 	defaultRegion = "default"
 	queryModeLogs = "Logs"
 	// QueryTypes
@@ -154,21 +157,25 @@ func (ds *DataSource) QueryData(ctx context.Context, req *backend.QueryDataReque
 	_, fromAlert := req.Headers[headerFromAlert]
 	fromExpression := req.GetHTTPHeader(headerFromExpression) != ""
 	// Public dashboard queries execute like alert queries, i.e. they execute on the backend, therefore, we need to handle them synchronously.
-	// Since `model.Type` is set during execution on the frontend by the query runner and isn't saved with the query, we are checking here is
-	// missing the `model.Type` property and if it is a log query in order to determine if it is a public dashboard query.
+	// The query JSON is caller-controlled, so a missing `type` must not select this path; only the header Grafana sets
+	// on public dashboard queries does.
+	fromPublicDashboard := req.Headers[headerFromPublicDashboard] == "true"
+
 	queryMode := ""
 	if model.QueryMode != "" {
 		queryMode = string(model.QueryMode)
 	}
 
-	fromPublicDashboard := model.Type == ""
-
 	isLogInsightsQuery := queryMode == queryModeLogs && (model.LogsMode == "" || model.LogsMode == dataquery.LogsModeInsights)
 
-	isSyncLogQuery := isLogInsightsQuery && ((fromAlert || fromExpression) || fromPublicDashboard)
+	isSyncLogQuery := isLogInsightsQuery && (fromAlert || fromExpression || fromPublicDashboard)
 
 	if isSyncLogQuery {
 		return executeSyncLogQuery(ctx, ds, req)
+	}
+
+	if isLogInsightsQuery && model.Type == "" {
+		return missingLogsQueryTypeResponse(req), nil
 	}
 
 	isLogsAnomaliesQuery := model.QueryMode == dataquery.CloudWatchQueryModeLogs && model.LogsMode == dataquery.LogsModeAnomalies
@@ -189,6 +196,15 @@ func (ds *DataSource) QueryData(ctx context.Context, req *backend.QueryDataReque
 	}
 
 	return result, err
+}
+
+func missingLogsQueryTypeResponse(req *backend.QueryDataRequest) *backend.QueryDataResponse {
+	resp := backend.NewQueryDataResponse()
+	err := backend.DownstreamError(fmt.Errorf("CloudWatch Logs queries must set a query type"))
+	for _, q := range req.Queries {
+		resp.Responses[q.RefID] = backend.ErrorResponseWithErrorSource(err)
+	}
+	return resp
 }
 
 func (ds *DataSource) CheckHealth(ctx context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {

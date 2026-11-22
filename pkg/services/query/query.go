@@ -43,6 +43,8 @@ const (
 	HeaderQueryGroupID   = "X-Query-Group-Id"    // mainly useful for finding related queries with query chunking
 	HeaderFromExpression = "X-Grafana-From-Expr" // used by datasources to identify expression queries
 	HeaderCallerID       = "X-Grafana-Caller-Id" // identifies the caller that initiated this query (e.g. an app plugin id or external tool name)
+	// HeaderFromPublicDashboard is set by Grafana, never forwarded from the client, on queries run for a public dashboard
+	HeaderFromPublicDashboard = "X-Grafana-From-Public-Dashboard"
 )
 
 func ProvideService(
