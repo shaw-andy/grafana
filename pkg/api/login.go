@@ -291,6 +291,11 @@ func (hs *HTTPServer) loginUserWithUser(user *user.User, c *contextmodel.ReqCont
 }
 
 func (hs *HTTPServer) Logout(c *contextmodel.ReqContext) {
+	if isFetchFromBrowser(c.Req) {
+		c.JsonApiErr(http.StatusForbidden, "Logout requires a top-level navigation", nil)
+		return
+	}
+
 	// FIXME: restructure saml client to implement authn.LogoutClient
 	if hs.samlSingleLogoutEnabled(c.Req.Context()) {
 		if c.GetAuthenticatedBy() == loginservice.SAMLAuthModule {
