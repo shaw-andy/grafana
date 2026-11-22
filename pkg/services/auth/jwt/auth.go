@@ -70,8 +70,9 @@ func (s *AuthService) Verify(ctx context.Context, strToken string) (map[string]a
 	s.log.Debug("Parsing JSON Web Token")
 
 	strToken = sanitizeJWT(strToken)
-	token, err := jwt.ParseSigned(strToken, []jose.SignatureAlgorithm{jose.EdDSA, jose.HS256, jose.HS384,
-		jose.HS512, jose.RS512, jose.RS256, jose.ES256, jose.ES384, jose.ES512, jose.PS256, jose.PS384, jose.PS512})
+	// HMAC algorithms are not accepted: the key sets hold only public keys.
+	token, err := jwt.ParseSigned(strToken, []jose.SignatureAlgorithm{jose.EdDSA, jose.RS512, jose.RS256,
+		jose.ES256, jose.ES384, jose.ES512, jose.PS256, jose.PS384, jose.PS512})
 	if err != nil {
 		return nil, err
 	}

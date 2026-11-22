@@ -1006,6 +1006,8 @@ func RedactedValue(key, value string) string {
 		"WEBHOOK_TOKEN$",
 		"INSTALL_TOKEN$",
 		"PROXY_TOKEN$",
+		"JWK_SET_VALUE$",
+		"JWT[._]KEY_VALUE$",
 	} {
 		if match, err := regexp.MatchString(pattern, uppercased); match && err == nil {
 			return RedactedPassword
@@ -1292,7 +1294,8 @@ func (cfg *Cfg) applyCommandLineProperties(file *ini.File) {
 			keyString := sectionName + key.Name()
 			value, exists := cfg.commandLineProps[keyString]
 			if exists {
-				cfg.appliedCommandLineProperties = append(cfg.appliedCommandLineProperties, fmt.Sprintf("%s=%s", keyString, value))
+				cfg.appliedCommandLineProperties = append(cfg.appliedCommandLineProperties,
+					fmt.Sprintf("%s=%s", keyString, RedactedValue(keyString, value)))
 				key.SetValue(value)
 			}
 		}
