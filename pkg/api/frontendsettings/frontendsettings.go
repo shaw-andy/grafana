@@ -146,7 +146,7 @@ func GetBaseFrontendSettings(reqCtx *contextmodel.ReqContext, cfg *setting.Cfg, 
 		PluginCatalogHiddenPlugins:       cfg.PluginCatalogHiddenPlugins,
 		PluginCatalogManagedPlugins:      []string{},
 
-		PluginCatalogPreinstalledPlugins:    append(cfg.PreinstallPluginsAsync, cfg.PreinstallPluginsSync...),
+		PluginCatalogPreinstalledPlugins:    getPreinstalledPlugins(cfg),
 		PluginCatalogPreinstalledAutoUpdate: cfg.PreinstallAutoUpdate,
 		ExpressionsEnabled:                  cfg.ExpressionsEnabled,
 		AwsAllowedAuthProviders:             cfg.AWSAllowedAuthProviders,
@@ -240,6 +240,16 @@ func GetBaseFrontendSettings(reqCtx *contextmodel.ReqContext, cfg *setting.Cfg, 
 	// [TODO] Restore namespace in the frontend service from baggage or context
 
 	return frontendSettings, nil
+}
+
+func getPreinstalledPlugins(cfg *setting.Cfg) []dtos.FrontendSettingsPreinstalledPluginDTO {
+	preinstalled := make([]dtos.FrontendSettingsPreinstalledPluginDTO, 0, len(cfg.PreinstallPluginsAsync)+len(cfg.PreinstallPluginsSync))
+	for _, list := range [][]setting.InstallPlugin{cfg.PreinstallPluginsAsync, cfg.PreinstallPluginsSync} {
+		for _, p := range list {
+			preinstalled = append(preinstalled, dtos.FrontendSettingsPreinstalledPluginDTO{ID: p.ID, Version: p.Version})
+		}
+	}
+	return preinstalled
 }
 
 func isSupportBundlesEnabled(cfg *setting.Cfg) bool {
