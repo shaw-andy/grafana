@@ -186,6 +186,8 @@ Key set in the same format as in JWKS endpoint but located on disk.
 jwk_set_file = /path/to/jwks.json
 ```
 
+A key set in `jwk_set_file` or `jwk_set_value` must contain only public keys. Grafana returns an error at startup if it contains a symmetric or private key. Grafana ignores such keys in a key set fetched from `jwk_set_url`, and doesn't accept tokens signed with an HMAC algorithm (`HS256`, `HS384`, or `HS512`).
+
 ### Verify token using a single key loaded from PEM-encoded file
 
 PEM-encoded public key file in PKIX or PKCS #1 format. Private keys are not accepted.

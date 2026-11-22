@@ -454,6 +454,12 @@ func (s *SocialBase) validateIDTokenSignatureWithURLs(ctx context.Context, clien
 
 		keys := keyset.Key(keyID)
 		for _, key := range keys {
+			// A symmetric key in a JWKS document is readable by anyone who can
+			// fetch that document, so it cannot prove who signed the token.
+			if !key.IsPublic() {
+				logger.Warn("Skipping non-public key in key set", "url", jwkSetURL, "kid", key.KeyID)
+				continue
+			}
 			logger.Debug("Trying to verify token with key", "kid", key.KeyID)
 			var claims map[string]any
 			if err := parsedToken.Claims(key, &claims); err == nil {

@@ -32,6 +32,7 @@ var ErrKeySetConfigurationAmbiguous = errors.New("key set configuration is ambig
 var ErrJWTSetURLMustHaveHTTPSScheme = errors.New("jwt_set_url must have https scheme")
 var ErrFailedToDecodeKeyValue = errors.New("failed to base64-decode inline key value")
 var ErrPrivateKeyNotSupported = errors.New("private keys are not supported for JWT verification; configure the corresponding public key")
+var ErrNonPublicKeyInKeySet = errors.New("key set for jwt verification must contain only public keys; symmetric and private keys are not supported")
 
 type keySet interface {
 	Key(ctx context.Context, kid string) ([]jose.JSONWebKey, error)
@@ -87,45 +88,45 @@ func (s *AuthService) initKeySet() error {
 		return err
 	}
 
+	ks, err := s.loadKeySet()
+	if err != nil {
+		return err
+	}
+	s.keySet = ks
+	return nil
+}
+
+func (s *AuthService) loadKeySet() (keySet, error) {
 	switch {
 	case s.Cfg.JWTAuth.KeyFile != "":
 		data, err := s.readKeyFile(s.Cfg.JWTAuth.KeyFile)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		s.keySet, err = parsePEMPublicKey(data, s.Cfg.JWTAuth.KeyID)
-		return err
+		return parsePEMPublicKey(data, s.Cfg.JWTAuth.KeyID)
 	case s.Cfg.JWTAuth.KeyValue != "":
 		data, err := decodeKeyValue(s.Cfg.JWTAuth.KeyValue)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		s.keySet, err = parsePEMPublicKey(data, s.Cfg.JWTAuth.KeyID)
-		return err
+		return parsePEMPublicKey(data, s.Cfg.JWTAuth.KeyID)
 	case s.Cfg.JWTAuth.JWKSetFile != "":
 		data, err := s.readKeyFile(s.Cfg.JWTAuth.JWKSetFile)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		s.keySet, err = parseJWKS(data)
-		return err
+		return parseJWKS(data)
 	case s.Cfg.JWTAuth.JWKSetValue != "":
 		data, err := decodeKeyValue(s.Cfg.JWTAuth.JWKSetValue)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		s.keySet, err = parseJWKS(data)
-		return err
+		return parseJWKS(data)
 	case s.Cfg.JWTAuth.JWKSetURL != "":
-		keySet, err := s.newHTTPKeySet(s.Cfg.JWTAuth.JWKSetURL)
-		if err != nil {
-			return err
-		}
-		s.keySet = keySet
-		return nil
+		return s.newHTTPKeySet(s.Cfg.JWTAuth.JWKSetURL)
 	}
 
-	return nil
+	return nil, nil
 }
 
 // newHTTPKeySet builds a key set that fetches a JWKS from an https endpoint.
@@ -257,11 +258,26 @@ func parseJWKS(data []byte) (*keySetJWKS, error) {
 	if err := json.Unmarshal(data, &jwks); err != nil {
 		return nil, err
 	}
+	for _, key := range jwks.Keys {
+		if !key.IsPublic() {
+			return nil, fmt.Errorf("%w: key %q", ErrNonPublicKeyInKeySet, key.KeyID)
+		}
+	}
 	return &keySetJWKS{jwks}, nil
 }
 
+// Key returns only public keys. Remote and cached key sets are not validated
+// when fetched, and a symmetric key here would let anyone who can read the key
+// set sign tokens.
 func (ks *keySetJWKS) Key(ctx context.Context, keyID string) ([]jose.JSONWebKey, error) {
-	return ks.JSONWebKeySet.Key(keyID), nil
+	keys := ks.JSONWebKeySet.Key(keyID)
+	public := make([]jose.JSONWebKey, 0, len(keys))
+	for _, key := range keys {
+		if key.IsPublic() {
+			public = append(public, key)
+		}
+	}
+	return public, nil
 }
 
 func getBearerToken(bearerTokenPath string) (string, error) {
