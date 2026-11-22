@@ -295,6 +295,11 @@ func GetRoutes(options dashv0.SnapshotSharingOptions, accessControl ac.AccessCon
 						return
 					}
 
+					if err := dashboardsnapshots.ValidateRequestedSnapshotKeys(&cmd); err != nil {
+						errhttp.Write(ctx, err, w)
+						return
+					}
+
 					if cmd.External && options.PublicMode {
 						wrap.JsonApiErr(http.StatusForbidden, "External snapshots are not supported in public mode", nil)
 						return
@@ -334,6 +339,9 @@ func GetRoutes(options dashv0.SnapshotSharingOptions, accessControl ac.AccessCon
 							resp, err = createExternalSnapshot(&cmd, options)
 						} else {
 							resp, err = createExternalSnapshotLegacy(&cmd, options)
+						}
+						if err == nil {
+							err = dashboardsnapshots.ValidateExternalSnapshotKeys(resp.Key, resp.DeleteKey)
 						}
 						if err != nil {
 							errhttp.Write(ctx, err, w)

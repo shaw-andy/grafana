@@ -71,6 +71,11 @@ func CreateDashboardSnapshot(c *contextmodel.ReqContext, cfg snapshot.SnapshotSh
 		return
 	}
 
+	if err := ValidateRequestedSnapshotKeys(&cmd); err != nil {
+		c.WriteErr(err)
+		return
+	}
+
 	cmd.ExternalURL = ""
 	cmd.OrgID = user.GetOrgID()
 	cmd.UserID, _ = identity.UserIdentifier(user.GetID())
@@ -124,6 +129,10 @@ func CreateDashboardSnapshot(c *contextmodel.ReqContext, cfg snapshot.SnapshotSh
 func CreateDashboardSnapshotPublic(c *contextmodel.ReqContext, cfg snapshot.SnapshotSharingOptions, cmd CreateDashboardSnapshotCommand, svc Service) {
 	if !cfg.SnapshotsEnabled {
 		c.JsonApiErr(http.StatusForbidden, "Dashboard Snapshots are disabled", nil)
+		return
+	}
+	if err := ValidateRequestedSnapshotKeys(&cmd); err != nil {
+		c.WriteErr(err)
 		return
 	}
 
@@ -268,6 +277,10 @@ func createExternalDashboardSnapshot(cmd CreateDashboardSnapshotCommand, externa
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&createSnapshotResponse); err != nil {
+		return nil, err
+	}
+
+	if err := ValidateExternalSnapshotKeys(createSnapshotResponse.Key, createSnapshotResponse.DeleteKey); err != nil {
 		return nil, err
 	}
 

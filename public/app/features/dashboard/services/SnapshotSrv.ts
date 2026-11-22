@@ -1,3 +1,4 @@
+import { PathValidationError, validatePath } from '@grafana/data';
 import { getBackendSrv } from '@grafana/runtime';
 import { FlagKeys, getFeatureFlagClient } from '@grafana/runtime/internal';
 import { dashboardAPIv0alpha1 } from 'app/api/clients/dashboard/v0alpha1';
@@ -50,6 +51,15 @@ export interface DashboardSnapshotSrv {
   getSnapshot: (key: string) => Promise<DashboardDTO>;
 }
 
+// Snapshot keys can come from an external snapshot server or from the page URL, so they
+// must be confined to a single path segment of the snapshot API.
+function snapshotKeySegment(key: string): string {
+  if (key === '' || key === '.') {
+    throw new PathValidationError();
+  }
+  return validatePath(encodeURIComponent(key));
+}
+
 const legacyDashboardSnapshotSrv: DashboardSnapshotSrv = {
   create: (cmd: SnapshotCreateCommand) => getBackendSrv().post<SnapshotCreateResponse>('/api/snapshots', cmd),
   getSnapshots: async () => {
@@ -57,10 +67,16 @@ const legacyDashboardSnapshotSrv: DashboardSnapshotSrv = {
     return { items, continueToken: undefined };
   },
   getSharingOptions: () => getBackendSrv().get<SnapshotSharingOptions>('/api/snapshot/shared-options'),
-  deleteSnapshot: (key: string) => getBackendSrv().delete('/api/snapshots/' + key),
+  deleteSnapshot: async (key: string) =>
+    getBackendSrv().delete('/api/snapshots/' + snapshotKeySegment(key), undefined, { validatePath: true }),
   getSnapshot: async (key: string) => {
     try {
-      const dto = await getBackendSrv().get<DashboardDTO>('/api/snapshots/' + key);
+      const dto = await getBackendSrv().get<DashboardDTO>(
+        '/api/snapshots/' + snapshotKeySegment(key),
+        undefined,
+        undefined,
+        { validatePath: true }
+      );
       dto.meta.canShare = false;
       return dto;
     } catch (e) {
@@ -107,7 +123,7 @@ class K8sAPI implements DashboardSnapshotSrv {
   }
 
   async deleteSnapshot(uid: string) {
-    await dispatch(dashboardAPIv0alpha1.endpoints.deleteSnapshot.initiate({ name: uid })).unwrap();
+    await dispatch(dashboardAPIv0alpha1.endpoints.deleteSnapshot.initiate({ name: snapshotKeySegment(uid) })).unwrap();
   }
 
   async getSharingOptions(): Promise<SnapshotSharingOptions> {
@@ -124,14 +140,15 @@ class K8sAPI implements DashboardSnapshotSrv {
   }
 
   async getSnapshot(uid: string): Promise<DashboardDTO> {
+    const name = snapshotKeySegment(uid);
     // For anonymous callers (`org-0`) the dashboard v0alpha1 baseAPI routes these
     // read-by-key endpoints to the `default` namespace, so the public snapshot view works
     // through RTK like every other method.
     const snapshotPromise = dispatch(
-      dashboardAPIv0alpha1.endpoints.getSnapshot.initiate({ name: uid }, { forceRefetch: true })
+      dashboardAPIv0alpha1.endpoints.getSnapshot.initiate({ name }, { forceRefetch: true })
     );
     const dashboardPromise = dispatch(
-      dashboardAPIv0alpha1.endpoints.getSnapshotDashboard.initiate({ name: uid }, { forceRefetch: true })
+      dashboardAPIv0alpha1.endpoints.getSnapshotDashboard.initiate({ name }, { forceRefetch: true })
     );
     try {
       const [snapshotResponse, dashboardResponse] = await Promise.all([
