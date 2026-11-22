@@ -13,11 +13,13 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
 const authTokenHeader = "X-Auth-Token" //#nosec G101 -- This is a false positive
 const rateLimiterHeader = "X-Tenant-ID"
+const renderKeyQueryParam = "renderKey"
 
 var (
 	remoteVersionFetchInterval   time.Duration = time.Second * 15
@@ -71,7 +73,7 @@ func (rs *RenderingService) generateImageRendererURL(renderType RenderType, opts
 	queryParams := imageRendererURL.Query()
 	url := rs.getGrafanaCallbackURL(opts.Path)
 	queryParams.Add("url", url)
-	queryParams.Add("renderKey", renderKey)
+	queryParams.Add(renderKeyQueryParam, renderKey)
 	queryParams.Add("domain", rs.domain)
 	queryParams.Add("timezone", isoTimeOffsetToPosixTz(opts.Timezone))
 	queryParams.Add("encoding", string(renderType))
@@ -151,11 +153,12 @@ func (rs *RenderingService) doRequest(ctx context.Context, u *url.URL, headers m
 	req.Header.Set("User-Agent", fmt.Sprintf("Grafana/%s", rs.Cfg.BuildVersion))
 	maps.Copy(req.Header, headers)
 
-	logger.Debug("calling remote rendering service", "url", u)
+	logger.Debug("calling remote rendering service", "url", redactRendererURL(u))
 
 	// make request to renderer server
 	resp, err := rs.netClient.Do(req)
 	if err != nil {
+		err = redactRendererRequestError(err, u)
 		logger.Error("Failed to send request to remote rendering service", "error", err)
 		if urlErr, ok := errors.AsType[*url.Error](err); ok {
 			if urlErr.Timeout() {
@@ -174,6 +177,33 @@ func (rs *RenderingService) doRequest(ctx context.Context, u *url.URL, headers m
 	}
 
 	return resp, nil
+}
+
+// redactRendererURL returns u without the render key, which authenticates as the
+// rendering user until it expires and must never reach logs or returned errors.
+func redactRendererURL(u *url.URL) string {
+	redacted := *u
+	query := redacted.Query()
+	query.Del(renderKeyQueryParam)
+	redacted.RawQuery = query.Encode()
+	return redacted.Redacted()
+}
+
+// redactRendererRequestError strips the render key from a failed renderer request.
+// net/http embeds the full request URL, including the query string, in *url.Error.
+func redactRendererRequestError(err error, u *url.URL) error {
+	safeURL := redactRendererURL(u)
+	if urlErr, ok := errors.AsType[*url.Error](err); ok {
+		err = &url.Error{Op: urlErr.Op, URL: safeURL, Err: urlErr.Err}
+	}
+
+	if key := u.Query().Get(renderKeyQueryParam); key != "" {
+		msg := err.Error()
+		if strings.Contains(msg, key) || strings.Contains(msg, url.QueryEscape(key)) {
+			return fmt.Errorf("request to %s failed", safeURL)
+		}
+	}
+	return err
 }
 
 func (rs *RenderingService) writeResponseToFile(ctx context.Context, resp *http.Response, filePath string) error {
