@@ -70,6 +70,10 @@ func ProvideService(bus bus.Bus, cfg *setting.Cfg, mailer Mailer, store TempUser
 		"Subject":                 subjectTemplateFunc,
 		"HiddenSubject":           hiddenSubjectTemplateFunc,
 		"__dangerouslyInjectHTML": __dangerouslyInjectHTML,
+		"externalLinkURL": func(raw string, ownURLs ...string) string {
+			link, _ := util.ExternalLinkURL(raw, append(ownURLs, cfg.AppURL)...)
+			return link
+		},
 	})
 	mailTemplates.Funcs(sprig.FuncMap())
 
