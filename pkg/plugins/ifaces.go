@@ -7,6 +7,7 @@ import (
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 
+	"github.com/grafana/grafana/pkg/plugins/auth"
 	"github.com/grafana/grafana/pkg/plugins/backendplugin"
 )
 
@@ -43,7 +44,14 @@ type AddOpts struct {
 	arch string
 
 	url string
+
+	authorizePermissions PermissionsAuthorizer
 }
+
+// PermissionsAuthorizer decides whether a plugin may be installed with the permissions its archive
+// requests on Grafana. It is called before the archive is written to disk, once for the plugin and
+// once for each dependency installed alongside it. A non-nil error aborts that installation.
+type PermissionsAuthorizer func(ctx context.Context, pluginID string, requested []auth.Permission) error
 
 func (co AddOpts) GrafanaVersion() string {
 	return co.grafanaVersion
@@ -59,6 +67,17 @@ func (co AddOpts) Arch() string {
 
 func (co AddOpts) URL() string {
 	return co.url
+}
+
+func (co AddOpts) PermissionsAuthorizer() PermissionsAuthorizer {
+	return co.authorizePermissions
+}
+
+// WithPermissionsAuthorizer returns a copy of the options that installs only archives whose
+// requested permissions pass authorize.
+func (co AddOpts) WithPermissionsAuthorizer(authorize PermissionsAuthorizer) AddOpts {
+	co.authorizePermissions = authorize
+	return co
 }
 
 func NewAddOpts(grafanaVersion, os, arch, url string) AddOpts {
