@@ -16,6 +16,7 @@ import { makeEditTimeIntervalLink } from '../../utils/misc';
 import { notificationPolicies } from '../../utils/navigation';
 import { getAnnotations, isPausedRule, prometheusRuleType, rulerRuleType } from '../../utils/rules';
 import { isNullDate } from '../../utils/time';
+import { getExternalLinkUrl } from '../../utils/url';
 import { Tokenize } from '../Tokenize';
 import { DetailText } from '../common/DetailText';
 import { TimingOptionsMeta } from '../notification-policies/Policy';
@@ -250,12 +251,12 @@ interface AnnotationValueProps {
 }
 
 export function AnnotationValue({ value }: AnnotationValueProps) {
-  const needsExternalLink = value && value.startsWith('http');
+  const externalLink = value ? getExternalLinkUrl(value) : undefined;
   const tokenizeValue = <Tokenize input={value} delimiter={['{{', '}}']} />;
 
-  if (needsExternalLink) {
+  if (externalLink) {
     return (
-      <TextLink href={value} external>
+      <TextLink href={externalLink} external>
         {value}
       </TextLink>
     );

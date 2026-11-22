@@ -1,6 +1,5 @@
 import { Fragment, type JSX } from 'react';
 
-import { textUtil } from '@grafana/data';
 import { Trans } from '@grafana/i18n';
 import { useReturnToPrevious } from '@grafana/runtime';
 import { Button, LinkButton, Stack } from '@grafana/ui';
@@ -13,6 +12,7 @@ import { Annotation } from '../../utils/constants';
 import { isCloudRulesSource } from '../../utils/datasource';
 import { createExploreLink } from '../../utils/misc';
 import { isFederatedRuleGroup, rulerRuleType } from '../../utils/rules';
+import { getExternalLinkUrl } from '../../utils/url';
 
 interface Props {
   rule: CombinedRule;
@@ -63,7 +63,7 @@ const RuleDetailsButtons = ({ rule, rulesSource }: Props) => {
         variant="primary"
         icon="book"
         target="_blank"
-        href={textUtil.sanitizeUrl(rule.annotations[Annotation.runbookURL])}
+        href={getExternalLinkUrl(rule.annotations[Annotation.runbookURL]) ?? 'about:blank'}
       >
         <Trans i18nKey="alerting.rule-details-buttons.view-runbook">View runbook</Trans>
       </LinkButton>

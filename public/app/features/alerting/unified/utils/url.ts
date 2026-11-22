@@ -26,6 +26,48 @@ export function createRelativeUrl(
   return `${subPath}${path}${searchParamsString ? `?${searchParamsString}` : ''}`;
 }
 
+/**
+ * Returns the canonical form of `value` when it is an absolute http(s) URL on a host other than this
+ * Grafana server, and undefined otherwise. Use the returned value, not `value`, as the link href.
+ *
+ * Links built from user-provided values must not point back at Grafana: following one sends the
+ * viewer's session cookie with a GET request. Hosts are compared without scheme or port because
+ * cookies are scoped to the host only.
+ */
+export function getExternalLinkUrl(value: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return undefined;
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return undefined;
+  }
+
+  const host = normalizeHost(url.hostname);
+  if (!host || getOwnHosts().includes(host)) {
+    return undefined;
+  }
+
+  return url.href;
+}
+
+function getOwnHosts(): string[] {
+  const hosts = [window.location.hostname];
+  try {
+    hosts.push(new URL(config.appUrl).hostname);
+  } catch {
+    // appUrl is not an absolute URL, so only the page's own host is known
+  }
+  return hosts.map(normalizeHost).filter(Boolean);
+}
+
+function normalizeHost(hostname: string): string {
+  return hostname.toLowerCase().replace(/\.+$/, '');
+}
+
 export function createAbsoluteUrl(
   path: RelativeUrl,
   queryParams?: string[][] | Record<string, string> | string | URLSearchParams

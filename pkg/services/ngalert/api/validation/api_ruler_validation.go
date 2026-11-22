@@ -84,6 +84,9 @@ func ValidateRuleNode(
 	}
 
 	if ruleNode.ApiRuleNode != nil {
+		if err := ngmodels.ValidateRunbookURL(ruleNode.Annotations); err != nil {
+			return nil, err
+		}
 		newAlertRule.Annotations = ruleNode.Annotations
 		err = validateLabels(ruleNode.Labels)
 		if err != nil {

@@ -114,9 +114,9 @@
     </mj-button>
   </mj-column>
   <mj-raw>{{ end }}</mj-raw>
-  <mj-raw>{{ if .Annotations.runbook_url }}</mj-raw>
+  <mj-raw>{{ with externalLinkURL .Annotations.runbook_url $.ExternalURL }}</mj-raw>
   <mj-column>
-    <mj-button align="center" href="{{ .Annotations.runbook_url }}" padding="0" inner-padding="5px 12px">
+    <mj-button align="center" href="{{ . }}" padding="0" inner-padding="5px 12px">
       View runbook
     </mj-button>
   </mj-column>

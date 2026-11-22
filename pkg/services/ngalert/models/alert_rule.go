@@ -133,6 +133,7 @@ const (
 	// Annotations are actually a set of labels, so technically this is the label name of an annotation.
 	DashboardUIDAnnotation = "__dashboardUid__"
 	PanelIDAnnotation      = "__panelId__"
+	RunbookURLAnnotation   = "runbook_url"
 
 	// GrafanaReservedLabelPrefix contains the prefix for Grafana reserved labels. These differ from "__<label>__" labels
 	// in that they are not meant for internal-use only and will be passed-through to AMs and available to users in the same
@@ -810,6 +811,10 @@ func (alertRule *AlertRule) ValidateAlertRule(cfg setting.UnifiedAlertingSetting
 		return fmt.Errorf("%w: cannot have Panel ID without a Dashboard UID", ErrAlertRuleFailedValidation)
 	}
 
+	if err := ValidateRunbookURL(alertRule.Annotations); err != nil {
+		return fmt.Errorf("%w: %s", ErrAlertRuleFailedValidation, err)
+	}
+
 	var err error
 	if alertRule.Type() == RuleTypeRecording {
 		err = validateRecordingRuleFields(alertRule)
@@ -842,6 +847,21 @@ func (alertRule *AlertRule) ValidateAlertRule(cfg setting.UnifiedAlertingSetting
 		}
 	}
 
+	return nil
+}
+
+// ValidateRunbookURL checks that the runbook annotation, which the UI and the
+// notification email render as a link, is an external http or https URL.
+// Templated values are only known after expansion, so they are checked where
+// the link is rendered.
+func ValidateRunbookURL(annotations map[string]string) error {
+	runbook := strings.TrimSpace(annotations[RunbookURLAnnotation])
+	if runbook == "" || strings.Contains(runbook, "{{") {
+		return nil
+	}
+	if _, ok := util.ExternalLinkURL(runbook, setting.AppUrl); !ok {
+		return fmt.Errorf("annotation %s must be an absolute http or https URL that does not point to this Grafana server", RunbookURLAnnotation)
+	}
 	return nil
 }
 
