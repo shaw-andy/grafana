@@ -13,8 +13,9 @@ import (
 )
 
 // getLocalImageAttachment serves screenshots stored by the local external image
-// storage provider. Screenshots can show private dashboards, so they are only
-// served to signed-in users and never marked as cacheable by shared caches.
+// storage provider. Screenshots can show private dashboards from any org, so
+// they are only served to signed-in, non-anonymous users and never marked as
+// cacheable by shared caches.
 func (hs *HTTPServer) getLocalImageAttachment(c *contextmodel.ReqContext) {
 	name := web.Params(c.Req)[":file"]
 	if name == "" || name != filepath.Base(name) || strings.ContainsAny(name, `/\`) || !strings.EqualFold(filepath.Ext(name), ".png") {

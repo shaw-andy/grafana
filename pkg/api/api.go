@@ -593,7 +593,7 @@ func (hs *HTTPServer) registerRoutes() {
 	r.Get("/render/*", requestmeta.SetSLOGroup(requestmeta.SLOGroupHighSlow), reqSignedIn, hs.RenderHandler)
 
 	if hs.Cfg.ImageUploadProvider == "local" {
-		r.Get("/public/img/attachments/:file", reqSignedIn, hs.getLocalImageAttachment)
+		r.Get("/public/img/attachments/:file", reqSignedInNoAnonymous, hs.getLocalImageAttachment)
 	}
 
 	// grafana.net proxy
