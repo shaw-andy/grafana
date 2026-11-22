@@ -7,7 +7,7 @@ import { type GetFieldLinksFn } from 'app/plugins/panel/logs/types';
 
 import { createLogLine } from '../mocks/logRow';
 
-import { getTempoTraceFromLinks, getTraceIdFromTraceQlQuery } from './links';
+import { getTempoTraceFromLinks, getTraceIdFromLinkQuery, getTraceIdFromTraceQlQuery } from './links';
 import { type LogListModel } from './processing';
 
 describe('getTempoTraceFromLinks', () => {
@@ -106,5 +106,31 @@ describe('getTraceIdFromTraceQlQuery', () => {
     [''],
   ])('returns undefined for non trace-id lookups: %s', (query) => {
     expect(getTraceIdFromTraceQlQuery(query)).toBeUndefined();
+  });
+});
+
+describe('getTraceIdFromLinkQuery', () => {
+  test.each([
+    ['2203801e0171aa8b', '2203801e0171aa8b'],
+    [' 2203801e0171aa8b\n', '2203801e0171aa8b'],
+    ['{ trace:id = "2203801e0171aa8b" }', '2203801e0171aa8b'],
+    ['{trace:id = `ABCDEF0123456789`}', 'ABCDEF0123456789'],
+  ])('returns the hex trace ID for %s', (query, expected) => {
+    expect(getTraceIdFromLinkQuery(query)).toBe(expected);
+  });
+
+  test.each([
+    ['{ resource.service.name = "payments" }'],
+    ['{ trace:id = "abcd1234" } || { resource.service.name = "payments" } || { trace:id = "" }'],
+    ['{ trace:id = "abcd1234" }\n|| { resource.service.name = "payments" }'],
+    ['abcd1234\n{ resource.service.name = "payments" }'],
+    ['abcd1234 || { true }'],
+    ['{ true }'],
+    ['0x2203801e0171aa8b'],
+    [''],
+    [undefined],
+    [{ query: '2203801e0171aa8b' }],
+  ])('returns undefined for queries that are not a trace ID: %s', (query) => {
+    expect(getTraceIdFromLinkQuery(query)).toBeUndefined();
   });
 });

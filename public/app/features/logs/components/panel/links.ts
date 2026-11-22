@@ -39,8 +39,20 @@ export type EmbeddedInternalLink = {
 // Matches a TraceQL trace-id lookup, e.g. `{ trace:id = "abc" }`. The quote is back-referenced so both ends match.
 const TRACE_ID_QUERY_REGEX = /^\{\s*trace:id\s*=\s*(["`])([0-9A-Fa-f]+)\1\s*\}$/;
 
+const TRACE_ID_REGEX = /^[0-9A-Fa-f]+$/;
+
 export function getTraceIdFromTraceQlQuery(query: string): string | undefined {
   return query.trim().match(TRACE_ID_QUERY_REGEX)?.[2];
+}
+
+// Link queries interpolate log content, so anything other than a bare hex trace ID or an exact trace-id lookup
+// must not be run.
+export function getTraceIdFromLinkQuery(query: unknown): string | undefined {
+  if (typeof query !== 'string') {
+    return undefined;
+  }
+  const trimmed = query.trim();
+  return TRACE_ID_REGEX.test(trimmed) ? trimmed : getTraceIdFromTraceQlQuery(trimmed);
 }
 
 type TempoQuery = {

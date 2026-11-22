@@ -25,7 +25,7 @@ interface TempoQuery extends DataQuery {
 }
 
 import { useLogListContext } from './LogListContext';
-import { getTraceIdFromTraceQlQuery, type EmbeddedInternalLink } from './links';
+import { getTraceIdFromLinkQuery, type EmbeddedInternalLink } from './links';
 
 interface Props {
   traceRef: EmbeddedInternalLink;
@@ -50,21 +50,26 @@ export const LogLineDetailsTrace = ({ timeRange, timeZone, traceRef }: Props) =>
     });
   }, [traceRef.dsUID]);
 
+  // Tempo only returns renderable trace spans for a bare trace ID, so unwrap `{ trace:id = "..." }` lookups.
+  const traceId = useMemo(() => getTraceIdFromLinkQuery(traceRef.query), [traceRef.query]);
+
   useEffect(() => {
+    if (!traceId) {
+      setDataFrames(null);
+      return;
+    }
     if (!dataSource) {
       return;
     }
     setDataFrames(undefined);
-    // Tempo only returns renderable trace spans for a bare trace ID, so unwrap `{ trace:id = "..." }` lookups.
-    const traceQuery = getTraceIdFromTraceQlQuery(traceRef.query) ?? traceRef.query;
     const request: DataQueryRequest<TempoQuery> = {
       app,
-      requestId: `log-details-trace-${traceQuery}`,
+      requestId: `log-details-trace-${traceId}`,
       targets: [
         {
-          query: traceQuery,
+          query: traceId,
           queryType: 'traceql',
-          refId: `log-details-trace-${traceQuery}`,
+          refId: `log-details-trace-${traceId}`,
           tableType: 'traces',
           filters: [],
         },
@@ -86,7 +91,7 @@ export const LogLineDetailsTrace = ({ timeRange, timeZone, traceRef }: Props) =>
           setDataFrames(null);
         });
     }
-  }, [app, dataSource, timeRange, timeZone, traceRef.query]);
+  }, [app, dataSource, timeRange, timeZone, traceId]);
 
   const traceProp = useMemo(() => (dataFrames?.length ? transformDataFrames(dataFrames[0]) : undefined), [dataFrames]);
 
