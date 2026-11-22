@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/grafana/grafana-app-sdk/resource"
@@ -11,8 +12,12 @@ import (
 	"github.com/grafana/grafana/apps/alerting/rules/pkg/app/config"
 	"github.com/grafana/grafana/apps/alerting/rules/pkg/app/util"
 	"github.com/grafana/grafana/apps/alerting/rules/pkg/app/validation"
+	"github.com/grafana/grafana/pkg/setting"
+	grafanautil "github.com/grafana/grafana/pkg/util"
 	prom_model "github.com/prometheus/common/model"
 )
+
+const runbookURLAnnotation = "runbook_url"
 
 // validateGroupLabels now delegates to util.ValidateGroupLabels for shared logic.
 func validateGroupLabels(r *model.AlertRule, oldObject *model.AlertRule, action resource.AdmissionAction) error {
@@ -55,6 +60,21 @@ func validateFolderAndSequenceMembership(ctx context.Context, r *model.AlertRule
 				return fmt.Errorf("cannot move rule %q to folder %q because it belongs to rule sequence %q", r.Name, folderUID, memberships[r.Name].SequenceUID)
 			}
 		}
+	}
+	return nil
+}
+
+// validateRunbookURL requires the runbook annotation, which the UI and the
+// notification email render as a link, to be an external http or https URL.
+// Templated values are only known after expansion, so they are checked where
+// the link is rendered.
+func validateRunbookURL(r *model.AlertRule) error {
+	runbook := strings.TrimSpace(string(r.Spec.Annotations[runbookURLAnnotation]))
+	if runbook == "" || strings.Contains(runbook, "{{") {
+		return nil
+	}
+	if _, ok := grafanautil.ExternalLinkURL(runbook, setting.AppUrl); !ok {
+		return fmt.Errorf("annotation %s must be an absolute http or https URL that does not point to this Grafana server", runbookURLAnnotation)
 	}
 	return nil
 }
@@ -138,6 +158,10 @@ func ValidateWrite(cfg config.RuntimeConfig) validation.ValidateFunc[*model.Aler
 		}
 
 		if err := validateDurations(r); err != nil {
+			return err
+		}
+
+		if err := validateRunbookURL(r); err != nil {
 			return err
 		}
 
