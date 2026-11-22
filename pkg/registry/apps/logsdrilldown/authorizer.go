@@ -75,24 +75,20 @@ func GetAuthorizer() authorizer.Authorizer {
 			return authorizer.DecisionDeny, "no permissions", nil
 		}
 
+		// Deny rather than NoOpinion: the org role authorizer that runs next would
+		// otherwise allow these per-user objects without any ownership check.
 		_, ok := p[accesscontrol.ActionDatasourcesExplore]
 		if !ok {
-			// defer to the default authorizer if datasources:explore is not present
-			return authorizer.DecisionNoOpinion, "", nil
+			return authorizer.DecisionDeny, "user missing datasources:explore", nil
 		}
 
 		switch attr.GetVerb() {
-		case "list":
-			// Allow everyone to list logsdrilldowns
-			return authorizer.DecisionAllow, "", nil
-		case "get":
-			// Allow everyone to get individual logsdrilldowns
-			return authorizer.DecisionAllow, "", nil
 		case "create":
-			// Create requests are validated later since we don't have access to the resource name
+			// The name is only in the request body; ownership is enforced by the admission plugin.
 			return authorizer.DecisionAllow, "", nil
-		case "delete", "patch", "update":
-			// Only allow the user to access their own settings
+		case "get", "list", "watch", "delete", "patch", "update":
+			// Only allow the user to access their own settings. Unscoped list and
+			// watch have no name and are therefore denied.
 			if !compareResourceNameAndUserUID(attr.GetName(), u) {
 				return authorizer.DecisionDeny, "forbidden", nil
 			}

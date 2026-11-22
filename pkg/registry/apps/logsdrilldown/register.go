@@ -1,6 +1,9 @@
 package logsdrilldown
 
 import (
+	"io"
+
+	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
 	restclient "k8s.io/client-go/rest"
 
@@ -24,6 +27,21 @@ type LogsDrilldownAppInstaller struct {
 
 func (l *LogsDrilldownAppInstaller) GetAuthorizer() authorizer.Authorizer {
 	return GetAuthorizer()
+}
+
+func (l *LogsDrilldownAppInstaller) AdmissionPlugin() admission.Factory {
+	appFactory := l.AppInstaller.AdmissionPlugin()
+	return func(cfg io.Reader) (admission.Interface, error) {
+		owner := newOwnerAdmission()
+		if appFactory == nil {
+			return owner, nil
+		}
+		appAdmission, err := appFactory(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return admission.NewChainHandler(appAdmission, owner), nil
+	}
 }
 
 func RegisterAppInstaller(
