@@ -3,7 +3,8 @@ import { lastValueFrom, type Observable, of } from 'rxjs';
 import { type DataQuery, type DataQueryResponse, DataSourceApi, type DataSourceInstanceSettings } from '@grafana/data';
 import { type BackendSrvRequest, getBackendSrv, isFetchError } from '@grafana/runtime';
 
-import { discoverAlertmanagerFeaturesByUrl } from '../../../features/alerting/unified/api/buildInfo';
+import { discoverAlertmanagerFeaturesByUid } from '../../../features/alerting/unified/api/buildInfo';
+import { getDataSourceProxyUrl } from '../../../features/alerting/unified/utils/datasource';
 import { messageFromError } from '../../../features/alerting/unified/utils/redux';
 import { type AlertmanagerApiFeatures } from '../../../types/unified-alerting-dto';
 
@@ -31,7 +32,8 @@ export class AlertManagerDatasource extends DataSourceApi<AlertManagerQuery, Ale
     const options: BackendSrvRequest = {
       headers: {},
       method: 'GET',
-      url: this.instanceSettings.url + url,
+      url: getDataSourceProxyUrl(this.instanceSettings.uid) + url,
+      redirect: 'manual',
     };
 
     if (this.instanceSettings.basicAuth || this.instanceSettings.withCredentials) {
@@ -50,7 +52,7 @@ export class AlertManagerDatasource extends DataSourceApi<AlertManagerQuery, Ale
     const amUrl = this.instanceSettings.url;
 
     const amFeatures: AlertmanagerApiFeatures = amUrl
-      ? await discoverAlertmanagerFeaturesByUrl(amUrl)
+      ? await discoverAlertmanagerFeaturesByUid(this.instanceSettings.uid)
       : { lazyConfigInit: false };
 
     if (this.instanceSettings.jsonData.implementation === AlertManagerImplementation.prometheus) {

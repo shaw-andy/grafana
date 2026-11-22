@@ -40,7 +40,7 @@ describe('discoverDataSourceFeatures', () => {
       );
 
       const response = await discoverDataSourceFeatures({
-        url: '/datasource/proxy',
+        uid: 'datasource-uid',
         name: 'Prometheus',
         type: 'prometheus',
       });
@@ -67,7 +67,7 @@ describe('discoverDataSourceFeatures', () => {
       );
 
       const response = await discoverDataSourceFeatures({
-        url: '/datasource/proxy',
+        uid: 'datasource-uid',
         name: 'Mimir',
         type: 'prometheus',
       });
@@ -95,7 +95,7 @@ describe('discoverDataSourceFeatures', () => {
       mocks.fetchTestRulerRulesGroup.mockResolvedValue(null);
 
       const response = await discoverDataSourceFeatures({
-        url: '/datasource/proxy',
+        uid: 'datasource-uid',
         name: 'Mimir',
         type: 'prometheus',
       });
@@ -129,7 +129,7 @@ describe('discoverDataSourceFeatures', () => {
       });
 
       const response = await discoverDataSourceFeatures({
-        url: '/datasource/proxy',
+        uid: 'datasource-uid',
         name: 'Mimir',
         type: 'prometheus',
       });
@@ -142,7 +142,7 @@ describe('discoverDataSourceFeatures', () => {
     });
 
     it('When the data source is Loki should not call the buildinfo endpoint', async () => {
-      await discoverDataSourceFeatures({ url: '/datasource/proxy', name: 'Loki', type: 'loki' });
+      await discoverDataSourceFeatures({ uid: 'datasource-uid', name: 'Loki', type: 'loki' });
 
       expect(fetch).not.toBeCalled();
     });
@@ -151,7 +151,7 @@ describe('discoverDataSourceFeatures', () => {
       mocks.fetchTestRulerRulesGroup.mockResolvedValue(null);
       mocks.fetchRules.mockResolvedValue([]);
 
-      const response = await discoverDataSourceFeatures({ url: '/datasource/proxy', name: 'Loki', type: 'loki' });
+      const response = await discoverDataSourceFeatures({ uid: 'datasource-uid', name: 'Loki', type: 'loki' });
 
       expect(response.application).toBe('Loki');
       expect(response.features.rulerApiEnabled).toBe(true);
@@ -181,7 +181,7 @@ describe('discoverDataSourceFeatures', () => {
       mocks.fetchRules.mockResolvedValue([]);
 
       const response = await discoverDataSourceFeatures({
-        url: '/datasource/proxy',
+        uid: 'datasource-uid',
         name: 'Cortex',
         type: 'prometheus',
       });
@@ -207,7 +207,7 @@ describe('discoverDataSourceFeatures', () => {
       mocks.fetchRules.mockResolvedValue([]);
 
       const response = await discoverDataSourceFeatures({
-        url: '/datasource/proxy',
+        uid: 'datasource-uid',
         name: 'Cortex',
         type: 'prometheus',
       });
@@ -240,7 +240,7 @@ describe('discoverDataSourceFeatures', () => {
 
       await expect(
         discoverDataSourceFeatures({
-          url: '/datasource/proxy',
+          uid: 'datasource-uid',
           name: 'Cortex',
           type: 'prometheus',
         })

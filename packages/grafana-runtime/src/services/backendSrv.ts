@@ -82,6 +82,12 @@ export type BackendSrvRequest = {
   credentials?: RequestCredentials;
 
   /**
+   * How HTTP redirects are handled. See {@link https://developer.mozilla.org/en-US/docs/Web/API/RequestInit#redirect | RequestInit.redirect}.
+   * Defaults to the browser's `follow` behaviour when omitted.
+   */
+  redirect?: RequestRedirect;
+
+  /**
    * @deprecated withCredentials is deprecated in favor of credentials
    */
   withCredentials?: boolean;
