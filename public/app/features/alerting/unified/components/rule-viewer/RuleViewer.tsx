@@ -64,6 +64,7 @@ import {
   prometheusRuleType,
   rulerRuleType,
 } from '../../utils/rules';
+import { getExternalLinkUrl } from '../../utils/url';
 import { AlertingPageWrapper } from '../AlertingPageWrapper';
 import { ProvisioningBadge } from '../Provisioning';
 import { WithReturnButton } from '../WithReturnButton';
@@ -233,8 +234,9 @@ const createMetadata = (rule: CombinedRule, styles: ReturnType<typeof getStyles>
   if (runbookUrl) {
     /* TODO instead of truncating the string, we should use flex and text overflow properly to allow it to take up all of the horizontal space available */
     const truncatedUrl = truncate(runbookUrl, { length: 42 });
-    const valueToAdd = isValidRunbookURL(runbookUrl) ? (
-      <TextLink variant="bodySmall" className={styles.url} href={runbookUrl} external>
+    const runbookLink = getExternalLinkUrl(runbookUrl);
+    const valueToAdd = runbookLink ? (
+      <TextLink variant="bodySmall" className={styles.url} href={runbookLink} external>
         {truncatedUrl}
       </TextLink>
     ) : (
@@ -584,20 +586,6 @@ const getStyles = (theme: GrafanaTheme2) => ({
     },
   }),
 });
-
-function isValidRunbookURL(url: string) {
-  const isRelative = url.startsWith('/');
-  let isAbsolute = false;
-
-  try {
-    new URL(url);
-    isAbsolute = true;
-  } catch (_) {
-    return false;
-  }
-
-  return isRelative || isAbsolute;
-}
 
 function getNamespaceString(rule: CombinedRule): string {
   // try rule.namespace.uid
