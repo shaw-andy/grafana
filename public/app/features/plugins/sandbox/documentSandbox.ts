@@ -29,7 +29,7 @@ export function getSafeSandboxDomElement(element: Element, pluginId: string): El
     return element;
   }
 
-  if (forbiddenElements.includes(nodeName)) {
+  if (forbiddenElements.includes(String(nodeName).toLowerCase())) {
     logWarning('<' + nodeName + '> is not allowed in sandboxed plugins', {
       pluginId,
       param: nodeName,
