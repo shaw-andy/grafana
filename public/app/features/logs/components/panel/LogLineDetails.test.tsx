@@ -6,21 +6,30 @@ import {
   createDataFrame,
   type DataFrame,
   DataFrameType,
+  type DataLinkTransformationConfig,
   type DataSourceApi,
+  type DataSourceInstanceSettings,
   dateTime,
   type Field,
   FieldType,
+  getDefaultTimeRange,
   LogLevel,
   type LogRowModel,
   LogsSortOrder,
   PluginExtensionPoints,
   type ScopedVars,
+  store,
+  SupportedTransformationType,
   toDataFrame,
 } from '@grafana/data';
-import { setPluginLinksHook, usePluginLinks } from '@grafana/runtime';
+import { getTemplateSrv, setPluginLinksHook, setTemplateSrv, usePluginLinks } from '@grafana/runtime';
 import { FlagKeys } from '@grafana/runtime/internal';
 import { getDataSourceInstance } from '@grafana/runtime/unstable';
+import { contextSrv } from 'app/core/services/context_srv';
+import { attachCorrelationsToDataFrames } from 'app/features/correlations/utils';
+import { getFieldLinksForExplore } from 'app/features/explore/utils/links';
 import { createLokiDatasource } from 'app/features/loki-helpers/mocks';
+import { TemplateSrv } from 'app/features/templating/template_srv';
 
 import { DATAPLANE_LABEL_TYPES_NAME, DATAPLANE_LABELS_NAME } from '../../logsFrame';
 import * as logsUtils from '../../utils';
@@ -1206,6 +1215,227 @@ describe('LogLineDetails', () => {
     expect(screen.getByText('label')).toBeInTheDocument();
     expect(screen.getByText('value')).toBeInTheDocument();
     expect(screen.getByText('Open service overview for label')).toBeInTheDocument();
+  });
+
+  describe('TraceQL link injection', () => {
+    const attackSelector = '{ resource.service.name = "payments" }';
+    const storageKey = 'trace-injection-details';
+    let templateSrv: ReturnType<typeof getTemplateSrv>;
+
+    beforeEach(() => {
+      templateSrv = getTemplateSrv();
+      setTemplateSrv(new TemplateSrv());
+      jest.spyOn(contextSrv, 'hasAccessToExplore').mockReturnValue(true);
+      tempoDS.query.mockReturnValue(
+        of({
+          data: [
+            createDataFrame({
+              fields: [
+                { name: 'traceID', values: ['5d5d850e24d89509'], type: FieldType.string },
+                { name: 'spanID', values: ['5d5d850e24d89509'], type: FieldType.string },
+              ],
+            }),
+          ],
+        })
+      );
+    });
+
+    afterEach(() => {
+      setTemplateSrv(templateSrv);
+      jest.mocked(contextSrv.hasAccessToExplore).mockRestore();
+      store.delete(`${storageKey}.log-details.traceOpen`);
+    });
+
+    function exploreFieldLinks(field: Field, rowIndex: number, dataFrame: DataFrame, vars: ScopedVars) {
+      return getFieldLinksForExplore({
+        field,
+        rowIndex,
+        range: getDefaultTimeRange(),
+        dataFrame,
+        vars,
+      });
+    }
+
+    function logFromFrame(dataFrame: DataFrame) {
+      return createLogLine(
+        { entry: 'log line', dataFrame, entryFieldIndex: 1, rowIndex: 0, datasourceUid: lokiDS.uid },
+        {
+          escape: false,
+          order: LogsSortOrder.Descending,
+          timeZone: 'browser',
+          virtualization: undefined,
+          wrapLogMessage: true,
+          getFieldLinks: exploreFieldLinks,
+        }
+      );
+    }
+
+    function dataLinkFrame(fieldValue: string, linkQuery: string) {
+      return toDataFrame({
+        refId: 'A',
+        fields: [
+          { name: 'timestamp', type: FieldType.time, values: [1] },
+          { name: 'entry', type: FieldType.string, values: ['log line'] },
+          {
+            name: 'traceId',
+            type: FieldType.string,
+            values: [fieldValue],
+            config: {
+              links: [
+                {
+                  title: 'Tempo',
+                  url: '',
+                  internal: {
+                    datasourceUid: tempoDS.uid,
+                    datasourceName: 'Tempo',
+                    query: {
+                      refId: 'A',
+                      query: linkQuery,
+                      queryType: 'traceql',
+                      datasource: { uid: tempoDS.uid },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      });
+    }
+
+    function correlationFrame(fieldValue: string, query: string, transformation: DataLinkTransformationConfig) {
+      const dataFrame = toDataFrame({
+        refId: 'A',
+        fields: [
+          { name: 'timestamp', type: FieldType.time, values: [1] },
+          { name: 'entry', type: FieldType.string, values: ['log line'] },
+          { name: 'traceId', type: FieldType.string, values: [fieldValue] },
+        ],
+      });
+      const datasource = {
+        uid: lokiDS.uid,
+        name: 'Loki',
+        type: 'loki',
+        meta: { id: 'loki' },
+      } as DataSourceInstanceSettings;
+      const tempo = {
+        uid: tempoDS.uid,
+        name: 'Tempo',
+        type: 'tempo',
+        meta: { id: 'tempo' },
+      } as DataSourceInstanceSettings;
+      attachCorrelationsToDataFrames(
+        [dataFrame],
+        [
+          {
+            uid: 'loki-to-tempo',
+            label: 'Logs to traces',
+            source: datasource,
+            target: tempo,
+            type: 'query',
+            provisioned: false,
+            config: {
+              field: 'traceId',
+              target: {
+                refId: 'A',
+                query,
+                queryType: 'traceql',
+              },
+              transformations: [transformation],
+            },
+          },
+        ],
+        { A: lokiDS.uid }
+      );
+      return dataFrame;
+    }
+
+    async function openTrace(log: ReturnType<typeof logFromFrame>, options?: { alreadyOpen?: boolean }) {
+      await setup({ logs: [log] }, undefined, options?.alreadyOpen ? { logOptionsStorageKey: storageKey } : undefined, {
+        showDetails: [log],
+        currentLog: log,
+      });
+      if (!options?.alreadyOpen) {
+        await userEvent.click(screen.getByText('Trace'));
+      }
+    }
+
+    async function expectTraceUnavailableWithoutQuery() {
+      await waitFor(() => {
+        expect(tempoDS.query).not.toHaveBeenCalled();
+        expect(screen.getByText('Could not retrieve trace.')).toBeInTheDocument();
+      });
+    }
+
+    test('does not query Tempo with a TraceQL selector stored in the log field', async () => {
+      const log = logFromFrame(dataLinkFrame(attackSelector, '${__value.raw}'));
+
+      await openTrace(log);
+
+      await expectTraceUnavailableWithoutQuery();
+    });
+
+    test('does not query Tempo when a trace-id data link is broken out of by the log field', async () => {
+      const log = logFromFrame(
+        dataLinkFrame(
+          'abcd1234" } || { resource.service.name = "payments" } || { trace:id = "',
+          '{ trace:id = "${__value.raw}" }'
+        )
+      );
+
+      await openTrace(log);
+
+      await expectTraceUnavailableWithoutQuery();
+    });
+
+    test('does not query Tempo with a selector captured by a correlation regex', async () => {
+      const log = logFromFrame(
+        correlationFrame(attackSelector, '${traceId}', {
+          type: SupportedTransformationType.Regex,
+          expression: '^(.*)$',
+          mapValue: 'traceId',
+        })
+      );
+
+      await openTrace(log);
+
+      await expectTraceUnavailableWithoutQuery();
+    });
+
+    test('does not query Tempo with a selector captured by a correlation logfmt parser', async () => {
+      const log = logFromFrame(
+        correlationFrame('traceId="{resource.service.name=\\"payments\\"}"', '${traceId}', {
+          type: SupportedTransformationType.Logfmt,
+        })
+      );
+
+      await openTrace(log);
+
+      await expectTraceUnavailableWithoutQuery();
+    });
+
+    test('does not query Tempo when the trace section was left open', async () => {
+      store.set(`${storageKey}.log-details.traceOpen`, true);
+      const log = logFromFrame(dataLinkFrame(attackSelector, '${__value.raw}'));
+
+      await openTrace(log, { alreadyOpen: true });
+
+      await expectTraceUnavailableWithoutQuery();
+    });
+
+    test('queries Tempo with only the hex id from an exact trace-id data link', async () => {
+      const log = logFromFrame(dataLinkFrame('abcd1234', '{ trace:id = "${__value.raw}" }'));
+
+      await openTrace(log);
+
+      await waitFor(() => {
+        expect(tempoDS.query).toHaveBeenCalledWith(
+          expect.objectContaining({
+            targets: [expect.objectContaining({ query: 'abcd1234', queryType: 'traceql' })],
+          })
+        );
+      });
+    });
   });
 
   describe('Width regressions', () => {
