@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash"
 	"net/http"
+	neturl "net/url"
 	"slices"
 	"sort"
 
@@ -255,7 +256,7 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 	dataSources := make(map[string]plugins.DataSourceDTO)
 
 	for _, ds := range orgDataSources {
-		url := ds.URL
+		url := browserAccessURL(ds.URL)
 
 		if ds.Access == datasources.DS_ACCESS_PROXY {
 			url = "/api/datasources/proxy/uid/" + ds.UID
@@ -320,7 +321,9 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 
 				dsDTO.Username = ds.User
 				dsDTO.Password = password
-				dsDTO.URL = url + "/db/" + ds.Database
+				if url != "" {
+					dsDTO.URL = url + "/db/" + ds.Database
+				}
 			}
 
 			if ds.Type == datasources.DS_INFLUXDB {
@@ -351,7 +354,7 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 
 		if ds.Type == datasources.DS_PROMETHEUS || ds.Type == datasources.DS_AMAZON_PROMETHEUS || ds.Type == datasources.DS_AZURE_PROMETHEUS {
 			// add unproxied server URL for link to Prometheus web UI
-			ds.JsonData.Set("directUrl", ds.URL)
+			ds.JsonData.Set("directUrl", browserAccessURL(ds.URL))
 		}
 
 		dataSources[ds.Name] = dsDTO
@@ -384,6 +387,17 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 	}
 
 	return dataSources, nil
+}
+
+// browserAccessURL returns the stored data source URL only if it is an absolute http(s) URL. Any other
+// value (a path, a protocol-relative or scheme-only reference) would be resolved by the browser against
+// Grafana's own origin and requested with the viewer's session cookie.
+func browserAccessURL(rawURL string) string {
+	u, err := neturl.Parse(rawURL)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return ""
+	}
+	return rawURL
 }
 
 func (hs *HTTPServer) getFSPanels(c *contextmodel.ReqContext, availablePanels map[string]*availablePluginDTO) map[string]plugins.PanelDTO {
