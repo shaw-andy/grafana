@@ -95,6 +95,13 @@ type FrontendSettingsAnalyticsDTO struct {
 	PresenceIndicatorsDisabled bool `json:"presenceIndicatorsDisabled,omitempty"`
 }
 
+// FrontendSettingsPreinstalledPluginDTO is served to unauthenticated visitors,
+// so it must never carry the plugin download URL, which can embed credentials.
+type FrontendSettingsPreinstalledPluginDTO struct {
+	ID      string `json:"id"`
+	Version string `json:"version"`
+}
+
 type FrontendSettingsUnifiedAlertingStateHistoryDTO struct {
 	Backend                       string `json:"backend,omitempty"`
 	Primary                       string `json:"primary,omitempty"`
@@ -250,31 +257,31 @@ type FrontendSettingsDTO struct {
 
 	LicenseInfo FrontendSettingsLicenseInfoDTO `json:"licenseInfo"`
 
-	FeatureToggles                      map[string]bool                `json:"featureToggles"`
-	AnonymousEnabled                    bool                           `json:"anonymousEnabled"`
-	AnonymousDeviceLimit                int64                          `json:"anonymousDeviceLimit"`
-	RendererAvailable                   bool                           `json:"rendererAvailable"`
-	RendererVersion                     string                         `json:"rendererVersion"`
-	RendererDefaultImageWidth           int                            `json:"rendererDefaultImageWidth"`
-	RendererDefaultImageHeight          int                            `json:"rendererDefaultImageHeight"`
-	RendererDefaultImageScale           float64                        `json:"rendererDefaultImageScale"`
-	Http2Enabled                        bool                           `json:"http2Enabled"`
-	GrafanaJavascriptAgent              setting.GrafanaJavascriptAgent `json:"grafanaJavascriptAgent"`
-	PluginCatalogURL                    string                         `json:"pluginCatalogURL"`
-	PluginAdminEnabled                  bool                           `json:"pluginAdminEnabled"`
-	PluginAdminExternalManageEnabled    bool                           `json:"pluginAdminExternalManageEnabled"`
-	PluginCatalogHiddenPlugins          []string                       `json:"pluginCatalogHiddenPlugins"`
-	PluginCatalogManagedPlugins         []string                       `json:"pluginCatalogManagedPlugins"`
-	PluginCatalogPreinstalledPlugins    []setting.InstallPlugin        `json:"pluginCatalogPreinstalledPlugins"`
-	PluginCatalogPreinstalledAutoUpdate bool                           `json:"pluginCatalogPreinstalledAutoUpdate"`
-	ExpressionsEnabled                  bool                           `json:"expressionsEnabled"`
-	AwsAllowedAuthProviders             []string                       `json:"awsAllowedAuthProviders"`
-	AwsAssumeRoleEnabled                bool                           `json:"awsAssumeRoleEnabled"`
-	AwsPerDatasourceHTTPProxyEnabled    bool                           `json:"awsPerDatasourceHTTPProxyEnabled"`
-	SupportBundlesEnabled               bool                           `json:"supportBundlesEnabled"`
-	SnapshotEnabled                     bool                           `json:"snapshotEnabled"`
-	SecureSocksDSProxyEnabled           bool                           `json:"secureSocksDSProxyEnabled"`
-	ReportingStaticContext              map[string]string              `json:"reportingStaticContext"`
+	FeatureToggles                      map[string]bool                         `json:"featureToggles"`
+	AnonymousEnabled                    bool                                    `json:"anonymousEnabled"`
+	AnonymousDeviceLimit                int64                                   `json:"anonymousDeviceLimit"`
+	RendererAvailable                   bool                                    `json:"rendererAvailable"`
+	RendererVersion                     string                                  `json:"rendererVersion"`
+	RendererDefaultImageWidth           int                                     `json:"rendererDefaultImageWidth"`
+	RendererDefaultImageHeight          int                                     `json:"rendererDefaultImageHeight"`
+	RendererDefaultImageScale           float64                                 `json:"rendererDefaultImageScale"`
+	Http2Enabled                        bool                                    `json:"http2Enabled"`
+	GrafanaJavascriptAgent              setting.GrafanaJavascriptAgent          `json:"grafanaJavascriptAgent"`
+	PluginCatalogURL                    string                                  `json:"pluginCatalogURL"`
+	PluginAdminEnabled                  bool                                    `json:"pluginAdminEnabled"`
+	PluginAdminExternalManageEnabled    bool                                    `json:"pluginAdminExternalManageEnabled"`
+	PluginCatalogHiddenPlugins          []string                                `json:"pluginCatalogHiddenPlugins"`
+	PluginCatalogManagedPlugins         []string                                `json:"pluginCatalogManagedPlugins"`
+	PluginCatalogPreinstalledPlugins    []FrontendSettingsPreinstalledPluginDTO `json:"pluginCatalogPreinstalledPlugins"`
+	PluginCatalogPreinstalledAutoUpdate bool                                    `json:"pluginCatalogPreinstalledAutoUpdate"`
+	ExpressionsEnabled                  bool                                    `json:"expressionsEnabled"`
+	AwsAllowedAuthProviders             []string                                `json:"awsAllowedAuthProviders"`
+	AwsAssumeRoleEnabled                bool                                    `json:"awsAssumeRoleEnabled"`
+	AwsPerDatasourceHTTPProxyEnabled    bool                                    `json:"awsPerDatasourceHTTPProxyEnabled"`
+	SupportBundlesEnabled               bool                                    `json:"supportBundlesEnabled"`
+	SnapshotEnabled                     bool                                    `json:"snapshotEnabled"`
+	SecureSocksDSProxyEnabled           bool                                    `json:"secureSocksDSProxyEnabled"`
+	ReportingStaticContext              map[string]string                       `json:"reportingStaticContext"`
 
 	Azure FrontendSettingsAzureDTO `json:"azure"`
 
