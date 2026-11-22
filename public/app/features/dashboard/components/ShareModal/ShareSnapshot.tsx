@@ -205,7 +205,7 @@ export class ShareSnapshot extends PureComponent<Props, State> {
 
   deleteSnapshot = async () => {
     const { deleteUrl } = this.state;
-    await getBackendSrv().get(deleteUrl);
+    await getBackendSrv().get(deleteUrl, undefined, undefined, { validatePath: true });
     this.setState({ step: 3 });
   };
 
