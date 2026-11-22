@@ -136,7 +136,7 @@ func Test_executeSyncLogQuery(t *testing.T) {
 		executeSyncLogQuery = origExecuteSyncLogQuery
 	})
 
-	t.Run("when query mode is 'Logs Insights' and does not include type or subtype", func(t *testing.T) {
+	t.Run("when query mode is Logs and type is omitted, sync polling is not selected", func(t *testing.T) {
 		origExecuteSyncLogQuery := executeSyncLogQuery
 		syncCalled := false
 		executeSyncLogQuery = func(ctx context.Context, e *DataSource, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
@@ -167,7 +167,7 @@ func Test_executeSyncLogQuery(t *testing.T) {
 		})
 
 		assert.NoError(t, err)
-		assert.Equal(t, true, syncCalled)
+		assert.False(t, syncCalled, "omitted type must not be treated as a public-dashboard signal")
 	})
 }
 func Test_executeSyncLogQuery_handles_RefId_from_input_queries(t *testing.T) {
