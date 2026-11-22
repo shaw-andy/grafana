@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/ua-parser/uap-go/uaparser"
@@ -76,6 +79,12 @@ func (hs *HTTPServer) RevokeUserAuthToken(c *contextmodel.ReqContext) response.R
 }
 
 func (hs *HTTPServer) RotateUserAuthTokenRedirect(c *contextmodel.ReqContext) response.Response {
+	// This GET route can be requested by any same-origin fetch, so it must not be usable as a
+	// trampoline into routes that end or switch the session.
+	if c.UseSessionStorageRedirect && hs.isSessionChangingRedirect(hs.Cfg.AppSubURL+c.Query("redirectTo")) {
+		return response.Redirect(hs.Cfg.AppSubURL + "/")
+	}
+
 	if err := hs.rotateToken(c); err != nil {
 		hs.log.FromContext(c.Req.Context()).Debug("Failed to rotate token", "error", err)
 		if errors.Is(err, auth.ErrInvalidSessionToken) {
@@ -86,7 +95,10 @@ func (hs *HTTPServer) RotateUserAuthTokenRedirect(c *contextmodel.ReqContext) re
 	}
 
 	if !c.UseSessionStorageRedirect {
-		return response.Redirect(hs.GetRedirectURL(c))
+		if redirectTo := hs.GetRedirectURL(c); !hs.isSessionChangingRedirect(redirectTo) {
+			return response.Redirect(redirectTo)
+		}
+		return response.Redirect(hs.Cfg.AppSubURL + "/")
 	}
 
 	redirectTo := hs.Cfg.AppSubURL + c.Query("redirectTo")
@@ -94,6 +106,23 @@ func (hs *HTTPServer) RotateUserAuthTokenRedirect(c *contextmodel.ReqContext) re
 		return response.Redirect(sanitized)
 	}
 	return response.Redirect(hs.Cfg.AppSubURL + "/")
+}
+
+// isSessionChangingRedirect reports whether redirectTo resolves to a GET route that logs the user out
+// or switches their active organization.
+func (hs *HTTPServer) isSessionChangingRedirect(redirectTo string) bool {
+	to, err := url.Parse(redirectTo)
+	if err != nil {
+		return false
+	}
+
+	p := strings.ToLower(path.Clean("/" + to.Path))
+	if subURL := strings.ToLower(hs.Cfg.AppSubURL); subURL != "" {
+		p = strings.TrimPrefix(p, subURL)
+	}
+
+	return p == "/logout" || strings.HasPrefix(p, "/logout/") ||
+		p == "/profile/switch-org" || strings.HasPrefix(p, "/profile/switch-org/")
 }
 
 // swagger:route POST /user/auth-tokens/rotate

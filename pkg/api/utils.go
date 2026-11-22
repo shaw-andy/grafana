@@ -27,6 +27,15 @@ func (hs *HTTPServer) GetRedirectURL(c *contextmodel.ReqContext) string {
 	return redirectURL
 }
 
+// isFetchFromBrowser reports whether a browser marked the request as a fetch, XHR or subresource load
+// rather than a navigation. GET routes that end or switch the session must refuse these, because any
+// same-origin script or URL the frontend loads would otherwise trigger them with the session cookie.
+// Requests without Fetch Metadata (non-browser clients) are not affected.
+func isFetchFromBrowser(r *http.Request) bool {
+	mode := r.Header.Get("Sec-Fetch-Mode")
+	return mode != "" && mode != "navigate"
+}
+
 func (hs *HTTPServer) errOnExternalUser(ctx context.Context, userID int64) response.Response {
 	isExternal, err := hs.isExternalUser(ctx, userID)
 	if err != nil {

@@ -340,6 +340,10 @@ export function isDataSourceManagingAlerts(ds: DataSourceInstanceSettings<DataSo
   return ds.jsonData.manageAlerts ?? config.defaultDatasourceManageAlertsUiToggle;
 }
 
+export function getDataSourceProxyUrl(dataSourceUid: string) {
+  return `/api/datasources/proxy/uid/${encodeURIComponent(dataSourceUid)}`;
+}
+
 export function isDataSourceAllowedAsRecordingRulesTarget(ds: DataSourceInstanceSettings<DataSourceJsonData>) {
   return ds.jsonData.allowAsRecordingRulesTarget !== false; // if this prop is undefined it defaults to true
 }

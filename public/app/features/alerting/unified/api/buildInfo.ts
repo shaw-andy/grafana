@@ -14,6 +14,7 @@ import {
   SUPPORTED_EXTERNAL_RULE_SOURCE_TYPES,
   type SupportedExternalRulesSourceType,
   getDataSourceByName,
+  getDataSourceProxyUrl,
   getRulesDataSourceByUID,
   isSupportedExternalRulesSourceType,
 } from '../utils/datasource';
@@ -47,7 +48,7 @@ export async function discoverFeaturesByUid(dataSourceUid: string): Promise<Prom
     );
   }
 
-  return discoverDataSourceFeatures({ name, url, type });
+  return discoverDataSourceFeatures({ uid: dsConfig.uid, name, type });
 }
 
 /**
@@ -59,16 +60,16 @@ export async function discoverFeaturesByUid(dataSourceUid: string): Promise<Prom
  * Mimir reports which "features" are enabled or available via the buildinfo endpoint, Prometheus does not.
  */
 export async function discoverDataSourceFeatures(dsSettings: {
-  url: string;
+  uid: string;
   name: string;
   type: SupportedExternalRulesSourceType;
 }): Promise<PromApiFeatures> {
-  const { url, name, type } = dsSettings;
+  const { uid, name, type } = dsSettings;
 
   // The current implementation of Loki's build info endpoint is useless
   // because it doesn't provide information about Loki's available features (e.g. Ruler API)
   // It's better to skip fetching it for Loki and go the Cortex path (manual discovery)
-  const buildInfoResponse = type === 'loki' ? undefined : await fetchPromBuildInfo(url);
+  const buildInfoResponse = type === 'loki' ? undefined : await fetchPromBuildInfo(uid);
 
   // check if the component returns buildinfo
   const hasBuildInfo = buildInfoResponse !== undefined;
@@ -134,12 +135,12 @@ export async function discoverAlertmanagerFeatures(amSourceName: string): Promis
     );
   }
 
-  return await discoverAlertmanagerFeaturesByUrl(url);
+  return await discoverAlertmanagerFeaturesByUid(dsConfig.uid);
 }
 
-export async function discoverAlertmanagerFeaturesByUrl(url: string): Promise<AlertmanagerApiFeatures> {
+export async function discoverAlertmanagerFeaturesByUid(dataSourceUid: string): Promise<AlertmanagerApiFeatures> {
   try {
-    const buildInfo = await fetchPromBuildInfo(url);
+    const buildInfo = await fetchPromBuildInfo(dataSourceUid);
     return { lazyConfigInit: buildInfo?.data?.application === 'Grafana Mimir' };
   } catch (e) {
     // If we cannot access the build info then we assume the lazy config is not available
@@ -155,10 +156,13 @@ function getDataSourceConfig(amSourceName: string) {
   return dsConfig;
 }
 
-export async function fetchPromBuildInfo(url: string): Promise<PromBuildInfoResponse | undefined> {
+// The stored data source URL is never used here: for browser-access data sources it is an arbitrary
+// admin-provided value that the browser would request with the user's session cookie.
+export async function fetchPromBuildInfo(dataSourceUid: string): Promise<PromBuildInfoResponse | undefined> {
   const response = await lastValueFrom(
     getBackendSrv().fetch<PromBuildInfoResponse>({
-      url: `${url}/api/v1/status/buildinfo`,
+      url: `${getDataSourceProxyUrl(dataSourceUid)}/api/v1/status/buildinfo`,
+      redirect: 'manual',
       showErrorAlert: false,
       showSuccessAlert: false,
     })

@@ -17,6 +17,7 @@ export const parseInitFromOptions = (options: BackendSrvRequest): RequestInit =>
     body,
     credentials,
     signal: options.abortSignal,
+    ...(options.redirect && { redirect: options.redirect }),
   };
 };
 
