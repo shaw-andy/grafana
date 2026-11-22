@@ -17,9 +17,10 @@ import (
 )
 
 var (
-	errInvalidOrg  = errutil.Unauthorized("anonymous.invalid-org")
-	errInvalidID   = errutil.Unauthorized("anonymous.invalid-id")
-	errDeviceLimit = errutil.Unauthorized("anonymous.device-limit-reached", errutil.WithPublicMessage("Anonymous device limit reached. Contact Administrator"))
+	errInvalidOrg    = errutil.Unauthorized("anonymous.invalid-org")
+	errInvalidID     = errutil.Unauthorized("anonymous.invalid-id")
+	errDeviceLimit   = errutil.Unauthorized("anonymous.device-limit-reached", errutil.WithPublicMessage("Anonymous device limit reached. Contact Administrator"))
+	errDeviceTagging = errutil.Unauthorized("anonymous.device-tagging-failed", errutil.WithPublicMessage("Anonymous device could not be registered. Try again later"))
 )
 
 var (
@@ -55,6 +56,11 @@ func (a *Anonymous) Authenticate(ctx context.Context, r *authn.Request) (*authn.
 	if err := a.anonDeviceService.TagDevice(ctx, httpReqCopy, anonymous.AnonDeviceUI); err != nil {
 		if errors.Is(err, anonstore.ErrDeviceLimitReached) {
 			return nil, errDeviceLimit.Errorf("limit reached for anonymous devices: %w", err)
+		}
+
+		// With a device limit, a device that could not be stored was not counted against it.
+		if a.cfg.Anonymous.DeviceLimit > 0 {
+			return nil, errDeviceTagging.Errorf("failed to tag anonymous device: %w", err)
 		}
 
 		a.log.Warn("Failed to tag anonymous session", "error", err)
