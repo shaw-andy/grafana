@@ -2,6 +2,7 @@ package anonstore
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -17,7 +18,12 @@ const cacheKeyPrefix = "anon-device"
 const anonymousDeviceExpiration = 30 * 24 * time.Hour
 const tableName = "anon_device"
 
+// GET_LOCK names are server wide on MySQL, so the name is namespaced to Grafana.
+const deviceLimitLockName = "grafana_anon_device_limit"
+const deviceLimitLockTimeoutSeconds = 10
+
 var ErrDeviceLimitReached = fmt.Errorf("device limit reached")
+var errDeviceLimitLock = fmt.Errorf("could not acquire anonymous device limit lock")
 
 type AnonDBStore struct {
 	sqlStore    db.DB
@@ -98,53 +104,33 @@ func (s *AnonDBStore) ListDevices(ctx context.Context, from *time.Time, to *time
 }
 
 // updateDevice updates a device if it exists and has been updated between the given times.
-func (s *AnonDBStore) updateDevice(ctx context.Context, device *Device) error {
+func updateDevice(dbSession *sqlstore.DBSession, device *Device) error {
 	const query = `UPDATE anon_device SET
 client_ip = ?,
 user_agent = ?,
 updated_at = ?
 WHERE device_id = ? AND updated_at BETWEEN ? AND ?`
 
-	args := []interface{}{device.ClientIP, device.UserAgent, device.UpdatedAt.UTC(), device.DeviceID,
+	result, err := dbSession.Exec(query, device.ClientIP, device.UserAgent, device.UpdatedAt.UTC(), device.DeviceID,
 		device.UpdatedAt.UTC().Add(-anonymousDeviceExpiration), device.UpdatedAt.UTC().Add(time.Minute),
+	)
+	if err != nil {
+		return err
 	}
-	err := s.sqlStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
-		args = append([]interface{}{query}, args...)
-		result, err := dbSession.Exec(args...)
-		if err != nil {
-			return err
-		}
 
-		rowsAffected, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
 
-		if rowsAffected == 0 {
-			return ErrDeviceLimitReached
-		}
+	if rowsAffected == 0 {
+		return ErrDeviceLimitReached
+	}
 
-		return nil
-	})
-
-	return err
+	return nil
 }
 
 func (s *AnonDBStore) CreateOrUpdateDevice(ctx context.Context, device *Device) error {
-	var query string
-
-	// if device limit is reached, only update devices
-	if s.deviceLimit > 0 {
-		count, err := s.CountDevices(ctx, time.Now().UTC().Add(-anonymousDeviceExpiration), time.Now().UTC().Add(time.Minute))
-		if err != nil {
-			return err
-		}
-
-		if count >= s.deviceLimit {
-			return s.updateDevice(ctx, device)
-		}
-	}
-
 	// If CreatedAt time is not set (i.e. it's zero), and we end up creating the device, use current time as creation time.
 	// If database converts zero time to NULL, but CreatedAt is not nullable, this helps to fix that problem too.
 	created := device.CreatedAt
@@ -152,7 +138,96 @@ func (s *AnonDBStore) CreateOrUpdateDevice(ctx context.Context, device *Device) 
 		created = time.Now()
 	}
 
-	args := []any{device.DeviceID, device.ClientIP, device.UserAgent, created.UTC(), device.UpdatedAt.UTC()}
+	query, err := s.upsertDeviceQuery()
+	if err != nil {
+		return err
+	}
+	args := []any{query, device.DeviceID, device.ClientIP, device.UserAgent, created.UTC(), device.UpdatedAt.UTC()}
+
+	if s.deviceLimit <= 0 {
+		return s.sqlStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
+			_, err := dbSession.Exec(args...)
+			return err
+		})
+	}
+
+	// The count and the write must be serialized across all callers (and Grafana instances);
+	// otherwise concurrent callers each see a count below the limit and all insert.
+	return s.sqlStore.WithTransactionalDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
+		unlock, err := s.lockDeviceLimit(ctx, dbSession)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+
+		now := time.Now().UTC()
+		count, err := s.countDevicesForLimit(dbSession, now.Add(-anonymousDeviceExpiration), now.Add(time.Minute))
+		if err != nil {
+			return err
+		}
+
+		// if device limit is reached, only update devices
+		if count >= s.deviceLimit {
+			return updateDevice(dbSession, device)
+		}
+
+		_, err = dbSession.Exec(args...)
+		return err
+	})
+}
+
+// lockDeviceLimit takes a lock that serializes device-limit checks until the
+// returned function is called or, where the lock is transaction scoped, until
+// the transaction ends.
+func (s *AnonDBStore) lockDeviceLimit(ctx context.Context, dbSession *sqlstore.DBSession) (func(), error) {
+	switch s.sqlStore.GetDBType() {
+	case migrator.Postgres:
+		// Self-conflicting and also conflicts with any other INSERT/UPDATE/DELETE on the table.
+		// Must run before any query in the transaction so that REPEATABLE READ/SERIALIZABLE
+		// snapshots are taken after the lock is held.
+		if _, err := dbSession.Exec("LOCK TABLE anon_device IN SHARE ROW EXCLUSIVE MODE"); err != nil {
+			return nil, err
+		}
+		return func() {}, nil
+	case migrator.MySQL:
+		// GET_LOCK is session scoped and must be released before the pooled connection is
+		// returned, so it is released before commit. countDevicesForLimit uses a locking read
+		// on MySQL, which waits for the previous holder's uncommitted insert to commit.
+		var acquired sql.NullInt64
+		if _, err := dbSession.SQL("SELECT GET_LOCK(?, ?)", deviceLimitLockName, deviceLimitLockTimeoutSeconds).Get(&acquired); err != nil {
+			return nil, err
+		}
+		if !acquired.Valid || acquired.Int64 != 1 {
+			return nil, errDeviceLimitLock
+		}
+		return func() {
+			var released sql.NullInt64
+			if _, err := dbSession.SQL("SELECT RELEASE_LOCK(?)", deviceLimitLockName).Get(&released); err != nil {
+				s.log.FromContext(ctx).Error("Failed to release anonymous device limit lock", "error", err)
+			}
+		}, nil
+	case migrator.SQLite:
+		// SQLite allows a single writer and fails the write of a transaction whose reads
+		// are stale (SQLITE_BUSY), which makes the transaction retry with a fresh count.
+		return func() {}, nil
+	default:
+		return nil, fmt.Errorf("unsupported database driver: %s", s.sqlStore.GetDBType())
+	}
+}
+
+func (s *AnonDBStore) countDevicesForLimit(dbSession *sqlstore.DBSession, from time.Time, to time.Time) (int64, error) {
+	query := "SELECT COUNT(*) FROM anon_device WHERE updated_at BETWEEN ? AND ?"
+	if s.sqlStore.GetDBType() == migrator.MySQL {
+		query += " FOR UPDATE"
+	}
+
+	var count int64
+	_, err := dbSession.SQL(query, from.UTC(), to.UTC()).Get(&count)
+	return count, err
+}
+
+func (s *AnonDBStore) upsertDeviceQuery() (string, error) {
+	var query string
 	switch s.sqlStore.GetDBType() {
 	case migrator.Postgres:
 		query = `INSERT INTO anon_device (device_id, client_ip, user_agent, created_at, updated_at)
@@ -177,16 +252,9 @@ func (s *AnonDBStore) CreateOrUpdateDevice(ctx context.Context, device *Device) 
 					user_agent = excluded.user_agent,
 					updated_at = excluded.updated_at`
 	default:
-		return fmt.Errorf("unsupported database driver: %s", s.sqlStore.GetDBType())
+		return "", fmt.Errorf("unsupported database driver: %s", s.sqlStore.GetDBType())
 	}
-
-	err := s.sqlStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
-		args = append([]any{query}, args...)
-		_, err := dbSession.Exec(args...)
-		return err
-	})
-
-	return err
+	return query, nil
 }
 
 func (s *AnonDBStore) CountDevices(ctx context.Context, from time.Time, to time.Time) (int64, error) {

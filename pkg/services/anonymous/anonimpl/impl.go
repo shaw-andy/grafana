@@ -99,22 +99,20 @@ func (a *AnonDeviceService) tagDeviceUI(ctx context.Context, device *anonstore.D
 		return nil
 	}
 
-	a.localCache.SetDefault(key, true)
-
 	if a.cfg.Env == setting.Dev {
 		a.log.Debug("Tagging device for UI", "deviceID", device.DeviceID, "device", device, "key", key)
 	}
 
+	// The device is only cached as admitted once the store has accepted it, so concurrent
+	// requests for a device that is about to be rejected cannot pass on the cache.
 	if err := a.anonStore.CreateOrUpdateDevice(ctx, device); err != nil {
 		if errors.Is(err, anonstore.ErrDeviceLimitReached) {
 			a.localCache.SetDefault(key, false)
-			return err
 		}
-		// invalidate cache if there is an error
-		a.localCache.Delete(key)
 		return err
 	}
 
+	a.localCache.SetDefault(key, true)
 	return nil
 }
 
@@ -128,6 +126,7 @@ func (a *AnonDeviceService) untagDevice(ctx context.Context, _ *authn.Identity, 
 		return
 	}
 
+	a.localCache.Delete((&anonstore.Device{DeviceID: deviceID}).CacheKey())
 	errD := a.anonStore.DeleteDevice(ctx, deviceID)
 	if errD != nil {
 		a.log.Debug("Failed to untag device", "error", errD)
