@@ -3,7 +3,6 @@ package meta
 import (
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"path"
@@ -287,7 +286,7 @@ func jsonDataToMetaJSONData(jsonData plugins.JSONData) pluginsv0alpha1.MetaJSOND
 		}
 	}
 
-	// Map Routes
+	// Map Routes. See redactMetaRoutes for why only the route's shape is kept.
 	if len(jsonData.Routes) > 0 {
 		meta.Routes = make([]pluginsv0alpha1.MetaRoute, 0, len(jsonData.Routes))
 		for _, route := range jsonData.Routes {
@@ -298,9 +297,6 @@ func jsonDataToMetaJSONData(jsonData plugins.JSONData) pluginsv0alpha1.MetaJSOND
 			if route.Method != "" {
 				v0Route.Method = &route.Method
 			}
-			if route.URL != "" {
-				v0Route.Url = &route.URL
-			}
 			if route.ReqRole != "" {
 				reqRole := string(route.ReqRole)
 				v0Route.ReqRole = &reqRole
@@ -309,14 +305,10 @@ func jsonDataToMetaJSONData(jsonData plugins.JSONData) pluginsv0alpha1.MetaJSOND
 				v0Route.ReqAction = &route.ReqAction
 			}
 			if len(route.Headers) > 0 {
-				headers := make([]pluginsv0alpha1.MetaV0alpha1RouteHeaders, 0, len(route.Headers))
+				v0Route.Headers = make([]pluginsv0alpha1.MetaV0alpha1RouteHeaders, 0, len(route.Headers))
 				for _, header := range route.Headers {
-					headers = append(headers, pluginsv0alpha1.MetaV0alpha1RouteHeaders{
-						Name:    header.Name,
-						Content: header.Content,
-					})
+					v0Route.Headers = append(v0Route.Headers, pluginsv0alpha1.MetaV0alpha1RouteHeaders{Name: header.Name})
 				}
-				v0Route.Headers = headers
 			}
 			if len(route.URLParams) > 0 {
 				v0Route.UrlParams = make([]pluginsv0alpha1.MetaV0alpha1RouteUrlParams, 0, len(route.URLParams))
@@ -325,64 +317,14 @@ func jsonDataToMetaJSONData(jsonData plugins.JSONData) pluginsv0alpha1.MetaJSOND
 					if param.Name != "" {
 						v0Param.Name = &param.Name
 					}
-					if param.Content != "" {
-						v0Param.Content = &param.Content
-					}
 					v0Route.UrlParams = append(v0Route.UrlParams, v0Param)
 				}
 			}
 			if route.TokenAuth != nil {
-				v0Route.TokenAuth = &pluginsv0alpha1.MetaV0alpha1RouteTokenAuth{}
-				if route.TokenAuth.Url != "" {
-					v0Route.TokenAuth.Url = &route.TokenAuth.Url
-				}
-				if len(route.TokenAuth.Scopes) > 0 {
-					v0Route.TokenAuth.Scopes = route.TokenAuth.Scopes
-				}
-				if len(route.TokenAuth.Params) > 0 {
-					params := &pluginsv0alpha1.MetaV0alpha1RouteTokenAuthParams{}
-					if grantType, ok := route.TokenAuth.Params["grant_type"]; ok {
-						params.GrantType = &grantType
-					}
-					if clientId, ok := route.TokenAuth.Params["client_id"]; ok {
-						params.ClientId = &clientId
-					}
-					if clientSecret, ok := route.TokenAuth.Params["client_secret"]; ok {
-						params.ClientSecret = &clientSecret
-					}
-					if resource, ok := route.TokenAuth.Params["resource"]; ok {
-						params.Resource = &resource
-					}
-					v0Route.TokenAuth.Params = params
-				}
+				v0Route.TokenAuth = &pluginsv0alpha1.MetaV0alpha1RouteTokenAuth{Scopes: route.TokenAuth.Scopes}
 			}
 			if route.JwtTokenAuth != nil {
-				v0Route.JwtTokenAuth = &pluginsv0alpha1.MetaV0alpha1RouteJwtTokenAuth{}
-				if route.JwtTokenAuth.Url != "" {
-					v0Route.JwtTokenAuth.Url = &route.JwtTokenAuth.Url
-				}
-				if len(route.JwtTokenAuth.Scopes) > 0 {
-					v0Route.JwtTokenAuth.Scopes = route.JwtTokenAuth.Scopes
-				}
-				if len(route.JwtTokenAuth.Params) > 0 {
-					params := &pluginsv0alpha1.MetaV0alpha1RouteJwtTokenAuthParams{}
-					if tokenUri, ok := route.JwtTokenAuth.Params["token_uri"]; ok {
-						params.TokenUri = &tokenUri
-					}
-					if clientEmail, ok := route.JwtTokenAuth.Params["client_email"]; ok {
-						params.ClientEmail = &clientEmail
-					}
-					if privateKey, ok := route.JwtTokenAuth.Params["private_key"]; ok {
-						params.PrivateKey = &privateKey
-					}
-					v0Route.JwtTokenAuth.Params = params
-				}
-			}
-			if len(route.Body) > 0 {
-				var bodyMap map[string]interface{}
-				if err := json.Unmarshal(route.Body, &bodyMap); err == nil {
-					v0Route.Body = bodyMap
-				}
+				v0Route.JwtTokenAuth = &pluginsv0alpha1.MetaV0alpha1RouteJwtTokenAuth{Scopes: route.JwtTokenAuth.Scopes}
 			}
 			meta.Routes = append(meta.Routes, v0Route)
 		}
@@ -793,6 +735,46 @@ func grafanaComChildPluginVersionToMetaSpec(logger logging.Logger, child grafana
 	return grafanaComPluginVersionMetaToMetaSpec(logger, childMeta, child.Path)
 }
 
+// redactMetaRoutes keeps only the shape of each route. Route header and URL
+// parameter values, bodies, token auth params and URLs can hold the credentials
+// Grafana uses to call the plugin's upstream API, and plugin metadata is readable
+// by every signed-in user.
+func redactMetaRoutes(routes []pluginsv0alpha1.MetaRoute) []pluginsv0alpha1.MetaRoute {
+	if len(routes) == 0 {
+		return nil
+	}
+	redacted := make([]pluginsv0alpha1.MetaRoute, 0, len(routes))
+	for _, route := range routes {
+		r := pluginsv0alpha1.MetaRoute{
+			Path:        route.Path,
+			Method:      route.Method,
+			ReqSignedIn: route.ReqSignedIn,
+			ReqRole:     route.ReqRole,
+			ReqAction:   route.ReqAction,
+		}
+		if len(route.Headers) > 0 {
+			r.Headers = make([]pluginsv0alpha1.MetaV0alpha1RouteHeaders, 0, len(route.Headers))
+			for _, header := range route.Headers {
+				r.Headers = append(r.Headers, pluginsv0alpha1.MetaV0alpha1RouteHeaders{Name: header.Name})
+			}
+		}
+		if len(route.UrlParams) > 0 {
+			r.UrlParams = make([]pluginsv0alpha1.MetaV0alpha1RouteUrlParams, 0, len(route.UrlParams))
+			for _, param := range route.UrlParams {
+				r.UrlParams = append(r.UrlParams, pluginsv0alpha1.MetaV0alpha1RouteUrlParams{Name: param.Name})
+			}
+		}
+		if route.TokenAuth != nil {
+			r.TokenAuth = &pluginsv0alpha1.MetaV0alpha1RouteTokenAuth{Scopes: route.TokenAuth.Scopes}
+		}
+		if route.JwtTokenAuth != nil {
+			r.JwtTokenAuth = &pluginsv0alpha1.MetaV0alpha1RouteJwtTokenAuth{Scopes: route.JwtTokenAuth.Scopes}
+		}
+		redacted = append(redacted, r)
+	}
+	return redacted
+}
+
 // placeholderVersion and placeholderUpdated are the unsubstituted plugin.json
 // placeholders that the build system leaves in place for nested plugins.
 // We need to blank them out so that downstream version handling
@@ -827,6 +809,7 @@ func grafanaComPluginVersionMetaToMetaSpec(logger logging.Logger, gcomMeta grafa
 		PluginJson: gcomMeta.JSON.MetaJSONData,
 		Class:      pluginsv0alpha1.MetaSpecClassExternal,
 	}
+	metaSpec.PluginJson.Routes = redactMetaRoutes(metaSpec.PluginJson.Routes)
 
 	// This path uses the embedded plugin.json verbatim, so normalise the version/updated
 	// placeholders here (jsonDataToMetaJSONData handles the other provider paths).
