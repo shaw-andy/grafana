@@ -225,6 +225,11 @@ function distortInnerHTML(distortions: DistortionMap) {
     Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML'),
     Object.getOwnPropertyDescriptor(Element.prototype, 'outerHTML'),
     Object.getOwnPropertyDescriptor(Element.prototype, 'insertAdjacentHTML'),
+    Object.getOwnPropertyDescriptor(Element.prototype, 'setHTMLUnsafe'),
+    globalThis.ShadowRoot && Object.getOwnPropertyDescriptor(ShadowRoot.prototype, 'innerHTML'),
+    globalThis.ShadowRoot && Object.getOwnPropertyDescriptor(ShadowRoot.prototype, 'setHTMLUnsafe'),
+    Object.getOwnPropertyDescriptor(Document, 'parseHTMLUnsafe'),
+    Object.getOwnPropertyDescriptor(Document.prototype, 'execCommand'),
     Object.getOwnPropertyDescriptor(DOMParser.prototype, 'parseFromString'),
   ];
 
@@ -236,169 +241,322 @@ function distortInnerHTML(distortions: DistortionMap) {
       distortions.set(descriptor.value, getInnerHTMLDistortion);
     }
   }
+
+  // unlike innerHTML, scripts in a contextual fragment run once the fragment is connected
+  function getCreateContextualFragmentDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
+    const createContextualFragment = getInnerHTMLDistortion(originalMethod, meta);
+    return function createContextualFragmentDistortion(this: HTMLElement, ...args: string[]) {
+      const fragment = createContextualFragment.apply(this, args);
+      removeScriptElements(fragment);
+      return fragment;
+    };
+  }
+  const contextualFragmentDescriptor = globalThis.Range
+    ? Object.getOwnPropertyDescriptor(Range.prototype, 'createContextualFragment')
+    : undefined;
+  if (contextualFragmentDescriptor?.value) {
+    distortions.set(contextualFragmentDescriptor.value, getCreateContextualFragmentDistortion);
+  }
+}
+
+const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+
+/**
+ * Creates a script element that never runs, wherever it is inserted later.
+ *
+ * Connecting a script with source text to a document without a browsing context marks it as
+ * "already started" without running it. That flag is kept when the script is adopted, modified or
+ * cloned, so DOM APIs called outside of the sandbox (e.g. by libraries plugins pass the element to)
+ * cannot run it in the page either.
+ */
+function createInertScriptElement(ownerDocument: unknown, namespace: string): Element {
+  const inertDocument = document.implementation.createHTMLDocument('');
+  const script =
+    namespace === SVG_NAMESPACE
+      ? inertDocument.createElementNS(SVG_NAMESPACE, 'script')
+      : inertDocument.createElement('script');
+  script.appendChild(inertDocument.createTextNode(' '));
+  inertDocument.body.appendChild(script);
+  script.remove();
+  script.textContent = '';
+  const targetDocument = ownerDocument instanceof Document ? ownerDocument : document;
+  return targetDocument.adoptNode(script);
+}
+
+function logForbiddenElementCreation(name: string, method: string, meta: SandboxPluginMeta) {
+  logWarning(`Plugin ${meta.id} tried to create ${name}`, {
+    pluginId: meta.id,
+    attrOrMethod: method,
+    param: name,
+    entity: 'document',
+  });
 }
 
 function distortCreateElement(distortions: DistortionMap) {
   function getCreateElementDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
-    const pluginId = meta.id;
-    return function createElementDistortion(this: HTMLElement, arg?: string, options?: unknown) {
-      if (arg && forbiddenElements.includes(arg)) {
-        logWarning(`Plugin ${pluginId} tried to create ${arg}`, {
-          pluginId,
-          attrOrMethod: 'createElement',
-          param: arg,
-          entity: 'document',
-        });
+    return function createElementDistortion(this: Document, arg?: string, options?: unknown) {
+      const tagName = String(arg);
+      const name = tagName.toLowerCase();
+      if (forbiddenElements.includes(name)) {
+        logForbiddenElementCreation(name, 'createElement', meta);
         return document.createDocumentFragment();
       }
+      if (name === 'script') {
+        return createInertScriptElement(this, HTML_NAMESPACE);
+      }
       if (isFunction(originalMethod)) {
-        return originalMethod.apply(this, [arg, options]);
+        return originalMethod.apply(this, [tagName, options]);
       }
     };
   }
+
+  function getCreateElementNSDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
+    return function createElementNSDistortion(
+      this: Document,
+      namespaceArg?: string | null,
+      qualifiedNameArg?: string,
+      options?: unknown
+    ) {
+      // arguments are converted once so the checked values are the ones passed to the native method
+      const namespace = namespaceArg === null || namespaceArg === undefined ? null : String(namespaceArg);
+      const qualifiedName = String(qualifiedNameArg);
+      const name = qualifiedName.slice(qualifiedName.indexOf(':') + 1).toLowerCase();
+      if (forbiddenElements.includes(name)) {
+        logForbiddenElementCreation(name, 'createElementNS', meta);
+        return document.createDocumentFragment();
+      }
+      if (name === 'script' && (namespace === HTML_NAMESPACE || namespace === SVG_NAMESPACE)) {
+        return createInertScriptElement(this, namespace);
+      }
+      if (isFunction(originalMethod)) {
+        return originalMethod.apply(this, [namespace, qualifiedName, options]);
+      }
+    };
+  }
+
   const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'createElement');
   if (descriptor?.value) {
     distortions.set(descriptor.value, getCreateElementDistortion);
   }
+  const descriptorNS = Object.getOwnPropertyDescriptor(Document.prototype, 'createElementNS');
+  if (descriptorNS?.value) {
+    distortions.set(descriptorNS.value, getCreateElementNSDistortion);
+  }
 }
 
+// Native getters are captured once so plugin code cannot influence the subtree walk below
+// by shadowing DOM properties on the nodes it passes in.
+function getNativeGetter(proto: object | undefined, property: string) {
+  return proto ? Object.getOwnPropertyDescriptor(proto, property)?.get : undefined;
+}
+const nativeNodeType = getNativeGetter(Node.prototype, 'nodeType');
+const nativeFirstChild = getNativeGetter(Node.prototype, 'firstChild');
+const nativeNextSibling = getNativeGetter(Node.prototype, 'nextSibling');
+const nativeLocalName = getNativeGetter(Element.prototype, 'localName');
+const nativeShadowRoot = getNativeGetter(Element.prototype, 'shadowRoot');
+const nativeTemplateContent = getNativeGetter(globalThis.HTMLTemplateElement?.prototype, 'content');
+const nativeRemove = Element.prototype.remove;
+
+function callNativeGetter(getter: (() => unknown) | undefined, target: unknown): unknown {
+  return getter ? Reflect.apply(getter, target, []) : undefined;
+}
+
+function getNodeType(value: unknown): number | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+  try {
+    const nodeType = callNativeGetter(nativeNodeType, value);
+    return typeof nodeType === 'number' ? nodeType : undefined;
+  } catch (e) {
+    // not a DOM node, native insertion methods convert it to a text node
+    return undefined;
+  }
+}
+
+function isElementNode(value: unknown): value is Element {
+  return getNodeType(value) === Node.ELEMENT_NODE;
+}
+
+/**
+ * Calls visit for every element in the node, its descendants, open shadow roots and template contents
+ * until visit returns true. Scripts can run in the page from any of those places once the node
+ * is connected, so the whole tree has to be checked and not only the node itself.
+ */
+function walkElements(node: unknown, visit: (element: Element, name: string) => boolean | void) {
+  if (getNodeType(node) === undefined) {
+    return;
+  }
+  const pending: unknown[] = [node];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (isElementNode(current)) {
+      const element = current;
+      const name = String(callNativeGetter(nativeLocalName, element)).toLowerCase();
+      if (visit(element, name)) {
+        return;
+      }
+      const shadowRoot = callNativeGetter(nativeShadowRoot, element);
+      if (shadowRoot) {
+        pending.push(shadowRoot);
+      }
+      if (name === 'template') {
+        try {
+          pending.push(callNativeGetter(nativeTemplateContent, element));
+        } catch (e) {
+          // not an HTML template element
+        }
+      }
+    }
+    let child = callNativeGetter(nativeFirstChild, current);
+    while (child) {
+      pending.push(child);
+      child = callNativeGetter(nativeNextSibling, child);
+    }
+  }
+}
+
+function findForbiddenElement(node: unknown): string | undefined {
+  let forbiddenElement: string | undefined;
+  walkElements(node, (_element, name) => {
+    if (name === 'script' || forbiddenElements.includes(name)) {
+      forbiddenElement = name;
+      return true;
+    }
+    return false;
+  });
+  return forbiddenElement;
+}
+
+function removeScriptElements(node: unknown) {
+  const scripts: Element[] = [];
+  walkElements(node, (element, name) => {
+    if (name === 'script') {
+      scripts.push(element);
+    }
+  });
+  for (const script of scripts) {
+    Reflect.apply(nativeRemove, script, []);
+  }
+}
+
+// Scripts are never handed to the native DOM method. Their src is evaluated inside the sandbox
+// instead, which is how webpack chunks of sandboxed plugins get loaded.
+// loadScriptIntoSandbox has restrictions on what scripts can be loaded
+function loadScriptElementIntoSandbox(script: HTMLScriptElement, sandboxEnv: SandboxEnvironment) {
+  loadScriptIntoSandbox(script.src, sandboxEnv)
+    .then(() => {
+      script.onload?.call(script, new Event('load'));
+    })
+    .catch((err) => {
+      script.onerror?.call(script, new ErrorEvent('error', { error: err }));
+    });
+}
+
+/**
+ * Returns true when the node can be passed to a native DOM insertion method.
+ * Otherwise the node is refused and, if it is a script element, loaded into the sandbox.
+ */
+function isAllowedToInsert(
+  node: unknown,
+  method: string,
+  meta: SandboxPluginMeta,
+  sandboxEnv?: SandboxEnvironment
+): boolean {
+  const forbiddenElement = findForbiddenElement(node);
+  if (forbiddenElement === undefined) {
+    return true;
+  }
+
+  if (node instanceof HTMLScriptElement && sandboxEnv) {
+    loadScriptElementIntoSandbox(node, sandboxEnv);
+    return false;
+  }
+
+  logWarning(`Plugin ${meta.id} tried to insert ${forbiddenElement}`, {
+    pluginId: meta.id,
+    attrOrMethod: method,
+    param: forbiddenElement,
+    entity: 'HTMLElement',
+  });
+  return false;
+}
+
+// set distortions for every DOM API that inserts a single node into a tree
 function distortInsert(distortions: DistortionMap) {
-  function getInsertDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
-    const pluginId = meta.id;
-    return function insertChildDistortion(this: HTMLElement, node?: Node, ref?: Node) {
-      const nodeType = node?.nodeName?.toLowerCase() || '';
-
-      if (node && forbiddenElements.includes(nodeType)) {
-        logWarning(`Plugin ${pluginId} tried to insert ${nodeType}`, {
-          pluginId,
-          attrOrMethod: 'insertChild',
-          param: nodeType,
-          entity: 'HTMLElement',
-        });
-        return document.createDocumentFragment();
-      }
-      if (isFunction(originalMethod)) {
-        return originalMethod.call(this, node, ref);
-      }
+  function getSingleNodeInsertDistortion(method: string, nodeArgIndex: number) {
+    return function (originalMethod: unknown, meta: SandboxPluginMeta, sandboxEnv?: SandboxEnvironment) {
+      return function insertNodeDistortion(this: unknown, ...args: unknown[]) {
+        if (!isAllowedToInsert(args[nodeArgIndex], method, meta, sandboxEnv)) {
+          return method === 'appendChild' ? undefined : document.createDocumentFragment();
+        }
+        if (isFunction(originalMethod)) {
+          return originalMethod.apply(this, args);
+        }
+      };
     };
   }
 
-  function getinsertAdjacentElementDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
-    const pluginId = meta.id;
-    return function insertAdjacentElementDistortion(this: HTMLElement, position?: string, node?: Node) {
-      const nodeType = node?.nodeName?.toLowerCase() || '';
-      if (node && forbiddenElements.includes(nodeType)) {
-        logWarning(`Plugin ${pluginId} tried to insert ${nodeType}`, {
-          pluginId,
-          attrOrMethod: 'insertAdjacentElement',
-          param: nodeType,
-          entity: 'HTMLElement',
-        });
-
-        return document.createDocumentFragment();
-      }
-      if (isFunction(originalMethod)) {
-        return originalMethod.call(this, position, node);
-      }
-    };
-  }
-
-  const descriptors = [
-    Object.getOwnPropertyDescriptor(Node.prototype, 'insertBefore'),
-    Object.getOwnPropertyDescriptor(Node.prototype, 'replaceChild'),
+  const singleNodeMethods: Array<[object | undefined, string, number]> = [
+    [Node.prototype, 'appendChild', 0],
+    [Node.prototype, 'insertBefore', 0],
+    [Node.prototype, 'replaceChild', 0],
+    [Element.prototype, 'insertAdjacentElement', 1],
+    [Element.prototype, 'moveBefore', 0],
+    [Document.prototype, 'moveBefore', 0],
+    [DocumentFragment.prototype, 'moveBefore', 0],
+    [globalThis.Range?.prototype, 'insertNode', 0],
+    [globalThis.Range?.prototype, 'surroundContents', 0],
   ];
 
-  for (const descriptor of descriptors) {
+  for (const [proto, method, nodeArgIndex] of singleNodeMethods) {
+    const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, method) : undefined;
     if (descriptor?.value) {
-      distortions.set(descriptor.set, getInsertDistortion);
+      distortions.set(descriptor.value, getSingleNodeInsertDistortion(method, nodeArgIndex));
     }
-  }
-
-  const descriptorAdjacent = Object.getOwnPropertyDescriptor(Element.prototype, 'insertAdjacentElement');
-  if (descriptorAdjacent?.value) {
-    distortions.set(descriptorAdjacent.set, getinsertAdjacentElementDistortion);
   }
 }
 
-// set distortions to append elements to the document
+// set distortions for every DOM API that inserts a list of nodes into a tree
+// e.g. append https://developer.mozilla.org/en-US/docs/Web/API/Element/append
 function distortAppend(distortions: DistortionMap) {
-  // append accepts an array of nodes to append https://developer.mozilla.org/en-US/docs/Web/API/Node/append
-  function getAppendDistortion(originalMethod: unknown, meta: SandboxPluginMeta) {
-    const pluginId = meta.id;
-    return function appendDistortion(this: HTMLElement, ...args: Node[]) {
-      let acceptedNodes = args;
-      const filteredAcceptedNodes = args?.filter((node) => !forbiddenElements.includes(node.nodeName.toLowerCase()));
-      acceptedNodes = filteredAcceptedNodes;
+  const replacingMethods = ['replaceChildren', 'replaceWith'];
 
-      if (acceptedNodes.length !== filteredAcceptedNodes.length) {
-        logWarning(`Plugin ${pluginId} tried to append fobiddenElements`, {
-          pluginId,
-          attrOrMethod: 'append',
-          param: args?.filter((node) => forbiddenElements.includes(node.nodeName.toLowerCase()))?.join(',') || '',
-          entity: 'HTMLElement',
-        });
-      }
-
-      if (isFunction(originalMethod)) {
-        originalMethod.apply(this, acceptedNodes);
-      }
-      // https://developer.mozilla.org/en-US/docs/Web/API/Element/append#return_value
-      return undefined;
-    };
-  }
-
-  // appendChild accepts a single node to add https://developer.mozilla.org/en-US/docs/Web/API/Node/appendChild
-  function getAppendChildDistortion(originalMethod: unknown, meta: SandboxPluginMeta, sandboxEnv?: SandboxEnvironment) {
-    const pluginId = meta.id;
-    return function appendChildDistortion(this: HTMLElement, arg?: Node) {
-      const nodeType = arg?.nodeName?.toLowerCase() || '';
-      if (arg && forbiddenElements.includes(nodeType)) {
-        logWarning(`Plugin ${pluginId} tried to append ${nodeType}`, {
-          pluginId,
-          attrOrMethod: 'appendChild',
-          param: nodeType,
-          entity: 'HTMLElement',
-        });
-
-        return document.createDocumentFragment();
-      }
-      // if the node is a script, load it into the sandbox
-      // this allows webpack chunks to be loaded into the sandbox
-      // loadScriptIntoSandbox has restrictions on what scripts can be loaded
-      if (sandboxEnv && arg && nodeType === 'script' && arg instanceof HTMLScriptElement) {
-        loadScriptIntoSandbox(arg.src, sandboxEnv)
-          .then(() => {
-            arg.onload?.call(arg, new Event('load'));
-          })
-          .catch((err) => {
-            arg.onerror?.call(arg, new ErrorEvent('error', { error: err }));
-          });
+  function getMultipleNodesInsertDistortion(method: string) {
+    return function (originalMethod: unknown, meta: SandboxPluginMeta, sandboxEnv?: SandboxEnvironment) {
+      return function insertNodesDistortion(this: unknown, ...args: unknown[]) {
+        const acceptedNodes = args.filter((node) => isAllowedToInsert(node, method, meta, sandboxEnv));
+        // replacing with only part of the requested nodes would remove content the plugin never got to replace
+        if (acceptedNodes.length !== args.length && replacingMethods.includes(method)) {
+          return undefined;
+        }
+        if (isFunction(originalMethod)) {
+          originalMethod.apply(this, acceptedNodes);
+        }
+        // https://developer.mozilla.org/en-US/docs/Web/API/Element/append#return_value
         return undefined;
-      }
-      if (isFunction(originalMethod)) {
-        return originalMethod.call(this, arg);
-      }
+      };
     };
   }
 
-  const descriptors = [
-    Object.getOwnPropertyDescriptor(Element.prototype, 'append'),
-    Object.getOwnPropertyDescriptor(Element.prototype, 'prepend'),
-    Object.getOwnPropertyDescriptor(Element.prototype, 'after'),
-    Object.getOwnPropertyDescriptor(Element.prototype, 'before'),
-    Object.getOwnPropertyDescriptor(Document.prototype, 'append'),
-    Object.getOwnPropertyDescriptor(Document.prototype, 'prepend'),
+  const parentNodeMethods = ['append', 'prepend', 'replaceChildren'];
+  const childNodeMethods = ['before', 'after', 'replaceWith'];
+  const targets: Array<[object | undefined, string[]]> = [
+    [Element.prototype, [...parentNodeMethods, ...childNodeMethods]],
+    [Document.prototype, parentNodeMethods],
+    [DocumentFragment.prototype, parentNodeMethods],
+    [CharacterData.prototype, childNodeMethods],
+    [globalThis.DocumentType?.prototype, childNodeMethods],
   ];
 
-  for (const descriptor of descriptors) {
-    if (descriptor?.value) {
-      distortions.set(descriptor.value, getAppendDistortion);
+  for (const [proto, methods] of targets) {
+    for (const method of methods) {
+      const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, method) : undefined;
+      if (descriptor?.value) {
+        distortions.set(descriptor.value, getMultipleNodesInsertDistortion(method));
+      }
     }
-  }
-
-  const appendChildDescriptor = Object.getOwnPropertyDescriptor(Node.prototype, 'appendChild');
-  if (appendChildDescriptor?.value) {
-    distortions.set(appendChildDescriptor.value, getAppendChildDistortion);
   }
 }
 
@@ -436,7 +594,7 @@ function distortDocument(distortions: DistortionMap) {
     });
   }
 
-  const documentForbiddenMethods = ['write'];
+  const documentForbiddenMethods = ['write', 'writeln'];
   for (const method of documentForbiddenMethods) {
     const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, method);
     if (descriptor?.set) {
