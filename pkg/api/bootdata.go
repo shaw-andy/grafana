@@ -283,7 +283,7 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 		dsDTO.Preload = plugin.Preload
 		dsDTO.Module = plugin.Module
 		dsDTO.PluginMeta = &plugins.PluginMetaDTO{
-			JSONData:                  plugin.JSONData,
+			JSONData:                  pluginMetaJSONData(plugin.JSONData),
 			Signature:                 plugin.Signature,
 			Module:                    plugin.Module,
 			ModuleHash:                hs.pluginAssets.ModuleHash(c.Req.Context(), plugin),
@@ -366,7 +366,7 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 				Name:     ds.Name,
 				JSONData: make(map[string]any),
 				PluginMeta: &plugins.PluginMetaDTO{
-					JSONData:  ds.JSONData,
+					JSONData:  pluginMetaJSONData(ds.JSONData),
 					Signature: ds.Signature,
 					Module:    ds.Module,
 					// ModuleHash: hs.pluginAssets.ModuleHash(c.Req.Context(), ds),
@@ -384,6 +384,13 @@ func (hs *HTTPServer) getFSDataSources(c *contextmodel.ReqContext, availablePlug
 	}
 
 	return dataSources, nil
+}
+
+// pluginMetaJSONData omits plugin routes, which can hold the credentials Grafana
+// uses to call the plugin's upstream API. Boot data is sent to every signed-in user.
+func pluginMetaJSONData(jsonData plugins.JSONData) plugins.JSONData {
+	jsonData.Routes = nil
+	return jsonData
 }
 
 func (hs *HTTPServer) getFSPanels(c *contextmodel.ReqContext, availablePanels map[string]*availablePluginDTO) map[string]plugins.PanelDTO {
