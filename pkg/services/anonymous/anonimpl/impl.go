@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/grafana/grafana/pkg/api/routing"
 	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/infra/localcache"
@@ -35,6 +37,7 @@ type AnonDeviceService struct {
 	serverLock     *serverlock.ServerLockService
 	cfg            *setting.Cfg
 	limitValidator validator.AnonUserLimitValidator
+	tagGroup       singleflight.Group
 }
 
 func ProvideAnonymousDeviceService(usageStats usagestats.Service, authBroker authn.Service,
@@ -99,23 +102,26 @@ func (a *AnonDeviceService) tagDeviceUI(ctx context.Context, device *anonstore.D
 		return nil
 	}
 
-	a.localCache.SetDefault(key, true)
-
-	if a.cfg.Env == setting.Dev {
-		a.log.Debug("Tagging device for UI", "deviceID", device.DeviceID, "device", device, "key", key)
-	}
-
-	if err := a.anonStore.CreateOrUpdateDevice(ctx, device); err != nil {
-		if errors.Is(err, anonstore.ErrDeviceLimitReached) {
-			a.localCache.SetDefault(key, false)
-			return err
+	// A device must only be cached as allowed after the store has applied the
+	// device limit; concurrent requests for the same device wait for that result.
+	_, err, _ = a.tagGroup.Do(key, func() (any, error) {
+		if a.cfg.Env == setting.Dev {
+			a.log.Debug("Tagging device for UI", "deviceID", device.DeviceID, "device", device, "key", key)
 		}
-		// invalidate cache if there is an error
-		a.localCache.Delete(key)
-		return err
-	}
 
-	return nil
+		// The result is shared with every waiting request, so it must not
+		// depend on the first caller's cancellation.
+		err := a.anonStore.CreateOrUpdateDevice(context.WithoutCancel(ctx), device)
+		switch {
+		case err == nil:
+			a.localCache.SetDefault(key, true)
+		case errors.Is(err, anonstore.ErrDeviceLimitReached):
+			a.localCache.SetDefault(key, false)
+		}
+		return nil, err
+	})
+
+	return err
 }
 
 func (a *AnonDeviceService) untagDevice(ctx context.Context, _ *authn.Identity, r *authn.Request, err error) {
