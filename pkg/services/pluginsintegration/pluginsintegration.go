@@ -207,6 +207,7 @@ func CreateMiddlewares(cfg *setting.Cfg, oAuthTokenService oauthtoken.OAuthToken
 		clientmiddleware.NewCachingMiddleware(cachingServiceClient),
 		clientmiddleware.NewForwardIDMiddleware(),
 		clientmiddleware.NewUseAlertHeadersMiddleware(),
+		clientmiddleware.NewPublicDashboardHeaderMiddleware(),
 	)
 
 	if cfg.SendUserHeader {

@@ -15,12 +15,19 @@ import (
 	"github.com/grafana/grafana/pkg/tsdb/cloudwatch/models"
 )
 
-const initialAlertPollPeriod = time.Second
+const (
+	initialAlertPollPeriod = time.Second
+	stopQueryTimeout       = 5 * time.Second
+)
 
 var executeSyncLogQuery = func(ctx context.Context, ds *DataSource, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
 	resp := backend.NewQueryDataResponse()
 
 	for _, q := range req.Queries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		var logsQuery models.LogsQuery
 		err := json.Unmarshal(q.JSON, &logsQuery)
 		if err != nil {
@@ -106,20 +113,40 @@ func (ds *DataSource) syncQuery(ctx context.Context, logsClient models.CWLogsCli
 	defer ticker.Stop()
 
 	attemptCount := 1
-	for range ticker.C {
+	for {
+		select {
+		case <-ctx.Done():
+			ds.stopSyncQuery(ctx, logsClient, requestParams)
+			return nil, ctx.Err()
+		case <-ticker.C:
+		}
+
 		res, err := ds.executeGetQueryResults(ctx, logsClient, requestParams)
 		if err != nil {
+			if ctx.Err() != nil {
+				ds.stopSyncQuery(ctx, logsClient, requestParams)
+				return nil, ctx.Err()
+			}
 			return nil, err
 		}
 		if isTerminated(res.Status) {
 			return res, err
 		}
 		if time.Duration(attemptCount)*time.Second >= logsTimeout {
+			ds.stopSyncQuery(ctx, logsClient, requestParams)
 			return res, fmt.Errorf("time to fetch query results exceeded logs timeout")
 		}
 
 		attemptCount++
 	}
+}
 
-	return nil, nil
+// stopSyncQuery stops a query that is being abandoned so it does not keep running in CloudWatch.
+// It uses a context detached from the request's cancellation, which has usually already happened.
+func (ds *DataSource) stopSyncQuery(ctx context.Context, logsClient models.CWLogsClient, logsQuery models.LogsQuery) {
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stopQueryTimeout)
+	defer cancel()
+	if _, err := ds.executeStopQuery(stopCtx, logsClient, logsQuery); err != nil {
+		ds.logger.FromContext(ctx).Warn("Failed to stop CloudWatch Logs query", "queryId", logsQuery.QueryId, "error", err)
+	}
 }
