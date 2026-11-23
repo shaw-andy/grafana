@@ -176,10 +176,7 @@ func (s *k8sRESTAdapter) List(ctx context.Context, options *internalversion.List
 		LegacyID: lf.LegacyID,
 	}
 
-	opts.Limit = 100
-	if options.Limit > 0 {
-		opts.Limit = options.Limit
-	}
+	opts.Limit = boundedListLimit(options.Limit)
 
 	// Extract continue token from request
 	if options.Continue != "" {

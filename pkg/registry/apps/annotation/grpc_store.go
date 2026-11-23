@@ -58,6 +58,7 @@ func (s *storeGRPC) Get(ctx context.Context, namespace, name string) (*annotatio
 }
 
 func (s *storeGRPC) List(ctx context.Context, namespace string, opts ListOptions) (*AnnotationList, error) {
+	opts.Limit = boundedListLimit(opts.Limit)
 	req := &storev1.ListRequest{
 		Namespace: namespace,
 		Options:   toProtoListOptions(opts),
@@ -133,6 +134,7 @@ func (s *storeGRPC) Cleanup(ctx context.Context, before time.Time) (int64, error
 }
 
 func (s *storeGRPC) ListTags(ctx context.Context, namespace string, opts TagListOptions) ([]Tag, error) {
+	opts.Limit = int(boundedListLimit(int64(opts.Limit)))
 	req := &storev1.ListTagsRequest{
 		Namespace: namespace,
 		Options:   toProtoTagListOptions(opts),
