@@ -628,9 +628,9 @@ No permission is required.
 
 #### Query parameters
 
-| Param       | Type    | Required | Description                            |
-| ----------- | ------- | -------- | -------------------------------------- |
-| reloadcache | boolean | No       | A flag to reload the permission cache. |
+| Param       | Type    | Required | Description                                                                                       |
+| ----------- | ------- | -------- | ------------------------------------------------------------------------------------------------- |
+| reloadcache | boolean | No       | A flag to reload the permission cache. Only honored for server administrators; otherwise ignored. |
 
 #### Example request
 
