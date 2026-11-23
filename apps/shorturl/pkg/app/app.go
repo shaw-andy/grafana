@@ -94,6 +94,10 @@ func New(cfg app.Config) (app.App, error) {
 						if err := validateRelativePath(info.Spec.Path); err != nil {
 							return fmt.Errorf("stored short URL has invalid path: %w", err)
 						}
+						redirectURL, err := resolveRedirectURL(appURL, strings.TrimSpace(info.Spec.Path))
+						if err != nil {
+							return fmt.Errorf("stored short URL has invalid path: %w", err)
+						}
 
 						// Update lastSeenAt in the background
 						func() { // TODO, this should be async, but keeping sync until we update tests
@@ -111,7 +115,6 @@ func New(cfg app.Config) (app.App, error) {
 							}
 						}()
 
-						redirectURL := appURL + "/" + info.Spec.Path
 						if req.URL.Query().Get("redirect") == "false" { // helpful for testing
 							return json.NewEncoder(w).Encode(shorturlv1beta1.GetGotoResponse{
 								Url: redirectURL,
