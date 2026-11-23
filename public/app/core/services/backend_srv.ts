@@ -33,6 +33,7 @@ import {
   type FetchError,
   type FetchResponse,
 } from '@grafana/runtime';
+import { getPublicDashboardApiPath } from '@grafana/runtime/internal';
 import { appEvents } from 'app/core/app_events';
 import { getConfig } from 'app/core/config';
 import { getSessionExpiry, hasRotatableSession } from 'app/core/utils/auth';
@@ -672,8 +673,8 @@ export class BackendSrv implements BackendService {
     return getDashboardAPI('v1').then((api) => api.getDashboardDTO(uid));
   }
 
-  getPublicDashboardByUid(uid: string) {
-    return this.get<DashboardDTO>(`/api/public/dashboards/${uid}`);
+  async getPublicDashboardByUid(uid: string) {
+    return this.get<DashboardDTO>(getPublicDashboardApiPath(uid), undefined, undefined, { validatePath: true });
   }
 
   /**

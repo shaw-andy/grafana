@@ -112,8 +112,10 @@ async function fetchBootData(): Promise<FetchBootDataResult> {
   let path = '/bootdata';
   // call a special bootdata url with the public access token
   // this is needed to set the access token and correct org for public dashboards on the ST backend
-  if (publicDashboardAccessToken) {
-    path += `/${publicDashboardAccessToken}`;
+  // The token comes from the page URL, so anything that is not UUID-shaped is ignored rather than
+  // allowed to change the path or query string of this credentialed request.
+  if (publicDashboardAccessToken && /^[0-9A-Za-z{}:-]+$/.test(publicDashboardAccessToken)) {
+    path += `/${encodeURIComponent(publicDashboardAccessToken)}`;
   }
   // pass the search params through to the bootdata request
   // this allows for overriding the theme/language etc
