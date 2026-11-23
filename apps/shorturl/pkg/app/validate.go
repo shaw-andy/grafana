@@ -50,5 +50,85 @@ func validateRelativePath(rawPath string) error {
 		return fmt.Errorf("%w: %s", ErrShortURLAbsolutePath, p)
 	}
 
+	if err != nil {
+		return fmt.Errorf("%w: not a valid URL path: %s", ErrShortURLInvalidPath, p)
+	}
+
+	// Browsers treat %2e as "." when removing dot segments, so the checks above
+	// must also hold for the percent-decoded path.
+	decoded := decodePath(parsed.Path)
+	if reason := unsafePathReason(decoded); reason != "" {
+		return fmt.Errorf("%w: path cannot contain %s: %s", ErrShortURLInvalidPath, reason, p)
+	}
+	if strings.HasPrefix(decoded, "/") || strings.Contains(decoded, "://") {
+		return fmt.Errorf("%w: %s", ErrShortURLInvalidPath, p)
+	}
+	if decodedURL, err := url.Parse(decoded); err == nil && decodedURL.Scheme != "" {
+		return fmt.Errorf("%w: %s", ErrShortURLInvalidPath, p)
+	}
+
 	return nil
+}
+
+// resolveRedirectURL resolves target against appURL and returns the URL to
+// redirect to. It refuses any target that, once a browser has decoded and
+// removed its dot segments, would leave appURL's scheme, host or path prefix.
+// IMPORTANT: This logic is duplicated in pkg/services/shorturls/models.go — keep both in sync.
+func resolveRedirectURL(appURL, target string) (string, error) {
+	root, err := url.Parse(strings.TrimSuffix(appURL, "/") + "/")
+	if err != nil || root.Opaque != "" {
+		return "", fmt.Errorf("invalid app URL: %s", appURL)
+	}
+
+	ref, err := url.Parse(target)
+	if err != nil || ref.Opaque != "" || ref.User != nil {
+		return "", fmt.Errorf("%w: %s", ErrShortURLInvalidPath, target)
+	}
+	if reason := unsafePathReason(decodePath(ref.Path)); reason != "" {
+		return "", fmt.Errorf("%w: redirect cannot contain %s: %s", ErrShortURLInvalidPath, reason, target)
+	}
+
+	resolved := root.ResolveReference(ref)
+	if !strings.EqualFold(resolved.Scheme, root.Scheme) || !strings.EqualFold(resolved.Host, root.Host) {
+		return "", fmt.Errorf("%w: redirect points outside the app URL: %s", ErrShortURLInvalidPath, target)
+	}
+
+	rootPath := root.EscapedPath()
+	resolvedPath := resolved.EscapedPath()
+	if resolvedPath+"/" != rootPath && !strings.HasPrefix(resolvedPath, rootPath) {
+		return "", fmt.Errorf("%w: redirect points outside the app URL: %s", ErrShortURLInvalidPath, target)
+	}
+
+	return resolved.String(), nil
+}
+
+// decodePath percent-decodes p until it stops changing, so that encoded dots,
+// slashes and backslashes are checked the way any later decoder will see them.
+func decodePath(p string) string {
+	for {
+		next, err := url.PathUnescape(p)
+		if err != nil || next == p {
+			return p
+		}
+		p = next
+	}
+}
+
+// unsafePathReason describes why a decoded path could escape the URL it is
+// appended to, or returns "" if it cannot.
+func unsafePathReason(decoded string) string {
+	for _, r := range decoded {
+		if r < 0x20 || r == 0x7f {
+			return "control characters"
+		}
+	}
+	if strings.Contains(decoded, `\`) {
+		return "a backslash"
+	}
+	for _, seg := range strings.Split(decoded, "/") {
+		if seg == "." || seg == ".." {
+			return "dot segments"
+		}
+	}
+	return ""
 }

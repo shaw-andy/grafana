@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -183,31 +182,22 @@ func (sk8s *shortURLK8sHandler) getKubernetesRedirectFromShortURL(c *contextmode
 		return
 	}
 
-	// Safety net: validate the redirect URL is not an open redirect.
-	// The URL from the goto subresource is already an absolute URL (appURL + path),
-	// so we parse it and validate the path component.
-	parsedURL, parseErr := url.Parse(value.Url)
-	if parseErr != nil {
-		c.Logger.Error("Short URL redirection error: invalid redirect URL", "uid", uid, "url", value.Url, "err", parseErr)
-		c.Redirect(sk8s.cfg.AppURL, http.StatusTemporaryRedirect)
-		return
-	}
-	// Ensure the redirect URL is relative to this server by checking it has no scheme
-	// or its host matches what we expect. Since the goto handler constructs the URL
-	// as appURL + "/" + path, we just need to verify it's not pointing externally.
+	// Safety net: the goto subresource may be served by a separately deployed
+	// app, so the URL it returns must still be confined to this Grafana's root URL.
 	appParsed, appParseErr := url.Parse(sk8s.cfg.AppURL)
 	if appParseErr != nil || appParsed.Host == "" {
 		c.Logger.Error("Short URL redirection error: invalid app URL configuration", "err", appParseErr)
 		c.Redirect(sk8s.cfg.AppURL, http.StatusTemporaryRedirect)
 		return
 	}
-	if parsedURL.Host != "" && !strings.EqualFold(parsedURL.Host, appParsed.Host) {
-		c.Logger.Error("Short URL redirect points to external host, refusing", "url", value.Url)
+	redirectURL, err := shorturls.ResolveRedirectURL(sk8s.cfg.AppURL, value.Url)
+	if err != nil {
+		c.Logger.Error("Short URL redirect points outside the app URL, refusing", "uid", uid, "url", value.Url, "err", err)
 		c.Redirect(sk8s.cfg.AppURL, http.StatusFound)
 		return
 	}
 
-	c.Resp.Header().Add("Location", value.Url)
+	c.Resp.Header().Add("Location", redirectURL)
 	c.Resp.WriteHeader(http.StatusFound)
 }
 
