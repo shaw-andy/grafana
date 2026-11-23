@@ -106,4 +106,33 @@ func TestValidateRelativePath(t *testing.T) {
 		require.Error(t, err)
 		require.True(t, ErrShortURLInvalidPath.Is(err))
 	})
+
+	// Dot segments are rejected only when the raw string contains "../" or "..\".
+	// A browser still treats percent-encoded dots as "." and removes those segments,
+	// so these paths must be refused before they are stored.
+	encodedDotPaths := []string{
+		"..",
+		"%2e%2e",
+		"%2e%2e/other-app/action",
+		"%2E%2E/other-app/action",
+		"%2e./other-app/action",
+		".%2e/other-app/action",
+		"d/%2e%2e/%2e%2e/other-app/action",
+		"%2e%2e%2fother-app/action",
+		"..%2fother-app/action",
+		"  %2e%2e/other-app/action",
+		"%2e%2e/other-app/action?x=1",
+	}
+	for _, p := range encodedDotPaths {
+		t.Run("rejects encoded dot segment: "+p, func(t *testing.T) {
+			err := ValidateRelativePath(p)
+			require.Error(t, err)
+			require.True(t, ErrShortURLInvalidPath.Is(err))
+		})
+	}
+
+	t.Run("accepts a percent-encoded dot that is not a dot segment", func(t *testing.T) {
+		err := ValidateRelativePath("d/foo%2ebar/dashboard")
+		assert.NoError(t, err)
+	})
 }

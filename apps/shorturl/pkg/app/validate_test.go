@@ -65,4 +65,33 @@ func TestValidateRelativePath(t *testing.T) {
 		require.Error(t, err)
 		require.True(t, errors.Is(err, ErrShortURLInvalidPath))
 	})
+
+	// Same gap as pkg/services/shorturls.ValidateRelativePath: only the literal
+	// character sequences "../" and "..\" are rejected. Percent-encoded dots are
+	// still dot segments once a browser parses the redirect.
+	encodedDotPaths := []string{
+		"..",
+		"%2e%2e",
+		"%2e%2e/other-app/action",
+		"%2E%2E/other-app/action",
+		"%2e./other-app/action",
+		".%2e/other-app/action",
+		"d/%2e%2e/%2e%2e/other-app/action",
+		"%2e%2e%2fother-app/action",
+		"..%2fother-app/action",
+		"  %2e%2e/other-app/action",
+		"%2e%2e/other-app/action?x=1",
+	}
+	for _, p := range encodedDotPaths {
+		t.Run("rejects encoded dot segment: "+p, func(t *testing.T) {
+			err := validateRelativePath(p)
+			require.Error(t, err)
+			require.True(t, errors.Is(err, ErrShortURLInvalidPath))
+		})
+	}
+
+	t.Run("accepts a percent-encoded dot that is not a dot segment", func(t *testing.T) {
+		err := validateRelativePath("d/foo%2ebar/dashboard")
+		assert.NoError(t, err)
+	})
 }
