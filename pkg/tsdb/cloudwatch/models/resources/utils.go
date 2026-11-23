@@ -31,14 +31,21 @@ func parseDimensionFilter(dimensionFilter string) ([]*Dimension, error) {
 
 	for k, v := range dimensionFilters {
 		// due to legacy, value can be a string, a string slice or nil
-		if vv, ok := v.(string); ok {
+		switch vv := v.(type) {
+		case string:
 			addDimension(k, vv)
-		} else if vv, ok := v.([]any); ok {
-			for _, v := range vv {
-				addDimension(k, v.(string))
+		case []any:
+			for _, item := range vv {
+				s, ok := item.(string)
+				if !ok {
+					return nil, fmt.Errorf("invalid value for dimension filter %q: expected string, got %T", k, item)
+				}
+				addDimension(k, s)
 			}
-		} else if v == nil {
+		case nil:
 			addDimension(k, "")
+		default:
+			return nil, fmt.Errorf("invalid value for dimension filter %q: expected string, array of strings or null, got %T", k, v)
 		}
 	}
 
