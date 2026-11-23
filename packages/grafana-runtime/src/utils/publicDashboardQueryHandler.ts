@@ -1,10 +1,11 @@
-import { catchError, type Observable, of, switchMap } from 'rxjs';
+import { catchError, defer, type Observable, of, switchMap } from 'rxjs';
 
 import { type DataQuery, type DataQueryRequest, type DataQueryResponse } from '@grafana/data';
 
 import { config } from '../config';
 import { getBackendSrv } from '../services/backendSrv';
 
+import { getPublicDashboardApiPath } from './publicDashboardApiPath';
 import { type BackendDataSourceResponse, toDataQueryResponse } from './queryResponse';
 
 export function publicDashboardQueryHandler(request: DataQueryRequest<DataQuery>): Observable<DataQueryResponse> {
@@ -36,19 +37,20 @@ export function publicDashboardQueryHandler(request: DataQueryRequest<DataQuery>
     },
   };
 
-  return getBackendSrv()
-    .fetch<BackendDataSourceResponse>({
-      url: `/api/public/dashboards/${config.publicDashboardAccessToken!}/panels/${panelId}/query`,
+  return defer(() =>
+    getBackendSrv().fetch<BackendDataSourceResponse>({
+      url: getPublicDashboardApiPath(config.publicDashboardAccessToken, `/panels/${panelId}/query`),
       method: 'POST',
       data: body,
       requestId,
+      validatePath: true,
     })
-    .pipe(
-      switchMap((raw) => {
-        return of(toDataQueryResponse(raw, request.targets));
-      }),
-      catchError((err) => {
-        return of(toDataQueryResponse(err));
-      })
-    );
+  ).pipe(
+    switchMap((raw) => {
+      return of(toDataQueryResponse(raw, request.targets));
+    }),
+    catchError((err) => {
+      return of(toDataQueryResponse(err));
+    })
+  );
 }

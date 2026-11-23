@@ -191,11 +191,14 @@ export class DashboardLoaderSrv extends DashboardLoaderSrvBase<DashboardDTO> {
       throw new Error('Dashboard uid or slug required');
     }
 
-    promise.then((result: DashboardDTO) => {
-      impressionSrv.addDashboardImpression(result.dashboard.uid);
+    promise
+      .then((result: DashboardDTO) => {
+        impressionSrv.addDashboardImpression(result.dashboard.uid);
 
-      return result;
-    });
+        return result;
+      })
+      // Load failures reach the caller through the returned promise.
+      .catch(() => {});
 
     return promise;
   }
@@ -256,10 +259,13 @@ export class DashboardLoaderSrvV2 extends DashboardLoaderSrvBase<DashboardWithAc
       throw new Error('Dashboard uid or slug required');
     }
 
-    promise.then((result: DashboardWithAccessInfo<DashboardV2Spec>) => {
-      impressionSrv.addDashboardImpression(result.metadata.name);
-      return result;
-    });
+    promise
+      .then((result: DashboardWithAccessInfo<DashboardV2Spec>) => {
+        impressionSrv.addDashboardImpression(result.metadata.name);
+        return result;
+      })
+      // Load failures reach the caller through the returned promise.
+      .catch(() => {});
 
     return promise;
   }

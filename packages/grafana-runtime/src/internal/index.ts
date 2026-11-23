@@ -29,6 +29,7 @@ export {
 } from '../services/pluginExtensions/getObservablePluginLinks';
 
 export { UserStorage, useUserStorage } from '../utils/userStorage';
+export { getPublicDashboardApiPath } from '../utils/publicDashboardApiPath';
 
 export {
   initOpenFeature,
