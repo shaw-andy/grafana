@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"go.opentelemetry.io/otel"
+	"golang.org/x/sync/singleflight"
 
 	claims "github.com/grafana/authlib/types"
 
@@ -45,6 +46,7 @@ type AccessControlAPI struct {
 	AccessControl ac.AccessControl
 	RouteRegister routing.RouteRegister
 	userSvc       user.Service
+	reloadGroup   singleflight.Group
 }
 
 func (api *AccessControlAPI) RegisterAPIEndpoints() {
@@ -62,8 +64,7 @@ func (api *AccessControlAPI) getUserActions(c *contextmodel.ReqContext) response
 	ctx, span := tracer.Start(c.Req.Context(), "accesscontrol.api.getUserActions")
 	defer span.End()
 
-	reloadCache := c.QueryBool("reloadcache")
-	permissions, err := api.Service.GetUserPermissions(ctx, c.SignedInUser, ac.Options{ReloadCache: reloadCache})
+	permissions, err := api.getSignedInUserPermissions(ctx, c)
 	if err != nil {
 		return response.JSON(http.StatusInternalServerError, err)
 	}
@@ -76,13 +77,36 @@ func (api *AccessControlAPI) getUserPermissions(c *contextmodel.ReqContext) resp
 	ctx, span := tracer.Start(c.Req.Context(), "accesscontrol.api.getUserPermissions")
 	defer span.End()
 
-	reloadCache := c.QueryBool("reloadcache")
-	permissions, err := api.Service.GetUserPermissions(ctx, c.SignedInUser, ac.Options{ReloadCache: reloadCache})
+	permissions, err := api.getSignedInUserPermissions(ctx, c)
 	if err != nil {
 		return response.JSON(http.StatusInternalServerError, err)
 	}
 
 	return response.JSON(http.StatusOK, ac.GroupScopesByActionContext(ctx, permissions))
+}
+
+// getSignedInUserPermissions only honors reloadcache for server admins: a reload
+// bypasses the permission cache and the service's request coalescing, so letting
+// any signed-in user set it would let them drive unbounded permission queries.
+func (api *AccessControlAPI) getSignedInUserPermissions(ctx context.Context, c *contextmodel.ReqContext) ([]ac.Permission, error) {
+	if !c.QueryBool("reloadcache") || !c.SignedInUser.GetIsGrafanaAdmin() {
+		return api.Service.GetUserPermissions(ctx, c.SignedInUser, ac.Options{})
+	}
+
+	// The shared call must not fail for every waiter when the request that started it is cancelled.
+	reloadCtx := context.WithoutCancel(ctx)
+	res, err, _ := api.reloadGroup.Do(c.SignedInUser.GetCacheKey(), func() (any, error) {
+		return api.Service.GetUserPermissions(reloadCtx, c.SignedInUser, ac.Options{ReloadCache: true})
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	permissions, ok := res.([]ac.Permission)
+	if !ok {
+		return nil, fmt.Errorf("unexpected type returned from singleflight: %T", res)
+	}
+	return permissions, nil
 }
 
 // GET /api/access-control/users/permissions/search
