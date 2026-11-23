@@ -106,7 +106,8 @@ func (r *RepositoryImpl) Find(ctx context.Context, query *annotations.ItemQuery)
 		q.Limit = int64(len(res))
 	}
 
-	results := make([]*annotations.ItemDTO, 0, q.Limit)
+	// q.Limit can come straight from the request, so it must not size an allocation.
+	results := make([]*annotations.ItemDTO, 0)
 	// Page paginates dashboards (used in Authorize → SearchDashboards), not annotation rows (store uses Limit/Offset).
 	q.Page = 1
 

@@ -286,6 +286,8 @@ func (s *PostgreSQLStore) Delete(ctx context.Context, namespace, name string) er
 
 // List lists annotations based on the provided options
 func (s *PostgreSQLStore) List(ctx context.Context, namespace string, opts ListOptions) (*AnnotationList, error) {
+	opts.Limit = boundedListLimit(opts.Limit)
+
 	// Decode continue token and validate limit
 	offset := int64(0)
 	if opts.Continue != "" {
@@ -299,11 +301,7 @@ func (s *PostgreSQLStore) List(ctx context.Context, namespace string, opts ListO
 		offset = token.Offset
 	}
 
-	// Build query
 	limit := opts.Limit
-	if limit == 0 {
-		limit = 100 // default limit
-	}
 	query, args := buildListQuery(namespace, opts, offset, limit)
 
 	// Execute query
@@ -358,6 +356,7 @@ func (s *PostgreSQLStore) List(ctx context.Context, namespace string, opts ListO
 
 // buildListQuery constructs the SQL query and arguments for List
 func buildListQuery(namespace string, opts ListOptions, offset, limit int64) (string, []any) {
+	limit = boundedListLimit(limit)
 	var conditions []string
 	var args []any
 	argNum := 1

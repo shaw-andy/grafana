@@ -17,6 +17,22 @@ var (
 	ErrInvalidInput = errors.New("invalid annotation input")
 )
 
+const (
+	defaultListLimit int64 = 100
+	// maxListLimit bounds how many rows a single list, search, or tags request
+	// may ask a backend to read. Callers page past it with the continue token.
+	maxListLimit int64 = 500
+)
+
+// boundedListLimit returns limit clamped to (0, maxListLimit], substituting
+// the default for unset or non-positive values.
+func boundedListLimit(limit int64) int64 {
+	if limit <= 0 {
+		return defaultListLimit
+	}
+	return min(limit, maxListLimit)
+}
+
 type Store interface {
 	Get(ctx context.Context, namespace, name string) (*annotationV0.Annotation, error)
 	List(ctx context.Context, namespace string, opts ListOptions) (*AnnotationList, error)

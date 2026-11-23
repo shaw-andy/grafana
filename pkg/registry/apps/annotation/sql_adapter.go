@@ -79,6 +79,7 @@ func (a *sqlAdapter) List(ctx context.Context, namespace string, opts ListOption
 		return nil, err
 	}
 
+	opts.Limit = boundedListLimit(opts.Limit)
 	offset := int64(0)
 	if opts.Continue != "" {
 		token, err := decodeContinueToken(opts.Continue)
@@ -211,7 +212,7 @@ func (a *sqlAdapter) ListTags(ctx context.Context, namespace string, opts TagLis
 	}
 	query := &annotations.TagsQuery{
 		OrgID: orgID,
-		Limit: int64(opts.Limit),
+		Limit: boundedListLimit(int64(opts.Limit)),
 		Tag:   tag,
 	}
 

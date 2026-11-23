@@ -95,10 +95,10 @@ func listOptionsFromQueryParams(queryParams url.Values) ListOptions {
 		}
 	}
 
-	opts.Limit = 100
+	opts.Limit = defaultListLimit
 	if v := queryParams.Get("limit"); v != "" {
-		if limit, err := strconv.ParseInt(v, 10, 64); err == nil && limit > 0 {
-			opts.Limit = limit
+		if limit, err := strconv.ParseInt(v, 10, 64); err == nil {
+			opts.Limit = boundedListLimit(limit)
 		}
 	}
 
