@@ -32,6 +32,7 @@ import { DATAPLANE_LABEL_TYPES_NAME } from './constants';
 import { type Scenario, type TestDataDataQuery, TestDataQueryType } from './dataquery';
 import { queryMetricTree } from './metricTree';
 import { generateRandomEdges, generateRandomNodes, generateShowcaseData, savedNodesResponse } from './nodeGraphUtils';
+import { assertRawFramesWithinLimits, isRawFrameContentTooLarge, parseRawFrameContent } from './rawFrameLimits';
 import { runStream } from './runStreams';
 import { flameGraphData, flameGraphDataDiff } from './testData/flameGraphResponse';
 import { TestDataVariableSupport } from './variables';
@@ -192,7 +193,7 @@ export class TestDataDataSource
     if (result.csvContent) {
       result.csvContent = this.templateSrv.replace(result.csvContent, scopedVars);
     }
-    if (result.rawFrameContent) {
+    if (result.rawFrameContent && !isRawFrameContentTooLarge(result.rawFrameContent)) {
       result.rawFrameContent = this.templateSrv.replace(result.rawFrameContent, scopedVars);
     }
 
@@ -415,7 +416,8 @@ export class TestDataDataSource
     options: DataQueryRequest<TestDataDataQuery>
   ): Observable<DataQueryResponse> {
     try {
-      const data = JSON.parse(target.rawFrameContent ?? '[]').map((v: unknown) => {
+      const frames = assertRawFramesWithinLimits(parseRawFrameContent(target.rawFrameContent ?? '[]'));
+      const data = frames.map((v) => {
         const f = toDataFrame(v);
         f.refId = target.refId;
         return f;
