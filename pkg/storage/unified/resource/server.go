@@ -712,6 +712,7 @@ type server struct {
 	writeHooks                WriteAccessHooks
 	now                       func() int64
 	mostRecentRV              atomic.Int64 // The most recent resource version seen by the server
+	broadcastRV               atomic.Int64 // The highest resource version handed to the broadcaster
 	storageMetrics            *StorageMetrics
 	overridesService          *OverridesService
 	quotasConfig              QuotasConfig
@@ -1461,12 +1462,32 @@ func (s *server) Read(ctx context.Context, req *resourcepb.ReadRequest) (*resour
 		return nil, status.Error(codes.InvalidArgument, r.Message)
 	}
 
+	authorize := s.authorizeRead
+	if req.ResourceVersion > 0 {
+		authorize = s.authorizeOlderVersion
+	}
+	return s.readInQueue(ctx, user, req, authorize)
+}
+
+// readPrevious reads the version a watch event replaced, checked against the
+// folder of that version.
+//
+// Not Read: Read checks an older version against the object as it is now, which
+// after a delete is the trash rule, and would fail the delete event for every
+// watcher that did not delete the object.
+func (s *server) readPrevious(ctx context.Context, user claims.AuthInfo, req *resourcepb.ReadRequest) (*resourcepb.ReadResponse, error) {
+	return s.readInQueue(ctx, user, req, s.authorizeRead)
+}
+
+type readAuthorizer func(ctx context.Context, user claims.AuthInfo, key *resourcepb.ResourceKey, rsp *BackendReadResponse) *resourcepb.ErrorResult
+
+func (s *server) readInQueue(ctx context.Context, user claims.AuthInfo, req *resourcepb.ReadRequest, authorize readAuthorizer) (*resourcepb.ReadResponse, error) {
 	var (
 		res *resourcepb.ReadResponse
 		err error
 	)
 	runErr := s.runInQueue(ctx, req.Key.Namespace, func(queueCtx context.Context) {
-		res, err = s.read(queueCtx, user, req)
+		res, err = s.read(queueCtx, user, req, authorize)
 	})
 	if runErr != nil {
 		return HandleQueueError(runErr, func(e *resourcepb.ErrorResult) *resourcepb.ReadResponse {
@@ -1477,7 +1498,7 @@ func (s *server) Read(ctx context.Context, req *resourcepb.ReadRequest) (*resour
 	return res, err
 }
 
-func (s *server) read(ctx context.Context, user claims.AuthInfo, req *resourcepb.ReadRequest) (readRsp *resourcepb.ReadResponse, readErr error) {
+func (s *server) read(ctx context.Context, user claims.AuthInfo, req *resourcepb.ReadRequest, authorize readAuthorizer) (readRsp *resourcepb.ReadResponse, readErr error) {
 	defer func() {
 		if readRsp != nil {
 			s.logIfServerError(ctx, "server.read", req.Key, readRsp.Error)
@@ -1485,7 +1506,7 @@ func (s *server) read(ctx context.Context, user claims.AuthInfo, req *resourcepb
 	}()
 
 	rsp := s.backend.ReadResource(ctx, req)
-	if errRes := s.authorizeRead(ctx, user, req.Key, rsp); errRes != nil {
+	if errRes := authorize(ctx, user, req.Key, rsp); errRes != nil {
 		return &resourcepb.ReadResponse{Error: errRes}, nil
 	}
 	return &resourcepb.ReadResponse{
@@ -1779,6 +1800,55 @@ func (s *server) listAuthorized(ctx context.Context, req *resourcepb.ListRequest
 	)
 	maxPageBytes := s.maxPageSizeBytes
 
+	// History, an explicit resource version, and a continue token (which carries
+	// the version of the first page) all list older versions.
+	var olderVersions *olderVersionAuthorizer
+	if req.Source != resourcepb.ListRequest_STORE || req.ResourceVersion > 0 || req.NextPageToken != "" {
+		user, ok := claims.AuthInfoFrom(ctx)
+		if !ok || user == nil {
+			rsp.Error = &resourcepb.ErrorResult{
+				Message: "no user found in context",
+				Code:    http.StatusUnauthorized,
+			}
+			return rsp, nil
+		}
+		olderVersions = s.newOlderVersionAuthorizer(user, key.Group, key.Resource)
+	}
+
+	extractFn := func(c candidateItem) authz.BatchCheckItem {
+		// Cross-namespace keys-only lists must authorize each item in its own
+		// namespace. Namespaced lists retain the request scope.
+		namespace := key.Namespace
+		if req.KeysOnly && namespace == "" {
+			namespace = c.namespace
+		}
+		return authz.BatchCheckItem{
+			Name:               c.name,
+			Folder:             c.folder,
+			Verb:               utils.VerbGet,
+			Group:              key.Group,
+			Resource:           key.Resource,
+			Namespace:          namespace,
+			FreshnessTimestamp: ResourceVersionTime(c.resourceVersion),
+		}
+	}
+
+	authorize := func(candidates iter.Seq[candidateItem]) iter.Seq2[candidateItem, error] {
+		if olderVersions == nil {
+			return authz.FilterAuthorized(ctx, s.access, candidates, extractFn, authz.WithTracer(tracer))
+		}
+		return filterOlderVersions(ctx, olderVersions, candidates, int(req.Limit)+1, func(c candidateItem) olderVersion {
+			namespace := key.Namespace
+			if namespace == "" {
+				namespace = c.namespace
+			}
+			if req.KeysOnly {
+				return olderVersion{objectRef: objectRef{namespace: namespace, name: c.name}}
+			}
+			return versionWithBody(namespace, c.name, c.value)
+		})
+	}
+
 	rv, err := backendList(ctx, req, func(iter ListIterator) error {
 		// Convert ListIterator to iter.Seq for FilterAuthorized
 		candidates := func(yield func(candidateItem) bool) {
@@ -1799,26 +1869,8 @@ func (s *server) listAuthorized(ctx context.Context, req *resourcepb.ListRequest
 			}
 		}
 
-		extractFn := func(c candidateItem) authz.BatchCheckItem {
-			// Cross-namespace keys-only lists must authorize each item in its own
-			// namespace. Namespaced lists retain the request scope.
-			namespace := key.Namespace
-			if req.KeysOnly && namespace == "" {
-				namespace = c.namespace
-			}
-			return authz.BatchCheckItem{
-				Name:               c.name,
-				Folder:             c.folder,
-				Verb:               utils.VerbGet,
-				Group:              key.Group,
-				Resource:           key.Resource,
-				Namespace:          namespace,
-				FreshnessTimestamp: ResourceVersionTime(c.resourceVersion),
-			}
-		}
-
 		var lastContinueToken string
-		for item, err := range authz.FilterAuthorized(ctx, s.access, candidates, extractFn, authz.WithTracer(tracer)) {
+		for item, err := range authorize(candidates) {
 			if err != nil {
 				return err
 			}
@@ -1993,6 +2045,11 @@ func (s *server) initWatcher() error {
 
 			s.log.Debug("Server. Streaming Event", "type", v.Type, "previousRV", v.PreviousRV, "group", v.Key.Group, "namespace", v.Key.Namespace, "resource", v.Key.Resource, "name", v.Key.Name)
 			s.mostRecentRV.Store(v.ResourceVersion)
+			// Stored before the broadcaster can cache the event. This goroutine is
+			// the only writer.
+			if v.ResourceVersion > s.broadcastRV.Load() {
+				s.broadcastRV.Store(v.ResourceVersion)
+			}
 			out <- v
 		}
 	}()
@@ -2062,6 +2119,12 @@ func (s *server) Watch(req *resourcepb.WatchRequest, srv resourcepb.ResourceStor
 		return err
 	}
 	defer s.broadcaster.Unsubscribe(stream)
+
+	// A new subscriber is first sent the broadcaster's cache of recent events, so
+	// events up to this version may predate the watch. Read after Subscribe, so it
+	// covers every event cached before the watch began. An event cached later is a
+	// write made after it.
+	replayedUpTo := s.broadcastRV.Load()
 
 	// Determine a safe starting resource-version for the watch.
 	// When the client requests SendInitialEvents we will use the resource-version
@@ -2210,7 +2273,14 @@ func (s *server) Watch(req *resourcepb.WatchRequest, srv resourcepb.ResourceStor
 			if !isKVBackend && (event.Key.Group != key.Group || event.Key.Resource != key.Resource) {
 				continue
 			}
-			if matchesQueryKey(key, event.Key) && checker(event.Key.Name, event.Folder) {
+			visible := matchesQueryKey(key, event.Key) && checker(event.Key.Name, event.Folder)
+			if visible && event.ResourceVersion <= replayedUpTo {
+				var authErr error
+				if visible, authErr = s.replayedEventVisible(ctx, user, event); authErr != nil {
+					return authErr
+				}
+			}
+			if visible {
 				value := event.Value
 				// remove the delete marker stored in the value for deleted objects
 				if event.Type == resourcepb.WatchEvent_DELETED {
@@ -2225,7 +2295,7 @@ func (s *server) Watch(req *resourcepb.WatchRequest, srv resourcepb.ResourceStor
 					},
 				}
 				if event.PreviousRV > 0 {
-					prevObj, err := s.Read(ctx, &resourcepb.ReadRequest{Key: event.Key, ResourceVersion: event.PreviousRV})
+					prevObj, err := s.readPrevious(ctx, user, &resourcepb.ReadRequest{Key: event.Key, ResourceVersion: event.PreviousRV})
 					if err != nil {
 						// This scenario should never happen, but if it does, we should log it and continue
 						// sending the event without the previous object. The client will decide what to do.

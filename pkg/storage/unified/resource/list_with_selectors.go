@@ -293,7 +293,12 @@ func (s *server) readSearchRows(ctx context.Context, rows []listSearchRow) iter.
 			ResourceVersion: row.resourceVersion,
 		}
 	}
+	return s.readResources(ctx, requests)
+}
 
+// readResources reads the requests in chunks, batched when the backend supports
+// it. The reads do no authorization.
+func (s *server) readResources(ctx context.Context, requests []*resourcepb.ReadRequest) iter.Seq[*BackendReadResponse] {
 	return func(yield func(*BackendReadResponse) bool) {
 		batchSupported := true
 		for chunk := range slices.Chunk(requests, searchReadChunkSize) {
