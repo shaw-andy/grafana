@@ -34,6 +34,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/apiserver/appinstaller"
 	searchauthorizer "github.com/grafana/grafana/pkg/services/apiserver/auth/authorizer"
+	"github.com/grafana/grafana/pkg/services/apiserver/auth/authorizer/storewrapper"
 	reqns "github.com/grafana/grafana/pkg/services/apiserver/endpoints/request"
 	"github.com/grafana/grafana/pkg/services/datasources"
 	"github.com/grafana/grafana/pkg/services/folder"
@@ -53,6 +54,8 @@ var (
 	_ appinstaller.LegacyStorageProvider  = (*AppInstaller)(nil)
 	_ appinstaller.LegacyStatusProvider   = (*AppInstaller)(nil)
 	_ appinstaller.StorageOptionsProvider = (*AppInstaller)(nil)
+
+	_ appinstaller.NamespaceScopedStorageAuthorizerProvider = (*AppInstaller)(nil)
 )
 
 type AppInstaller struct {
@@ -298,6 +301,15 @@ func (a *AppInstaller) GetAuthorizer() authorizer.Authorizer {
 			return authorizer.DecisionNoOpinion, "", nil
 		},
 	)
+}
+
+// GetNamespaceScopedStorageAuthorizer applies the folder scope to RuleSequence,
+// which has no legacy storage and is served straight from unified storage.
+func (a *AppInstaller) GetNamespaceScopedStorageAuthorizer(gr schema.GroupResource) storewrapper.ResourceStorageAuthorizer {
+	if gr == rulesequence.ResourceInfo.GroupResource() {
+		return rulesequence.NewStorageAuthorizer(a.ng.Api.AccessControl)
+	}
+	return nil
 }
 
 // ruleSearchReadAttributes restates the compatibility POST as the list it
