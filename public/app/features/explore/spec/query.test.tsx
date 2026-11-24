@@ -3,6 +3,7 @@ import { type Props } from 'react-virtualized-auto-sizer';
 
 import { EventBusSrv, serializeStateToUrlParam } from '@grafana/data';
 
+import { runQuery } from './helper/interactions';
 import { makeLogsQueryResponse } from './helper/query';
 import { setupExplore, tearDown, waitForExplore } from './helper/setup';
 
@@ -38,7 +39,7 @@ describe('Explore: handle running/not running query', () => {
     expect(datasources.loki.query).not.toBeCalled();
   });
 
-  it('runs query when initial state contains query and renders results', async () => {
+  it('loads the query from the URL without running it, then runs it and renders results when the user runs it', async () => {
     const urlParams = {
       left: serializeStateToUrlParam({
         datasource: 'loki-uid',
@@ -48,6 +49,11 @@ describe('Explore: handle running/not running query', () => {
     };
     const { datasources } = setupExplore({ urlParams });
     jest.mocked(datasources.loki.query).mockReturnValueOnce(makeLogsQueryResponse());
+
+    await screen.findByText(`loki Editor input: { label="value"}`);
+    expect(datasources.loki.query).not.toBeCalled();
+
+    await runQuery();
 
     // Make sure we render the logs panel
     await screen.findByRole('heading', { name: /^Logs$/ });

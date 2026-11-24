@@ -286,7 +286,7 @@ export const exploreReducer = (state = initialExploreState, action: AnyAction): 
     };
   }
 
-  if (runQueries.pending.match(action)) {
+  if (runQueries?.pending?.match(action)) {
     const pane = state.panes[action.meta.arg.exploreId];
     if (!pane) {
       return state;
