@@ -24,8 +24,13 @@ import (
 )
 
 type filesConnector struct {
-	getter                RepoGetter
-	access                auth.AccessChecker
+	getter RepoGetter
+	// repoAccess authorizes repository-level operations (directory listing) and
+	// may carry an org-role fallback.
+	repoAccess auth.AccessChecker
+	// resourceAccess authorizes individual dashboards and folders. It must not
+	// carry an org-role fallback: a fallback would override folder-scoped denials.
+	resourceAccess        auth.AccessChecker
 	parsers               resources.ParserFactory
 	clients               resources.ClientFactory
 	folderMetadataEnabled bool
@@ -34,12 +39,13 @@ type filesConnector struct {
 	maxFileSize int64
 }
 
-func NewFilesConnector(getter RepoGetter, parsers resources.ParserFactory, clients resources.ClientFactory, access auth.AccessChecker, folderMetadataEnabled bool, maxFileSize int64) *filesConnector {
+func NewFilesConnector(getter RepoGetter, parsers resources.ParserFactory, clients resources.ClientFactory, repoAccess, resourceAccess auth.AccessChecker, folderMetadataEnabled bool, maxFileSize int64) *filesConnector {
 	return &filesConnector{
 		getter:                getter,
 		parsers:               parsers,
 		clients:               clients,
-		access:                access,
+		repoAccess:            repoAccess,
+		resourceAccess:        resourceAccess,
 		folderMetadataEnabled: folderMetadataEnabled,
 		maxFileSize:           maxFileSize,
 	}
@@ -184,7 +190,7 @@ func (c *filesConnector) createDualReadWriter(ctx context.Context, repo reposito
 	}
 
 	folders := resources.NewFolderManager(readWriter, folderClient, resources.NewEmptyFolderTree(), folderGVK, resources.WithFolderMetadataEnabled(c.folderMetadataEnabled))
-	authorizer := resources.NewAuthorizer(repo.Config(), readWriter, c.access, clients, c.folderMetadataEnabled)
+	authorizer := resources.NewAuthorizer(repo.Config(), readWriter, c.resourceAccess, clients, c.folderMetadataEnabled)
 	return resources.NewDualReadWriter(readWriter, parser, folders, authorizer, c.folderMetadataEnabled), authorizer, nil
 }
 
@@ -392,7 +398,7 @@ func (c *filesConnector) handleDelete(ctx context.Context, opts resources.DualWr
 // authorizeListFiles checks if the user has repositories:read permission for listing files.
 // The access checker handles AccessPolicy identities, namespace resolution, and role-based fallback internally.
 func (c *filesConnector) authorizeListFiles(ctx context.Context, repoName string) error {
-	return c.access.Check(ctx, authlib.CheckRequest{
+	return c.repoAccess.Check(ctx, authlib.CheckRequest{
 		Verb:     utils.VerbGet,
 		Group:    provisioning.GROUP,
 		Resource: provisioning.RepositoryResourceInfo.GetName(),

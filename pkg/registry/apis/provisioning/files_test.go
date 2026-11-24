@@ -169,7 +169,7 @@ func TestHandleDirectoryListing_RefNotFoundMapsTo404(t *testing.T) {
 	mockReadWriter := repository.NewMockReaderWriter(t)
 	mockReadWriter.EXPECT().ReadTree(mock.Anything, "test-panel").Return([]repository.FileTreeEntry(nil), wrappedErr)
 
-	connector := &filesConnector{access: mockAccess}
+	connector := &filesConnector{repoAccess: mockAccess}
 	responder := &fakeResponder{}
 
 	connector.handleDirectoryListing(
@@ -584,7 +584,7 @@ func TestHandleGetRawFile(t *testing.T) {
 				}, nil)
 			}
 
-			connector := &filesConnector{access: mockAccess}
+			connector := &filesConnector{resourceAccess: mockAccess}
 
 			opts := resources.DualWriteOptions{Path: tt.path}
 
@@ -625,7 +625,7 @@ func TestHandleGetRawFile_FolderScopedAuth(t *testing.T) {
 			Return(apierrors.NewForbidden(provisioningapi.RepositoryResourceInfo.GroupResource(), "team-a", errors.New("denied")))
 
 		authorizer := resources.NewAuthorizer(repo, mockReadWriter, mockAccess, resources.NewMockResourceClients(t), false)
-		connector := &filesConnector{access: mockAccess}
+		connector := &filesConnector{resourceAccess: mockAccess}
 
 		_, err := connector.handleGetRawFile(
 			context.Background(),
