@@ -47,7 +47,7 @@ func (hs *HTTPServer) SendResetPasswordEmail(c *contextmodel.ReqContext) respons
 		}
 	}
 
-	emailCmd := notifications.SendResetPasswordEmailCommand{User: usr}
+	emailCmd := notifications.SendResetPasswordEmailCommand{User: usr, ClientAddr: c.RemoteAddr()}
 	if err := hs.NotificationService.SendResetPasswordEmail(c.Req.Context(), &emailCmd); err != nil {
 		return response.Error(http.StatusInternalServerError, "Failed to send email", err)
 	}

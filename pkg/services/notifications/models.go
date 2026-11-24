@@ -49,6 +49,8 @@ type SendWebhookSync struct {
 
 type SendResetPasswordEmailCommand struct {
 	User *user.User
+	// ClientAddr is the address of the anonymous caller that requested the reset.
+	ClientAddr string
 }
 
 type ValidateResetPasswordCodeQuery struct {
