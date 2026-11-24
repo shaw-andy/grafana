@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/url"
@@ -39,6 +40,8 @@ type Context struct {
 	Req      *http.Request
 	Resp     ResponseWriter
 	template *template.Template
+
+	multipartForms []*multipart.Form
 }
 
 var errMissingWrite = errutil.Internal("web.missingWrite")
@@ -50,6 +53,7 @@ func (ctx *Context) run() {
 	}
 
 	rw := ctx.Resp
+	defer ctx.removeMultipartForms()
 	h.ServeHTTP(ctx.Resp, ctx.Req)
 
 	// Prevent the handler chain from not writing anything.
@@ -149,8 +153,25 @@ func (ctx *Context) parseForm() {
 	if (ctx.Req.Method == "POST" || ctx.Req.Method == "PUT") &&
 		len(contentType) > 0 && strings.Contains(contentType, "multipart/form-data") {
 		_ = ctx.Req.ParseMultipartForm(MaxMemory)
+		if ctx.Req.MultipartForm != nil {
+			ctx.multipartForms = append(ctx.multipartForms, ctx.Req.MultipartForm)
+		}
 	} else {
 		_ = ctx.Req.ParseForm()
+	}
+}
+
+// removeMultipartForms deletes the temp files of multipart forms parsed during
+// the request. net/http only cleans up the form of the request it created, and
+// handlers here see copies made with WithContext, so their forms would leak.
+func (ctx *Context) removeMultipartForms() {
+	forms := ctx.multipartForms
+	if ctx.Req != nil && ctx.Req.MultipartForm != nil && !slices.Contains(forms, ctx.Req.MultipartForm) {
+		forms = append(forms, ctx.Req.MultipartForm)
+	}
+	ctx.multipartForms = nil
+	for _, f := range forms {
+		_ = f.RemoveAll()
 	}
 }
 
