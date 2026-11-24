@@ -15,6 +15,7 @@ import (
 	"k8s.io/apiserver/pkg/registry/rest"
 
 	common "github.com/grafana/grafana/pkg/apimachinery/apis/common/v0alpha1"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
 	"github.com/grafana/grafana/pkg/apis/datasource/v0alpha1"
 	"github.com/grafana/grafana/pkg/infra/metrics/metricutil"
@@ -215,11 +216,20 @@ func (s *legacyStorage) DeleteCollection(ctx context.Context, deleteValidation r
 		}()
 	}
 
+	user, err := identity.GetRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
 	dss, err := s.datasources.ListDataSources(ctx)
 	if err != nil {
 		return nil, err
 	}
+	// The collection request is authorized without an object name, so it only
+	// proves the caller can delete some datasource. Skip the ones they cannot.
 	for _, ds := range dss.Items {
+		if !canDeleteDataSource(user, ds.Name) {
+			continue
+		}
 		if err = s.datasources.DeleteDataSource(ctx, ds.Name); err != nil {
 			return nil, err
 		}

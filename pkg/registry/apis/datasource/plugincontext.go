@@ -7,10 +7,14 @@ import (
 	"strings"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	datasourceV0 "github.com/grafana/grafana/pkg/apis/datasource/v0alpha1"
 	"github.com/grafana/grafana/pkg/plugins"
 	"github.com/grafana/grafana/pkg/registry/apis/datasource/converter"
+	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/apiserver/endpoints/request"
 	"github.com/grafana/grafana/pkg/services/datasources"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/plugincontext"
@@ -159,12 +163,25 @@ func (q *scopedDatasourceProvider) DeleteDataSource(ctx context.Context, uid str
 	if ds == nil {
 		return fmt.Errorf("not found")
 	}
+	// The datasource cache only enforces query access, so delete access must be
+	// checked here against the datasource that is about to be deleted.
+	if !canDeleteDataSource(user, ds.UID) {
+		return apierrors.NewForbidden(schema.GroupResource{
+			Group:    q.plugin.ID + ".datasource.grafana.app",
+			Resource: "datasources",
+		}, ds.UID, datasources.ErrDataSourceAccessDenied)
+	}
 	return q.dsService.DeleteDataSource(ctx, &datasources.DeleteDataSourceCommand{
 		ID:    ds.ID,
 		UID:   ds.UID,
 		OrgID: ds.OrgID,
 		Name:  ds.Name,
 	})
+}
+
+func canDeleteDataSource(user identity.Requester, uid string) bool {
+	evaluator := accesscontrol.EvalPermission(datasources.ActionDelete, datasources.ScopeProvider.GetResourceScopeUID(uid))
+	return evaluator.Evaluate(user.GetPermissions())
 }
 
 // GetDataSource implements PluginDatasourceProvider.
