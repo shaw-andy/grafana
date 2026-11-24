@@ -226,7 +226,8 @@ func (hs *HTTPServer) tryAutoLogin(c *contextmodel.ReqContext) bool {
 }
 
 func (hs *HTTPServer) getRedirectToForAutoLogin(c *contextmodel.ReqContext) string {
-	redirectTo := c.Req.FormValue("redirectTo")
+	// Reading from the body would parse pre-auth multipart uploads to temp files.
+	redirectTo := c.Req.URL.Query().Get("redirectTo")
 	if hs.Cfg.AppSubURL != "" && strings.HasPrefix(redirectTo, hs.Cfg.AppSubURL) {
 		redirectTo = strings.TrimPrefix(redirectTo, hs.Cfg.AppSubURL)
 	}
