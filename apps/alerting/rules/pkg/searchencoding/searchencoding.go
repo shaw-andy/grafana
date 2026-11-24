@@ -41,10 +41,29 @@ func LabelTerms[T ~string](labels map[string]T) []string {
 //
 // Ties in length are broken lexicographically so the result never depends on
 // the order bleve happens to return the terms in.
+//
+// A rule's label count is not bounded, so the candidates for a key are found
+// with a binary search over the lexicographically sorted terms (every term
+// extending a prefix sits in one contiguous run) and a segment tree that
+// returns the shortest unused term in that run. Comparing each key against
+// every term instead makes decoding one hit quadratic in its label count.
 func LabelMap(terms []string) map[string]string {
 	if len(terms) == 0 {
 		return nil
 	}
+
+	lex := make([]int, len(terms))
+	for i := range lex {
+		lex[i] = i
+	}
+	sort.Slice(lex, func(a, b int) bool { return terms[lex[a]] < terms[lex[b]] })
+	sorted := make([]string, len(lex))
+	pos := make([]int, len(terms))
+	for p, ti := range lex {
+		sorted[p] = terms[ti]
+		pos[ti] = p
+	}
+	avail := newShortestTree(sorted)
 
 	order := make([]int, len(terms))
 	for i := range order {
@@ -52,29 +71,23 @@ func LabelMap(terms []string) map[string]string {
 	}
 	sort.Slice(order, func(a, b int) bool { return before(terms[order[a]], terms[order[b]]) })
 
-	used := make([]bool, len(terms))
 	out := make(map[string]string, len(terms)/2)
 	for _, ki := range order {
-		if used[ki] {
+		if !avail.has(pos[ki]) {
 			continue
 		}
 		prefix := terms[ki] + "="
-		best := -1
-		for vi, candidate := range terms {
-			if used[vi] || vi == ki || !strings.HasPrefix(candidate, prefix) {
-				continue
-			}
-			// Shortest extension first: it is the value of this key rather than
-			// of a longer key that also starts with it.
-			if best == -1 || shortest(candidate, terms[best]) {
-				best = vi
-			}
-		}
+		lo := sort.SearchStrings(sorted, prefix)
+		hi := lo + sort.Search(len(sorted)-lo, func(i int) bool { return !strings.HasPrefix(sorted[lo+i], prefix) })
+		// Shortest extension first: it is the value of this key rather than of
+		// a longer key that also starts with it.
+		best := avail.shortest(lo, hi)
 		if best == -1 {
 			continue
 		}
-		used[ki], used[best] = true, true
-		out[terms[ki]] = terms[best][len(prefix):]
+		avail.remove(pos[ki])
+		avail.remove(best)
+		out[terms[ki]] = sorted[best][len(prefix):]
 	}
 	if len(out) == 0 {
 		return nil
@@ -82,18 +95,77 @@ func LabelMap(terms []string) map[string]string {
 	return out
 }
 
+// shortestTree is a segment tree over lexicographically sorted terms that
+// answers "shortest present term in [lo, hi)", ties going to the
+// lexicographically smaller (lower position) term.
+type shortestTree struct {
+	terms []string
+	size  int
+	node  []int // position of the best present term in the subtree, or -1
+}
+
+func newShortestTree(sorted []string) *shortestTree {
+	size := 1
+	for size < len(sorted) {
+		size <<= 1
+	}
+	t := &shortestTree{terms: sorted, size: size, node: make([]int, 2*size)}
+	for i := range t.node {
+		t.node[i] = -1
+	}
+	for p := range sorted {
+		t.node[size+p] = p
+	}
+	for i := size - 1; i > 0; i-- {
+		t.node[i] = t.pick(t.node[2*i], t.node[2*i+1])
+	}
+	return t
+}
+
+func (t *shortestTree) pick(a, b int) int {
+	if a == -1 {
+		return b
+	}
+	if b == -1 {
+		return a
+	}
+	if len(t.terms[b]) < len(t.terms[a]) || (len(t.terms[b]) == len(t.terms[a]) && b < a) {
+		return b
+	}
+	return a
+}
+
+func (t *shortestTree) has(p int) bool {
+	return t.node[t.size+p] != -1
+}
+
+func (t *shortestTree) remove(p int) {
+	i := t.size + p
+	t.node[i] = -1
+	for i >>= 1; i > 0; i >>= 1 {
+		t.node[i] = t.pick(t.node[2*i], t.node[2*i+1])
+	}
+}
+
+func (t *shortestTree) shortest(lo, hi int) int {
+	best := -1
+	for l, r := lo+t.size, hi+t.size; l < r; l, r = l>>1, r>>1 {
+		if l&1 == 1 {
+			best = t.pick(best, t.node[l])
+			l++
+		}
+		if r&1 == 1 {
+			r--
+			best = t.pick(best, t.node[r])
+		}
+	}
+	return best
+}
+
 // before orders terms longest first, then lexicographically.
 func before(a, b string) bool {
 	if len(a) != len(b) {
 		return len(a) > len(b)
-	}
-	return a < b
-}
-
-// shortest orders terms shortest first, then lexicographically.
-func shortest(a, b string) bool {
-	if len(a) != len(b) {
-		return len(a) < len(b)
 	}
 	return a < b
 }
