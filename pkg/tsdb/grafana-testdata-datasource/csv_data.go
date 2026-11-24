@@ -17,6 +17,19 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/data"
 )
 
+const (
+	// maxCSVValues matches the point ceiling RandomWalk applies.
+	maxCSVValues = 10000
+	// maxCSVContentCells bounds the cells, header included, of one CSV Content query.
+	maxCSVContentCells = 10 * maxCSVValues
+)
+
+// exceedsCSVValues reports whether a comma-separated list holds more than
+// maxCSVValues values, without allocating a slice of them.
+func exceedsCSVValues(s string) bool {
+	return strings.Count(s, ",") >= maxCSVValues
+}
+
 func (s *Service) handleCsvContentScenario(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
 	resp := backend.NewQueryDataResponse()
 
@@ -29,6 +42,12 @@ func (s *Service) handleCsvContentScenario(ctx context.Context, req *backend.Que
 		csvContent := model.CsvContent
 		if len(csvContent) == 0 {
 			continue
+		}
+
+		// Every cell ends at a comma, a newline, or the end of the input, so this
+		// bounds the cell count before the parser allocates per cell.
+		if strings.Count(csvContent, ",")+strings.Count(csvContent, "\n")+1 > maxCSVContentCells {
+			return nil, fmt.Errorf("csv content must have at most %d values", maxCSVContentCells)
 		}
 
 		alias := model.Alias
@@ -137,12 +156,15 @@ func LoadCsvContent(ioReader io.Reader, name string) (*data.Frame, error) {
 		fieldRawValues = append(fieldRawValues, []string{})
 	}
 
-	for {
+	for rows := 0; ; rows++ {
 		lineValues, err := reader.Read()
 		if errors.Is(err, io.EOF) {
 			break // reached end of the file
 		} else if err != nil {
 			return nil, fmt.Errorf("failed to read line: %v", err)
+		}
+		if rows >= maxCSVValues {
+			return nil, fmt.Errorf("csv must have at most %d rows", maxCSVValues)
 		}
 
 		for fieldIndex, value := range lineValues {
@@ -194,12 +216,18 @@ func LoadCsvContent(ioReader io.Reader, name string) (*data.Frame, error) {
 }
 
 func csvLineToField(stringInput string) (*data.Field, error) {
+	if exceedsCSVValues(stringInput) {
+		return nil, fmt.Errorf("csv must have at most %d values", maxCSVValues)
+	}
 	return csvValuesToField(strings.Split(strings.ReplaceAll(stringInput, " ", ""), ","))
 }
 
 func csvValuesToField(parts []string) (*data.Field, error) {
 	if len(parts) < 1 {
 		return nil, fmt.Errorf("csv must have at least one value")
+	}
+	if len(parts) > maxCSVValues {
+		return nil, fmt.Errorf("csv must have at most %d values", maxCSVValues)
 	}
 
 	first := strings.ToUpper(parts[0])

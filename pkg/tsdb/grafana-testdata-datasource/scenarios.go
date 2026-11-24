@@ -393,7 +393,8 @@ func (s *Service) handleCSVMetricValuesScenario(ctx context.Context, req *backen
 		}
 		valueField, err := csvLineToField(stringInput)
 		if err != nil {
-			return nil, err
+			resp.Responses[q.RefID] = backend.ErrDataResponse(backend.StatusBadRequest, err.Error())
+			continue
 		}
 		valueField.Name = frameNameForQuery(q, model, 0)
 
@@ -1337,6 +1338,9 @@ func predictableCSVWave(query backend.DataQuery, model kinds.TestDataQuery) ([]*
 		var err error
 
 		rawValues := strings.TrimRight(strings.TrimSpace(subQ.ValuesCSV), ",") // Strip Trailing Comma
+		if exceedsCSVValues(rawValues) {
+			return nil, fmt.Errorf("csv wave must have at most %d values", maxCSVValues)
+		}
 		rawValesCSV := strings.Split(rawValues, ",")
 		values := make([]*float64, len(rawValesCSV))
 
@@ -1363,9 +1367,8 @@ func predictableCSVWave(query backend.DataQuery, model kinds.TestDataQuery) ([]*
 		subQ.TimeStep *= 1000 // Seconds to Milliseconds
 		valuesLen := int64(len(values))
 		getValue := func(mod int64) (*float64, error) {
-			var i int64
-			for i = 0; i < valuesLen; i++ {
-				if mod == i*subQ.TimeStep {
+			if subQ.TimeStep != 0 && mod%subQ.TimeStep == 0 {
+				if i := mod / subQ.TimeStep; i >= 0 && i < valuesLen {
 					return values[i], nil
 				}
 			}
