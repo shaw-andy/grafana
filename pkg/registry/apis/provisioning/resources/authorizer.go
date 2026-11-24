@@ -620,11 +620,44 @@ func (a *ProvisioningAuthorizer) nearestSyncedFolderID(ctx context.Context, dir 
 // reasons documented on the Authorizer interface — caller-supplied refs can
 // be used to spoof folder UIDs.
 func (a *ProvisioningAuthorizer) AuthorizeReadRawFile(ctx context.Context, path string) error {
-	folderID, err := a.nearestSyncedFolderID(ctx, safepath.Dir(path))
+	dir := safepath.Dir(path)
+	folderID, err := a.nearestSyncedFolderID(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("resolve folder for %q: %w", path, err)
 	}
+	if err := a.checkFolderRead(ctx, folderID); err != nil {
+		return err
+	}
+	if dir == "" {
+		return nil
+	}
 
+	dirID, err := a.getFolderID(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("get folder ID for %q: %w", dir, err)
+	}
+	if dirID == folderID {
+		return nil
+	}
+	return a.authorizeUnsyncedDirRead(ctx, dirID)
+}
+
+// authorizeUnsyncedDirRead narrows reads in a directory that has no Grafana
+// folder, on top of the inherited permission already checked: the caller needs
+// read on the directory's own folder ID (e.g. a folders:read wildcard) or an
+// org role of at least Viewer. It can only deny what the inherited check allowed.
+func (a *ProvisioningAuthorizer) authorizeUnsyncedDirRead(ctx context.Context, dirID string) error {
+	err := a.checkFolderRead(ctx, dirID)
+	if err == nil {
+		return nil
+	}
+	if requester, rerr := identity.GetRequester(ctx); rerr == nil && requester.GetOrgRole().Includes(identity.RoleViewer) {
+		return nil
+	}
+	return err
+}
+
+func (a *ProvisioningAuthorizer) checkFolderRead(ctx context.Context, folderID string) error {
 	return a.access.Check(ctx, authlib.CheckRequest{
 		Group:    FolderResource.Group,
 		Resource: FolderResource.Resource,

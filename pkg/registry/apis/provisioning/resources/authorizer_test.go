@@ -10,6 +10,7 @@ import (
 	"github.com/grafana/grafana/apps/provisioning/pkg/apis/auth"
 	provisioning "github.com/grafana/grafana/apps/provisioning/pkg/apis/provisioning/v0alpha1"
 	"github.com/grafana/grafana/apps/provisioning/pkg/repository"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -1133,6 +1134,40 @@ func TestAuthorizeReadRawFile(t *testing.T) {
 			assert.ErrorIs(t, err, assert.AnError, "the denial for the governing folder must be returned")
 		})
 	}
+
+	t.Run("unsynced directory also requires its own folder grant or the Viewer role", func(t *testing.T) {
+		docsID := ParseFolder("docs/", repo.Name).ID
+		cases := []struct {
+			name      string
+			orgRole   identity.RoleType
+			dirGrant  bool
+			wantAllow bool
+		}{
+			{name: "org Viewer", orgRole: identity.RoleViewer, wantAllow: true},
+			{name: "no org role with a grant on the directory", orgRole: identity.RoleNone, dirGrant: true, wantAllow: true},
+			{name: "no org role and only the inherited grant", orgRole: identity.RoleNone, wantAllow: false},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				mockAccess := auth.NewMockAccessChecker(t)
+				mockAccess.EXPECT().Check(mock.Anything, mock.Anything, RootFolder(repo)).Return(nil).Once()
+				var dirResult error = assert.AnError
+				if tc.dirGrant {
+					dirResult = nil
+				}
+				mockAccess.EXPECT().Check(mock.Anything, mock.Anything, docsID).Return(dirResult).Once()
+
+				ctx := identity.WithRequester(context.Background(), &identity.StaticRequester{OrgID: 1, OrgRole: tc.orgRole})
+				authorizer := NewAuthorizer(repo, newReader(t), mockAccess, clientsWithFolders(t), false)
+				err := authorizer.AuthorizeReadRawFile(ctx, "docs/README.md")
+				if tc.wantAllow {
+					assert.NoError(t, err)
+				} else {
+					assert.ErrorIs(t, err, assert.AnError)
+				}
+			})
+		}
+	})
 
 	t.Run("folder lookup failure denies without checking access", func(t *testing.T) {
 		fake := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
