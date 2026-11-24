@@ -18,6 +18,9 @@ import (
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 )
 
 func TestCheckQuota(t *testing.T) {
@@ -527,6 +530,17 @@ func TestParseRequestOptionsRefValidation(t *testing.T) {
 	}
 }
 
+// rawFileTestClients returns ResourceClients whose folder API holds no folders,
+// so raw-file authorization resolves to the repository root folder.
+func rawFileTestClients(t *testing.T) *resources.MockResourceClients {
+	clients := resources.NewMockResourceClients(t)
+	folders := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		resources.FolderResource: "FolderList",
+	}).Resource(resources.FolderResource).Namespace("default")
+	clients.EXPECT().Folder(mock.Anything).Return(folders, resources.FolderKind, nil).Maybe()
+	return clients
+}
+
 func TestHandleGetRawFile(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -565,13 +579,13 @@ func TestHandleGetRawFile(t *testing.T) {
 			mockAccess.EXPECT().Check(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 
 			repo := &provisioningapi.Repository{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-repo"},
+				ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "default"},
 				Spec: provisioningapi.RepositorySpec{
 					Sync: provisioningapi.SyncOptions{Target: provisioningapi.SyncTargetTypeFolder},
 				},
 			}
 			mockReadWriter.EXPECT().Config().Return(repo).Maybe()
-			authorizer := resources.NewAuthorizer(repo, mockReadWriter, mockAccess, resources.NewMockResourceClients(t), false)
+			authorizer := resources.NewAuthorizer(repo, mockReadWriter, mockAccess, rawFileTestClients(t), false)
 
 			if tt.readError != nil {
 				mockReadWriter.EXPECT().Read(mock.Anything, tt.path, "").Return(nil, tt.readError)
@@ -612,7 +626,7 @@ func TestHandleGetRawFile_FolderScopedAuth(t *testing.T) {
 		mockAccess := auth.NewMockAccessChecker(t)
 
 		repo := &provisioningapi.Repository{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-repo"},
+			ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "default"},
 			Spec: provisioningapi.RepositorySpec{
 				Sync: provisioningapi.SyncOptions{Target: provisioningapi.SyncTargetTypeFolder},
 			},
@@ -624,7 +638,7 @@ func TestHandleGetRawFile_FolderScopedAuth(t *testing.T) {
 			Check(mock.Anything, mock.Anything, mock.Anything).
 			Return(apierrors.NewForbidden(provisioningapi.RepositoryResourceInfo.GroupResource(), "team-a", errors.New("denied")))
 
-		authorizer := resources.NewAuthorizer(repo, mockReadWriter, mockAccess, resources.NewMockResourceClients(t), false)
+		authorizer := resources.NewAuthorizer(repo, mockReadWriter, mockAccess, rawFileTestClients(t), false)
 		connector := &filesConnector{resourceAccess: mockAccess}
 
 		_, err := connector.handleGetRawFile(

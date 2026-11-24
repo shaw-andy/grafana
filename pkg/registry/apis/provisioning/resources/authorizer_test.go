@@ -15,8 +15,11 @@ import (
 	"github.com/stretchr/testify/mock"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 // authTestClients returns a ResourceClients exposing the static supported set and
@@ -1052,5 +1055,97 @@ func TestAuthorizeMoveByPath(t *testing.T) {
 		err := authorizer.AuthorizeMoveByPath(context.Background(), "src/dash.json", "restricted/dash.json")
 
 		assert.Error(t, err)
+	})
+}
+
+// TestAuthorizeReadRawFile verifies that raw-file reads are authorized against
+// the nearest directory that exists in Grafana as a folder, so an unsynced
+// subdirectory of a restricted folder is governed by that restricted folder.
+func TestAuthorizeReadRawFile(t *testing.T) {
+	repo := &provisioning.Repository{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "default"},
+		Spec: provisioning.RepositorySpec{
+			Sync: provisioning.SyncOptions{Target: provisioning.SyncTargetTypeFolder},
+		},
+	}
+	restrictedID := ParseFolder("restricted/", repo.Name).ID
+
+	syncedFolder := func(id string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": FolderKind.GroupVersion().String(),
+			"kind":       FolderKind.Kind,
+			"metadata":   map[string]interface{}{"name": id, "namespace": "default"},
+		}}
+	}
+	clientsWithFolders := func(t *testing.T, objs ...runtime.Object) *MockResourceClients {
+		fake := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+			FolderResource: "FolderList",
+		}, objs...)
+		c := NewMockResourceClients(t)
+		c.EXPECT().Folder(mock.Anything).Return(fake.Resource(FolderResource).Namespace("default"), FolderKind, nil).Maybe()
+		return c
+	}
+	newReader := func(t *testing.T) *repository.MockReader {
+		r := repository.NewMockReader(t)
+		r.EXPECT().Config().Return(repo).Maybe()
+		return r
+	}
+
+	tests := []struct {
+		name           string
+		path           string
+		synced         []runtime.Object
+		expectedFolder string
+	}{
+		{
+			name:           "synced containing folder is checked",
+			path:           "restricted/README.md",
+			synced:         []runtime.Object{syncedFolder(restrictedID)},
+			expectedFolder: restrictedID,
+		},
+		{
+			name:           "unsynced subdirectory is governed by its synced ancestor",
+			path:           "restricted/docs/README.md",
+			synced:         []runtime.Object{syncedFolder(restrictedID)},
+			expectedFolder: restrictedID,
+		},
+		{
+			name:           "unsynced directory without synced ancestor uses the repository root",
+			path:           "docs/README.md",
+			expectedFolder: RootFolder(repo),
+		},
+		{
+			name:           "file at the root uses the repository root",
+			path:           "README.md",
+			expectedFolder: RootFolder(repo),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockAccess := auth.NewMockAccessChecker(t)
+			mockAccess.EXPECT().Check(mock.Anything, mock.MatchedBy(func(req authlib.CheckRequest) bool {
+				return req.Group == FolderResource.Group && req.Verb == utils.VerbGet && req.Name == tt.expectedFolder
+			}), tt.expectedFolder).Return(assert.AnError).Once()
+
+			authorizer := NewAuthorizer(repo, newReader(t), mockAccess, clientsWithFolders(t, tt.synced...), false)
+			err := authorizer.AuthorizeReadRawFile(context.Background(), tt.path)
+			assert.ErrorIs(t, err, assert.AnError, "the denial for the governing folder must be returned")
+		})
+	}
+
+	t.Run("folder lookup failure denies without checking access", func(t *testing.T) {
+		fake := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+			FolderResource: "FolderList",
+		})
+		fake.PrependReactor("get", FolderResource.Resource, func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, assert.AnError
+		})
+		c := NewMockResourceClients(t)
+		c.EXPECT().Folder(mock.Anything).Return(fake.Resource(FolderResource).Namespace("default"), FolderKind, nil)
+
+		authorizer := NewAuthorizer(repo, newReader(t), auth.NewMockAccessChecker(t), c, false)
+		err := authorizer.AuthorizeReadRawFile(context.Background(), "restricted/README.md")
+		assert.ErrorIs(t, err, assert.AnError)
 	})
 }
