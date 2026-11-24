@@ -5,12 +5,15 @@ import (
 	"fmt"
 
 	authlib "github.com/grafana/authlib/types"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/grafana/grafana/apps/provisioning/pkg/apis/auth"
 	provisioning "github.com/grafana/grafana/apps/provisioning/pkg/apis/provisioning/v0alpha1"
 	"github.com/grafana/grafana/apps/provisioning/pkg/repository"
 	"github.com/grafana/grafana/apps/provisioning/pkg/safepath"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
 )
 
@@ -126,8 +129,10 @@ type Authorizer interface {
 	//
 	// Raw files such as README.md are returned as bytes rather than parsed as
 	// k8s resources, so we cannot derive a per-resource verb. We instead gate
-	// access on the read permission of the file's containing folder. For files
-	// at the repository root, the check uses the repository's root folder.
+	// access on the read permission of the file's containing folder, or of its
+	// nearest ancestor that exists in Grafana when the containing directory was
+	// never synced. For files at the repository root, the check uses the
+	// repository's root folder.
 	//
 	// Permissions on a parent folder grant at least that level of access to
 	// all children, so a user who can read the parent folder can read raw
@@ -570,26 +575,89 @@ func (a *ProvisioningAuthorizer) AuthorizeWrite(ctx context.Context, ref string)
 	return repository.IsWriteAllowed(a.repo, ref)
 }
 
+// nearestSyncedFolderID returns the ID of the closest directory at or above dir
+// that exists in Grafana as a folder, or the repository root folder when none
+// does. A directory that was never synced (e.g. one holding only a README) has
+// no permissions of its own and inherits those of its nearest synced ancestor,
+// so authorizing against that ancestor grants exactly what Grafana would.
+func (a *ProvisioningAuthorizer) nearestSyncedFolderID(ctx context.Context, dir string) (string, error) {
+	if dir == "" {
+		return RootFolder(a.repo), nil
+	}
+
+	folders, _, err := a.clients.Folder(ctx)
+	if err != nil {
+		return "", fmt.Errorf("get folder client: %w", err)
+	}
+	// Existence is looked up as the provisioning identity: the caller may be
+	// unable to see the folder, and that is the case that must be denied.
+	lookupCtx, _, err := identity.WithProvisioningIdentity(ctx, a.repo.Namespace)
+	if err != nil {
+		return "", fmt.Errorf("use provisioning identity: %w", err)
+	}
+
+	for ; dir != ""; dir = safepath.Dir(dir) {
+		id, err := a.getFolderID(ctx, dir)
+		if err != nil {
+			return "", fmt.Errorf("get folder ID for %q: %w", dir, err)
+		}
+		_, err = folders.Get(lookupCtx, id, metav1.GetOptions{})
+		if err == nil {
+			return id, nil
+		}
+		if !apierrors.IsNotFound(err) {
+			return "", fmt.Errorf("look up folder %q: %w", id, err)
+		}
+	}
+	return RootFolder(a.repo), nil
+}
+
 // AuthorizeReadRawFile checks if the user has read permission on the folder
-// containing a raw (non-resource) file.
+// containing a raw (non-resource) file. When that directory was never synced
+// into Grafana, its nearest synced ancestor is checked instead.
 //
 // Folder IDs are resolved from the configured branch (ref="") for the same
 // reasons documented on the Authorizer interface — caller-supplied refs can
 // be used to spoof folder UIDs.
 func (a *ProvisioningAuthorizer) AuthorizeReadRawFile(ctx context.Context, path string) error {
-	parentPath := safepath.Dir(path)
-
-	var folderID string
-	if parentPath == "" {
-		folderID = RootFolder(a.repo)
-	} else {
-		id, err := a.getFolderID(ctx, parentPath)
-		if err != nil {
-			return fmt.Errorf("get parent folder ID for %q: %w", path, err)
-		}
-		folderID = id
+	dir := safepath.Dir(path)
+	folderID, err := a.nearestSyncedFolderID(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("resolve folder for %q: %w", path, err)
+	}
+	if err := a.checkFolderRead(ctx, folderID); err != nil {
+		return err
+	}
+	if dir == "" {
+		return nil
 	}
 
+	dirID, err := a.getFolderID(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("get folder ID for %q: %w", dir, err)
+	}
+	if dirID == folderID {
+		return nil
+	}
+	return a.authorizeUnsyncedDirRead(ctx, dirID)
+}
+
+// authorizeUnsyncedDirRead narrows reads in a directory that has no Grafana
+// folder, on top of the inherited permission already checked: the caller needs
+// read on the directory's own folder ID (e.g. a folders:read wildcard) or an
+// org role of at least Viewer. It can only deny what the inherited check allowed.
+func (a *ProvisioningAuthorizer) authorizeUnsyncedDirRead(ctx context.Context, dirID string) error {
+	err := a.checkFolderRead(ctx, dirID)
+	if err == nil {
+		return nil
+	}
+	if requester, rerr := identity.GetRequester(ctx); rerr == nil && requester.GetOrgRole().Includes(identity.RoleViewer) {
+		return nil
+	}
+	return err
+}
+
+func (a *ProvisioningAuthorizer) checkFolderRead(ctx context.Context, folderID string) error {
 	return a.access.Check(ctx, authlib.CheckRequest{
 		Group:    FolderResource.Group,
 		Resource: FolderResource.Resource,

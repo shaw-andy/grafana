@@ -162,7 +162,7 @@ func TestSessionAccessChecker_WithFallbackRole_ImmutableOriginal(t *testing.T) {
 		identityType: authlib.TypeUser,
 	})
 
-	req := authlib.CheckRequest{}
+	req := authlib.CheckRequest{Group: "provisioning.grafana.app", Resource: "repositories"}
 
 	// Original should deny (no fallback)
 	err := original.Check(ctx, req, "")
@@ -192,7 +192,7 @@ func TestSessionAccessChecker_WithFallbackRole_ChainedCalls(t *testing.T) {
 		identityType: authlib.TypeUser,
 	})
 
-	err := checker.Check(ctx, authlib.CheckRequest{}, "")
+	err := checker.Check(ctx, authlib.CheckRequest{Group: "provisioning.grafana.app", Resource: "repositories"}, "")
 	require.NoError(t, err, "last fallback (editor) should be used")
 }
 
@@ -212,8 +212,56 @@ func TestSessionAccessChecker_RealSignedInUser(t *testing.T) {
 
 	ctx := identity.WithRequester(context.Background(), signedInUser)
 
-	err := checker.Check(ctx, authlib.CheckRequest{}, "")
+	err := checker.Check(ctx, authlib.CheckRequest{Group: "provisioning.grafana.app", Resource: "repositories"}, "")
 	require.NoError(t, err, "admin user should be allowed via fallback")
+}
+
+func TestSessionAccessChecker_FallbackDoesNotOverrideScopedDenials(t *testing.T) {
+	tests := []struct {
+		name   string
+		req    authlib.CheckRequest
+		folder string
+	}{
+		{
+			name:   "dashboard in a folder",
+			req:    authlib.CheckRequest{Verb: "update", Group: "dashboard.grafana.app", Resource: "dashboards", Name: "dash"},
+			folder: "restricted-folder",
+		},
+		{
+			name: "dashboard at the root",
+			req:  authlib.CheckRequest{Verb: "update", Group: "dashboard.grafana.app", Resource: "dashboards", Name: "dash"},
+		},
+		{
+			name:   "folder read",
+			req:    authlib.CheckRequest{Verb: "get", Group: "folder.grafana.app", Resource: "folders", Name: "restricted-folder"},
+			folder: "restricted-folder",
+		},
+		{
+			name:   "provisioning resource checked within a folder",
+			req:    authlib.CheckRequest{Verb: "get", Group: "provisioning.grafana.app", Resource: "repositories", Name: "repo"},
+			folder: "restricted-folder",
+		},
+	}
+
+	for _, tt := range tests {
+		for _, innerErr := range []error{nil, errors.New("access check failed")} {
+			t.Run(tt.name, func(t *testing.T) {
+				mock := &mockInnerAccessChecker{
+					response: authlib.CheckResponse{Allowed: false},
+					err:      innerErr,
+				}
+				checker := NewSessionAccessChecker(mock).WithFallbackRole(identity.RoleViewer)
+				ctx := identity.WithRequester(context.Background(), &mockRequester{
+					orgRole:      identity.RoleAdmin,
+					identityType: authlib.TypeUser,
+				})
+
+				err := checker.Check(ctx, tt.req, tt.folder)
+				require.Error(t, err)
+				assert.True(t, apierrors.IsForbidden(err), "expected Forbidden error, got: %v", err)
+			})
+		}
+	}
 }
 
 func TestSessionAccessChecker_FillsNamespace(t *testing.T) {

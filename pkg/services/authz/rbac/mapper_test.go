@@ -46,8 +46,8 @@ func TestMapperRegistry_DatasourceWildcard(t *testing.T) {
 
 // TestMapperRegistry_Playlist verifies playlists map to their real two-action model
 // (playlists:read / playlists:write) rather than the default create/delete actions, and
-// that create skips scope since playlists are neither folder-scoped nor scope-checked.
-// This is what lets the provisioning export preflight authorize playlists.
+// that no verb requires a scope since playlists are neither folder-scoped nor scope-checked.
+// This is what lets provisioning authorize playlists under the requesting user.
 func TestMapperRegistry_Playlist(t *testing.T) {
 	reg := NewMapperRegistry()
 
@@ -66,7 +66,9 @@ func TestMapperRegistry_Playlist(t *testing.T) {
 		assert.Equal(t, "playlists:write", action, "verb %q should map to write (no playlists:create/delete action exists)", verb)
 	}
 
-	assert.True(t, mapping.SkipScope(utils.VerbCreate), "create must skip scope; playlists are not folder-scoped")
+	for _, verb := range []string{utils.VerbGet, utils.VerbCreate, utils.VerbUpdate, utils.VerbPatch, utils.VerbDelete} {
+		assert.True(t, mapping.SkipScope(verb), "verb %q must skip scope; playlist actions are granted unscoped", verb)
+	}
 	assert.False(t, mapping.HasFolderSupport(), "playlists are not folder-scoped")
 }
 

@@ -587,8 +587,9 @@ func NewMapperRegistry() MapperRegistry {
 		"playlist.grafana.app": {
 			// Playlists only define two actions (playlists:read / playlists:write) and are
 			// neither folder-scoped nor scope-checked by their own authorizer, so writes map
-			// to playlists:write and create skips scope. This lets the provisioning export
-			// preflight (run under the requesting user) authorize playlists like other kinds.
+			// to playlists:write and no verb requires a scope: the actions are granted
+			// unscoped. This lets provisioning (run under the requesting user) authorize
+			// playlists like other kinds.
 			"playlists": translation{
 				resource:  "playlists",
 				attribute: "uid",
@@ -603,7 +604,7 @@ func NewMapperRegistry() MapperRegistry {
 					utils.VerbDeleteCollection: "playlists:write",
 				},
 				folderSupport:   false,
-				skipScopeOnVerb: map[string]bool{utils.VerbCreate: true},
+				skipScopeOnVerb: skipScopeOnAllVerbs,
 			},
 		},
 		"iam.grafana.app": {
