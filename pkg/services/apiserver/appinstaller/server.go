@@ -144,7 +144,7 @@ func (s *serverWrapper) configureStoragePath(
 			parentPath := strings.TrimSuffix(storagePath, "/status")
 			parentStore, ok := apiGroupInfo.VersionedResourcesStorageMap[v][parentPath]
 			if ok {
-				if _, isMode4or5 := parentStore.(*genericregistry.Store); !isMode4or5 {
+				if !isUnifiedOnlyStore(parentStore) {
 					// When legacy resources have status, the dual writing must be handled explicitly
 					if statusProvider, ok := s.installer.(LegacyStatusProvider); ok {
 						storage = statusProvider.GetLegacyStatus(gr.WithVersion(v), statusRest)
@@ -159,6 +159,18 @@ func (s *serverWrapper) configureStoragePath(
 	}
 	apiGroupInfo.VersionedResourcesStorageMap[v][storagePath] = storage
 	return nil
+}
+
+// isUnifiedOnlyStore reports whether a resource is served by unified storage
+// alone (dual writer modes 4 and 5, or no legacy storage). configureStorage
+// wraps the unified store in a storewrapper before any dual writer is built, so
+// a wrapper here never sits in front of legacy storage.
+func isUnifiedOnlyStore(store genericrest.Storage) bool {
+	switch store.(type) {
+	case *genericregistry.Store, *storewrapper.Wrapper:
+		return true
+	}
+	return false
 }
 
 // resourceFromStoragePath returns the top-level resource of a storage path, dropping any
@@ -190,7 +202,7 @@ func (s *serverWrapper) configureStorage(gr schema.GroupResource, dualWriteSuppo
 			if provider, ok := s.installer.(NamespaceScopedStorageAuthorizerProvider); ok {
 				authz := provider.GetNamespaceScopedStorageAuthorizer(gr)
 				if authz != nil {
-					return storewrapper.New(gs, gr, authz)
+					return storewrapper.New(gs, gr, authz, storewrapper.WithAuthorizeDeletedObject())
 				}
 			}
 
@@ -221,7 +233,7 @@ func (s *serverWrapper) configureStorage(gr schema.GroupResource, dualWriteSuppo
 			authz = &storewrapper.DenyAuthorizer{}
 		}
 
-		return storewrapper.New(gs, gr, authz)
+		return storewrapper.New(gs, gr, authz, storewrapper.WithAuthorizeDeletedObject())
 	}
 
 	// if the storage is a status store, we need to extract the underlying generic registry store

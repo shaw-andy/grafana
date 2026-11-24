@@ -7,6 +7,7 @@ import (
 
 	"github.com/grafana/grafana-app-sdk/resource"
 	alertingv0alpha1 "github.com/grafana/grafana/apps/alerting/rules/pkg/apis/alerting/v0alpha1"
+	rulesequenceapp "github.com/grafana/grafana/apps/alerting/rules/pkg/app/rulesequence"
 	"github.com/grafana/grafana/pkg/infra/log"
 	reqns "github.com/grafana/grafana/pkg/services/apiserver/endpoints/request"
 	"github.com/grafana/grafana/pkg/services/ngalert/models"
@@ -97,6 +98,10 @@ func convertRuleSequence(seq alertingv0alpha1.RuleSequence) (models.SchedulableR
 	interval, err := seq.Spec.Trigger.Interval.ToDuration()
 	if err != nil {
 		return models.SchedulableRuleSequence{}, fmt.Errorf("invalid interval: %w", err)
+	}
+	// Admission enforces the same bound; this covers sequences stored before it did.
+	if interval <= 0 || interval > rulesequenceapp.MaxInterval {
+		return models.SchedulableRuleSequence{}, fmt.Errorf("interval %s is outside (0, %s]", interval, rulesequenceapp.MaxInterval)
 	}
 
 	recRefs := make([]string, 0, len(seq.Spec.RecordingRules))

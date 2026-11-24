@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
+	k8srest "k8s.io/apiserver/pkg/registry/rest"
 
 	"github.com/grafana/authlib/types"
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
@@ -221,6 +222,75 @@ func TestWrapper_Delete(t *testing.T) {
 		setup.mockAuth.AssertExpectations(t)
 		setup.mockStore.AssertExpectations(t)
 		setup.mockStore.AssertNotCalled(t, "Delete")
+	})
+}
+
+func TestWrapper_DeleteWithAuthorizeDeletedObject(t *testing.T) {
+	newSetup := func(t *testing.T) *testSetup {
+		mockStore := rest.NewMockStorage(t)
+		mockAuth := &FakeAuthorizer{}
+		ctx := identity.WithRequester(context.Background(), &identity.StaticRequester{UserUID: "u001", Type: types.TypeUser})
+		return &testSetup{mockStore: mockStore, mockAuth: mockAuth, wrapper: New(mockStore, testResource, mockAuth, WithAuthorizeDeletedObject()), ctx: ctx}
+	}
+	fetched := &fakeObject{ObjectMeta: metaV1.ObjectMeta{Name: "to-delete", ResourceVersion: "1"}}
+	current := &fakeObject{ObjectMeta: metaV1.ObjectMeta{Name: "to-delete", ResourceVersion: "2"}}
+	deleteOpts := &metaV1.DeleteOptions{}
+
+	// runDeleteValidation stands in for a store that validates the version it is
+	// about to delete, calling the validation with its own service identity.
+	runDeleteValidation := func(validationErr *error) func(args mock.Arguments) {
+		return func(args mock.Arguments) {
+			validate := args.Get(2).(k8srest.ValidateObjectFunc)
+			storeCtx, _ := identity.WithServiceIdentity(context.Background(), 0)
+			*validationErr = validate(storeCtx, current)
+		}
+	}
+
+	t.Run("authorizes the version the store deletes as the caller", func(t *testing.T) {
+		setup := newSetup(t)
+		var validationErr error
+		innerCalled := false
+		inner := func(ctx context.Context, obj runtime.Object) error {
+			innerCalled = true
+			assert.Same(t, current, obj)
+			return nil
+		}
+
+		setup.mockStore.On("Get", mock.MatchedBy(matchesServiceIdentity()), "to-delete", mock.Anything).Return(fetched, nil)
+		setup.mockAuth.On("BeforeDelete", mock.MatchedBy(matchesOriginalUser()), fetched).Return(nil).Once()
+		setup.mockAuth.On("BeforeDelete", mock.MatchedBy(matchesOriginalUser()), current).Return(nil).Once()
+		setup.mockStore.On("Delete", mock.MatchedBy(matchesServiceIdentity()), "to-delete", mock.Anything, deleteOpts).
+			Run(runDeleteValidation(&validationErr)).Return(current, true, nil)
+
+		_, deleted, err := setup.wrapper.Delete(setup.ctx, "to-delete", inner, deleteOpts)
+
+		require.NoError(t, err)
+		require.NoError(t, validationErr)
+		assert.True(t, deleted)
+		assert.True(t, innerCalled)
+		setup.mockAuth.AssertExpectations(t)
+	})
+
+	t.Run("refuses when the version the store deletes is not authorized", func(t *testing.T) {
+		setup := newSetup(t)
+		var validationErr error
+		inner := func(ctx context.Context, obj runtime.Object) error {
+			t.Fatal("inner delete validation must not run after authorization fails")
+			return nil
+		}
+
+		setup.mockStore.On("Get", mock.MatchedBy(matchesServiceIdentity()), "to-delete", mock.Anything).Return(fetched, nil)
+		setup.mockAuth.On("BeforeDelete", mock.MatchedBy(matchesOriginalUser()), fetched).Return(nil).Once()
+		setup.mockAuth.On("BeforeDelete", mock.MatchedBy(matchesOriginalUser()), current).Return(ErrUnauthorized).Once()
+		setup.mockStore.On("Delete", mock.MatchedBy(matchesServiceIdentity()), "to-delete", mock.Anything, deleteOpts).
+			Run(runDeleteValidation(&validationErr)).Return(nil, false, ErrUnauthorized)
+
+		_, deleted, err := setup.wrapper.Delete(setup.ctx, "to-delete", inner, deleteOpts)
+
+		require.ErrorIs(t, validationErr, ErrUnauthorized)
+		require.ErrorIs(t, err, ErrUnauthorized)
+		assert.False(t, deleted)
+		setup.mockAuth.AssertExpectations(t)
 	})
 }
 
