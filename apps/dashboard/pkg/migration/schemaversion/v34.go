@@ -59,6 +59,11 @@ import (
 //	  { name: "CloudWatch Alerts - Minimum", dimensions: {"InstanceId": "i-123"}, namespace: "AWS/EC2", region: "us-east-1", prefixMatching: false, statistic: "Minimum" }
 //	]
 func V34(_ context.Context, dashboard map[string]interface{}) error {
+	// Validate the whole dashboard before mutating it, so a rejected dashboard is left untouched.
+	if err := validateCloudWatchStatisticsSplit(dashboard); err != nil {
+		return err
+	}
+
 	dashboard["schemaVersion"] = int(34)
 
 	// Migrate panel queries if panels exist and are an array
@@ -103,6 +108,7 @@ func migrateCloudWatchQueriesInPanel(panel map[string]interface{}) {
 
 	var newTargets []interface{}
 	var additionalTargets []interface{}
+	refIds := newRefIdAllocator(targets)
 
 	for _, target := range targets {
 		t, ok := target.(map[string]interface{})
@@ -174,7 +180,7 @@ func migrateCloudWatchQueriesInPanel(panel map[string]interface{}) {
 				if i == 0 {
 					newTargets = append(newTargets, newQuery)
 				} else {
-					newQuery["refId"] = generateNextRefId(append(targets, additionalTargets...), len(additionalTargets))
+					newQuery["refId"] = refIds.next(len(additionalTargets))
 					additionalTargets = append(additionalTargets, newQuery)
 				}
 			}
@@ -343,36 +349,162 @@ func isLegacyCloudWatchAnnotationQuery(annotation map[string]interface{}) bool {
 	return hasDimensions && hasNamespace && hasRegion && hasPrefixMatching && hasStatistics
 }
 
-// generateNextRefId generates a new refId for additional queries created during migration.
-func generateNextRefId(allTargets []interface{}, additionalIndex int) string {
-	// Collect all existing refIds
-	used := make(map[string]bool)
-	for _, target := range allTargets {
+const (
+	// maxStatisticsPerCloudWatchQuery bounds how many queries or annotations a single
+	// statistics array may be split into.
+	maxStatisticsPerCloudWatchQuery = 64
+
+	// refIdCandidateCount is the number of refIds the allocator can hand out: A-Z, then AA-ZZ.
+	refIdCandidateCount = 26 + 26*26
+
+	// maxTargetsPerPanelAfterStatisticsSplit bounds a panel's targets once its statistics
+	// arrays are split; past refIdCandidateCount no unique letter refId remains.
+	maxTargetsPerPanelAfterStatisticsSplit = refIdCandidateCount
+
+	// maxQueriesAddedByStatisticsSplit bounds the queries and annotations the split may add
+	// across the whole dashboard, so many panels at the per-query limit cannot multiply
+	// the dashboard's size.
+	maxQueriesAddedByStatisticsSplit = 10000
+)
+
+// validateCloudWatchStatisticsSplit rejects dashboards whose CloudWatch statistics arrays
+// would expand into more queries or annotations than the migration allows.
+func validateCloudWatchStatisticsSplit(dashboard map[string]interface{}) error {
+	added := 0
+	addPanel := func(panel interface{}) error {
+		p, ok := panel.(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		n, err := statisticsSplitAddedTargets(p)
+		if err != nil {
+			return err
+		}
+		added += n
+		if added > maxQueriesAddedByStatisticsSplit {
+			return fmt.Errorf("splitting CloudWatch statistics would add more than %d queries", maxQueriesAddedByStatisticsSplit)
+		}
+		return nil
+	}
+
+	if panels, ok := dashboard["panels"].([]interface{}); ok {
+		for _, panel := range panels {
+			if err := addPanel(panel); err != nil {
+				return err
+			}
+
+			p, ok := panel.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			nestedPanels, ok := p["panels"].([]interface{})
+			if !ok {
+				continue
+			}
+			for _, nestedPanel := range nestedPanels {
+				if err := addPanel(nestedPanel); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	annotations, ok := dashboard["annotations"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	annotationsList, ok := annotations["list"].([]interface{})
+	if !ok {
+		return nil
+	}
+	for _, annotation := range annotationsList {
+		a, ok := annotation.(map[string]interface{})
+		if !ok || !isLegacyCloudWatchAnnotationQuery(a) {
+			continue
+		}
+		stats, _ := getValidStatistics(a["statistics"])
+		if len(stats) > maxStatisticsPerCloudWatchQuery {
+			return fmt.Errorf("CloudWatch annotation has %d statistics, at most %d are supported", len(stats), maxStatisticsPerCloudWatchQuery)
+		}
+		if len(stats) > 1 {
+			added += len(stats) - 1
+			if added > maxQueriesAddedByStatisticsSplit {
+				return fmt.Errorf("splitting CloudWatch statistics would add more than %d queries", maxQueriesAddedByStatisticsSplit)
+			}
+		}
+	}
+
+	return nil
+}
+
+// statisticsSplitAddedTargets returns how many targets splitting the panel's CloudWatch
+// statistics arrays would add, or an error if the split exceeds the supported limits.
+func statisticsSplitAddedTargets(panel map[string]interface{}) (int, error) {
+	targets, ok := panel["targets"].([]interface{})
+	if !ok {
+		return 0, nil
+	}
+
+	added := 0
+	for _, target := range targets {
+		t, ok := target.(map[string]interface{})
+		if !ok || !isCloudWatchQuery(t) {
+			continue
+		}
+		stats, _ := getValidStatistics(t["statistics"])
+		if len(stats) > maxStatisticsPerCloudWatchQuery {
+			return 0, fmt.Errorf("CloudWatch query has %d statistics, at most %d are supported", len(stats), maxStatisticsPerCloudWatchQuery)
+		}
+		if len(stats) > 1 {
+			added += len(stats) - 1
+		}
+	}
+
+	if added > 0 && len(targets)+added > maxTargetsPerPanelAfterStatisticsSplit {
+		return 0, fmt.Errorf("splitting CloudWatch statistics would give a panel %d targets, at most %d are supported", len(targets)+added, maxTargetsPerPanelAfterStatisticsSplit)
+	}
+
+	return added, nil
+}
+
+// refIdAllocator hands out the first unused refId in the sequence A-Z, AA-ZZ.
+// Used refIds are collected once per panel; since the set only grows, the first free
+// candidate never moves backwards, so the cursor makes each allocation amortized O(1).
+type refIdAllocator struct {
+	used   map[string]bool
+	cursor int
+}
+
+func newRefIdAllocator(targets []interface{}) *refIdAllocator {
+	used := make(map[string]bool, len(targets))
+	for _, target := range targets {
 		if t, ok := target.(map[string]interface{}); ok {
 			if refId, ok := t["refId"].(string); ok && refId != "" {
 				used[refId] = true
 			}
 		}
 	}
+	return &refIdAllocator{used: used}
+}
 
-	// Generate next available refId starting from A
-	for c := 'A'; c <= 'Z'; c++ {
-		candidate := string(c)
-		if !used[candidate] {
+func (a *refIdAllocator) next(additionalIndex int) string {
+	for ; a.cursor < refIdCandidateCount; a.cursor++ {
+		candidate := refIdCandidate(a.cursor)
+		if !a.used[candidate] {
+			a.used[candidate] = true
+			a.cursor++
 			return candidate
-		}
-	}
-
-	// If all single letters are taken, use double letters
-	for c1 := 'A'; c1 <= 'Z'; c1++ {
-		for c2 := 'A'; c2 <= 'Z'; c2++ {
-			candidate := string(c1) + string(c2)
-			if !used[candidate] {
-				return candidate
-			}
 		}
 	}
 
 	// Fallback (should never happen in practice)
 	return "X" + string(rune('0'+additionalIndex))
+}
+
+func refIdCandidate(i int) string {
+	if i < 26 {
+		return string(rune('A' + i))
+	}
+	i -= 26
+	return string(rune('A'+i/26)) + string(rune('A'+i%26))
 }
