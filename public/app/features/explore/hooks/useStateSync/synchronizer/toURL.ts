@@ -59,6 +59,13 @@ export function syncToURL(
     };
   }, {});
 
+  // prevParams is only updated after React re-renders, so right after initialization it can lag behind a URL
+  // that already reflects the state. Pushing then would create a duplicate history entry.
+  if (location.getSearchObject().panes === JSON.stringify(panesQueryParams)) {
+    prevParams.current = { panes: JSON.stringify(panesQueryParams) };
+    return;
+  }
+
   if (!isEqual(prevParams.current.panes, JSON.stringify(panesQueryParams))) {
     // If there's no previous state it means we are mounting explore for the first time,
     // in this case we want to replace the URL instead of pushing a new entry to the history.

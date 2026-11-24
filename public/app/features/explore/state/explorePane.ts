@@ -20,7 +20,7 @@ import { type ExploreItemState } from 'app/types/explore';
 import { createAsyncThunk, type ThunkResult } from 'app/types/store';
 
 import { datasourceReducer } from './datasource';
-import { queryReducer, runQueries } from './query';
+import { queryReducer } from './query';
 import { timeReducer, updateTime } from './time';
 import { makeExplorePaneState, loadAndInitDatasource, createEmptyQueryResponse, getRange } from './utils';
 //
@@ -163,6 +163,8 @@ export interface InitializeExploreOptions {
  * The `datasource` param will be passed to the datasource service `get` function
  * and can be either a string that is the name or uid, or a datasourceRef
  * This is to maximize compatability with how datasources are accessed from the URL param.
+ *
+ * Queries are not run: the options can come from a URL anyone can craft, so callers decide when to run them.
  */
 export const initializeExplore = createAsyncThunk(
   'explore/initializeExplore',
@@ -213,8 +215,6 @@ export const initializeExplore = createAsyncThunk(
     if (instance) {
       const correlations = await getCorrelationsFromStorage(dispatch, queries, instance.uid);
       dispatch(saveCorrelationsAction({ exploreId: exploreId, correlations: correlations.correlations || [] }));
-
-      dispatch(runQueries({ exploreId }));
     }
 
     // initialize new pane with helper data

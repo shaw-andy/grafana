@@ -7,6 +7,7 @@ import { EventBusSrv, serializeStateToUrlParam } from '@grafana/data';
 
 import * as mainState from '../state/main';
 
+import { runQuery } from './helper/interactions';
 import { makeLogsQueryResponse } from './helper/query';
 import { setupExplore, tearDown, waitForExplore } from './helper/setup';
 
@@ -119,6 +120,13 @@ describe('Handles open/close splits and related events in UI and URL', () => {
     const { datasources } = setupExplore({ urlParams });
     jest.mocked(datasources.loki.query).mockReturnValueOnce(makeLogsQueryResponse());
     jest.mocked(datasources.elastic.query).mockReturnValueOnce(makeLogsQueryResponse());
+
+    await screen.findByText(`elastic Editor input: error`);
+    expect(datasources.loki.query).not.toBeCalled();
+    expect(datasources.elastic.query).not.toBeCalled();
+
+    await runQuery('left');
+    await runQuery('right');
 
     // Make sure we render the logs panel
     await waitFor(() => {

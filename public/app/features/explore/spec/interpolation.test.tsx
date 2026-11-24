@@ -5,6 +5,7 @@ import { getTemplateSrv } from '@grafana/runtime';
 
 import { type LokiQuery } from '../../loki-helpers/types';
 
+import { runQuery } from './helper/interactions';
 import { makeLogsQueryResponse } from './helper/query';
 import { setupExplore, tearDown, waitForExplore } from './helper/setup';
 
@@ -64,6 +65,10 @@ describe('Explore: interpolation', () => {
     });
 
     await waitForExplore();
+    expect(fakeFetch).not.toBeCalled();
+
+    await runQuery('left');
+    await runQuery('right');
 
     expect(fakeFetch).toBeCalledTimes(2);
     expect(fakeFetch).toHaveBeenCalledWith('{ job="a", from="1600000000000", to="1700000000000" }');

@@ -7,6 +7,7 @@ import { getDataSourceInstance } from '@grafana/runtime/unstable';
 import { type DataQuery } from '@grafana/schema';
 import { initializeExplore } from 'app/features/explore/state/explorePane';
 import { clearPanes, syncTimesAction } from 'app/features/explore/state/main';
+import { runQueriesIfPreviouslyExecuted } from 'app/features/explore/state/query';
 import { fromURLRange } from 'app/features/explore/state/utils';
 import { withUniqueRefIds } from 'app/features/explore/utils/queries';
 import { type ThunkDispatch } from 'app/types/store';
@@ -93,6 +94,8 @@ export function initializeFromURL(
         ).unwrap();
       })
     );
+
+    initializedPanes.forEach(({ exploreId }) => dispatch(runQueriesIfPreviouslyExecuted(exploreId)));
 
     if (initializedPanes.length > 1) {
       const paneTimesUnequal = initializedPanes.some(

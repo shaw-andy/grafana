@@ -155,6 +155,7 @@ describe('Explore: Query History', () => {
     });
     jest.mocked(datasources.loki.query).mockReturnValueOnce(makeLogsQueryResponse());
     await waitForExplore();
+    await runQuery();
     await openQueryHistory();
 
     await inputQuery('query #2');
@@ -178,6 +179,7 @@ describe('Explore: Query History', () => {
     });
     jest.mocked(datasources.loki.query).mockReturnValueOnce(makeLogsQueryResponse());
     await waitForExplore();
+    await runQuery();
     await openQueryHistory();
 
     const storeSpy = jest.spyOn(store, 'setObject').mockImplementation(() => {
@@ -208,6 +210,7 @@ describe('Explore: Query History', () => {
     });
     jest.mocked(datasources.loki.query).mockReturnValueOnce(makeLogsQueryResponse());
     await waitForExplore();
+    await runQuery();
     await openQueryHistory();
 
     jest.spyOn(localStorage, 'cleanUpUnstarredQuery').mockImplementationOnce((queries) => {
@@ -235,6 +238,7 @@ describe('Explore: Query History', () => {
     });
     jest.mocked(datasources.loki.query).mockReturnValueOnce(makeLogsQueryResponse());
     await waitForExplore();
+    await runQuery();
     await openQueryHistory();
     await assertQueryHistory(['{"expr":"query #1"}']);
     await commentQueryHistory(0, 'test comment');
@@ -258,6 +262,7 @@ describe('Explore: Query History', () => {
     jest.mocked(datasources.loki.query).mockReturnValueOnce(makeLogsQueryResponse());
 
     await waitForExplore();
+    await runQuery();
     await openQueryHistory();
 
     // queries in history
