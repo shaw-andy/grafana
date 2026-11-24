@@ -139,6 +139,9 @@ func (a *sqlAdapter) Create(ctx context.Context, anno *annotationV0.Annotation) 
 	}
 
 	item := a.fromK8sResource(anno)
+	// The primary key must come from the database: a caller-chosen value near the
+	// top of the int64 range exhausts auto-increment for the whole annotation table.
+	item.ID = 0
 	item.OrgID = orgID
 
 	if user, err := identity.GetRequester(ctx); err == nil {
