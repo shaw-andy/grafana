@@ -10,6 +10,7 @@ import (
 
 	authlib "github.com/grafana/authlib/types"
 	"github.com/grafana/grafana-app-sdk/logging"
+	provisioning "github.com/grafana/grafana/apps/provisioning/pkg/apis/provisioning/v0alpha1"
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 )
 
@@ -21,7 +22,8 @@ type sessionAccessChecker struct {
 
 // NewSessionAccessChecker creates an AccessChecker that gets identity from Grafana
 // sessions via GetRequester(ctx). Supports optional role-based fallback via
-// WithFallbackRole for backwards compatibility.
+// WithFallbackRole for backwards compatibility; the fallback is limited to
+// provisioning resources checked without a folder (see fallbackApplies).
 func NewSessionAccessChecker(inner authlib.AccessChecker) AccessChecker {
 	return &sessionAccessChecker{
 		inner:        inner,
@@ -76,8 +78,9 @@ func (c *sessionAccessChecker) Check(ctx context.Context, req authlib.CheckReque
 	// Build the GroupResource for error messages
 	gr := schema.GroupResource{Group: req.Group, Resource: req.Resource}
 
-	// No fallback configured, return result directly
-	if c.fallbackRole == "" {
+	// No fallback configured, or the check is one the fallback must not
+	// override: return result directly
+	if c.fallbackRole == "" || !fallbackApplies(req, folder) {
 		if err != nil {
 			logger.Debug("access check error (no fallback)",
 				"resource", req.Resource,
@@ -150,4 +153,13 @@ func (c *sessionAccessChecker) Check(ctx context.Context, req authlib.CheckReque
 		"orgRole", requester.GetOrgRole(),
 	)
 	return apierrors.NewForbidden(gr, req.Name, fmt.Errorf("%s role is required", strings.ToLower(string(c.fallbackRole))))
+}
+
+// fallbackApplies reports whether the org-role fallback may grant a request.
+// The fallback only covers provisioning's own resources checked outside any
+// folder. Folder-scoped checks and resources from other groups (dashboards,
+// folders, ...) carry real per-object permissions that an org role must not
+// override.
+func fallbackApplies(req authlib.CheckRequest, folder string) bool {
+	return folder == "" && req.Group == provisioning.GROUP
 }
