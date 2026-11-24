@@ -1002,6 +1002,10 @@ func buildGroupCursorCondition(sess *xorm.Session, c ngmodels.GroupCursor, orgID
 }
 
 func shouldIncludeRule(rule *ngmodels.AlertRule, query *ngmodels.ListAlertRulesExtendedQuery, groupsMap map[string]struct{}) bool {
+	if query.OrgID >= 0 && rule.OrgID != query.OrgID {
+		return false
+	}
+
 	settings := rule.ContactPointRouting()
 	if !matchesReceiverFilters(settings, query) {
 		return false
@@ -1202,8 +1206,11 @@ func buildRuleGroupFilter(q *xorm.Session, ruleGroups []string) (*xorm.Session, 
 		case len(realGroups) > 0 && len(noGroupRuleGroupRuleUIDs) > 0:
 			groupArgs, groupIn := getINSubQueryArgs(realGroups)
 			ruleUIDArgs, ruleUIDIn := getINSubQueryArgs(noGroupRuleGroupRuleUIDs)
-			q = q.Where(fmt.Sprintf("rule_group IN (%s)", strings.Join(groupIn, ",")), groupArgs...).Or(
-				fmt.Sprintf("uid IN (%s)", strings.Join(ruleUIDIn, ",")), ruleUIDArgs...,
+			// Session.Or would OR this with every condition added before it (org, namespace, ...),
+			// so the alternative must be a single parenthesized condition ANDed with the rest.
+			q = q.Where(
+				fmt.Sprintf("(rule_group IN (%s) OR uid IN (%s))", strings.Join(groupIn, ","), strings.Join(ruleUIDIn, ",")),
+				append(groupArgs, ruleUIDArgs...)...,
 			)
 		}
 
@@ -1486,6 +1493,10 @@ func (st DBstore) handleRuleRow(rows *xorm.Rows, query *ngmodels.ListAlertRulesE
 	converted, err := alertRuleToModelsAlertRule(*rule, st.Logger)
 	if err != nil {
 		st.Logger.Error("Invalid rule found in DB store, cannot convert, ignoring it", "func", "ListAlertRules", "error", err)
+		return nil, false
+	}
+	if query.OrgID >= 0 && converted.OrgID != query.OrgID {
+		st.Logger.Error("Query returned a rule from another organization, ignoring it", "func", "ListAlertRules", "org_id", query.OrgID, "rule_org_id", converted.OrgID, "rule_uid", converted.UID)
 		return nil, false
 	}
 	settings := converted.ContactPointRouting()

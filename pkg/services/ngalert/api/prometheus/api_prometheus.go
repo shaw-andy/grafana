@@ -618,7 +618,7 @@ func (ctx *paginationContext) fetchAndFilterPage(log log.Logger, store ListAlert
 		ctx.opts.StatusPreparer(ruleUIDs)
 	}
 
-	groupedRules := getGroupedRules(log, ruleList, ctx.ruleNamesSet, ctx.opts.AllowedNamespaces)
+	groupedRules := getGroupedRules(log, ctx.opts.OrgID, ruleList, ctx.ruleNamesSet, ctx.opts.AllowedNamespaces)
 
 	result := pageResult{
 		groups:      make([]apimodels.RuleGroup, 0, len(groupedRules)),
@@ -1086,7 +1086,7 @@ func PrepareRuleGroupStatuses(log log.Logger, store ListAlertRulesStore, opts Ru
 		}
 	}
 
-	groupedRules := getGroupedRules(log, ruleList, ruleNamesSet, opts.AllowedNamespaces)
+	groupedRules := getGroupedRules(log, opts.OrgID, ruleList, ruleNamesSet, opts.AllowedNamespaces)
 	rulesTotals := make(map[string]int64, len(groupedRules))
 	var newToken string
 	foundToken := false
@@ -1159,12 +1159,17 @@ type ruleGroup struct {
 }
 
 // Returns a slice of rule groups ordered by namespace and group name
-func getGroupedRules(log log.Logger, ruleList ngmodels.RulesGroup, ruleNamesSet map[string]struct{}, namespaceMap map[string]string) []*ruleGroup {
+func getGroupedRules(log log.Logger, orgID int64, ruleList ngmodels.RulesGroup, ruleNamesSet map[string]struct{}, namespaceMap map[string]string) []*ruleGroup {
 	// Group rules together by Namespace and Rule Group. Rules are also grouped by Org ID,
-	// but in this API all rules belong to the same organization. Also filter by rule name if
+	// but in this API all rules must belong to the requested organization, and namespaceMap
+	// only describes folders of that organization. Also filter by rule name if
 	// it was provided as a query param.
 	groupedRules := make(map[ngmodels.AlertRuleGroupKey][]*ngmodels.AlertRule)
 	for _, rule := range ruleList {
+		if rule.OrgID != orgID {
+			log.Warn("Query returned a rule that belongs to another organization. It will not be added to the response", "org_id", orgID, "rule_org_id", rule.OrgID, "rule_uid", rule.UID)
+			continue
+		}
 		if len(ruleNamesSet) > 0 {
 			if _, exists := ruleNamesSet[rule.Title]; !exists {
 				continue
