@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -619,7 +620,8 @@ func TestCellsParseRoundTrip(t *testing.T) {
 	}
 
 	resp := legacyResponse(t, rule)
-	hits := NewHandler(nil, nil).parseHits(resp)
+	hits, err := NewHandler(nil, nil).parseHits(context.Background(), resp)
+	require.NoError(t, err)
 	require.Len(t, hits, 1)
 	h := hits[0]
 
@@ -665,7 +667,8 @@ func TestParseHits_recordingRuleKind(t *testing.T) {
 		Data:            []ngmodels.AlertQuery{{DatasourceUID: "ds1"}},
 	}
 	resp := legacyResponse(t, rule)
-	hits := NewHandler(nil, nil).parseHits(resp)
+	hits, err := NewHandler(nil, nil).parseHits(context.Background(), resp)
+	require.NoError(t, err)
 	require.Len(t, hits, 1)
 	h := hits[0]
 
