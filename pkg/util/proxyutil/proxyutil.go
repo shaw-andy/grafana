@@ -48,7 +48,18 @@ func PrepareProxyRequest(req *http.Request) {
 	}
 }
 
+// grafanaAuthCookieNames are cookies Grafana uses to authenticate a request or complete a login.
+// They must never reach a proxied backend, whatever a datasource's keepCookies says, since the
+// backend could replay them against Grafana. The login cookie name is configurable, so callers
+// pass it in skipCookiesNames.
+var grafanaAuthCookieNames = []string{
+	"renderKey",
+	"oauth_state",
+	"oauth_code_verifier",
+}
+
 // ClearCookieHeader clear cookie header, except for cookies specified to be kept (keepCookiesNames) if not in skipCookiesNames.
+// Grafana authentication cookies are always cleared.
 func ClearCookieHeader(req *http.Request, keepCookiesNames []string, skipCookiesNames []string) {
 	keepCookies := map[string]*http.Cookie{}
 	for _, c := range req.Cookies() {
@@ -75,6 +86,9 @@ func ClearCookieHeader(req *http.Request, keepCookiesNames []string, skipCookies
 	}
 
 	for _, v := range skipCookiesNames {
+		delete(keepCookies, v)
+	}
+	for _, v := range grafanaAuthCookieNames {
 		delete(keepCookies, v)
 	}
 

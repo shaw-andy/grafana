@@ -169,6 +169,24 @@ func TestClearCookieHeader(t *testing.T) {
 		ClearCookieHeader(req, []string{"[]"}, nil)
 		require.Equal(t, "cookie1=; special23=", req.Header.Get("Cookie"))
 	})
+
+	t.Run("Clear cookie header should never keep Grafana auth cookies", func(t *testing.T) {
+		for _, keep := range [][]string{
+			{"renderKey", "oauth_state", "oauth_code_verifier", "cookie1"},
+			{"render[]", "oauth_[]", "cookie1"},
+			{"[]"},
+		} {
+			req, err := http.NewRequest(http.MethodGet, "/", nil)
+			require.NoError(t, err)
+			req.AddCookie(&http.Cookie{Name: "renderKey", Value: "a"})
+			req.AddCookie(&http.Cookie{Name: "oauth_state", Value: "b"})
+			req.AddCookie(&http.Cookie{Name: "oauth_code_verifier", Value: "c"})
+			req.AddCookie(&http.Cookie{Name: "cookie1", Value: "d"})
+
+			ClearCookieHeader(req, keep, nil)
+			require.Equal(t, "cookie1=d", req.Header.Get("Cookie"), "keepCookies %v", keep)
+		}
+	})
 }
 
 func TestApplyUserHeader(t *testing.T) {
