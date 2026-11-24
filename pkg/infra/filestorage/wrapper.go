@@ -327,24 +327,6 @@ func (b wrapper) List(ctx context.Context, folderPath string, paging *Paging, op
 
 	options = b.listOptionsWithDefaults(options)
 
-	var fileChan = make(chan *File)
-	fileRetrievalCtx, cancelFileGet := context.WithCancel(ctx)
-	defer cancelFileGet()
-
-	go func() {
-		if options.WithFiles {
-			var getOptions *GetFileOptions
-			if options.WithContents {
-				getOptions = &GetFileOptions{WithContents: true}
-			}
-			if f, _, err := b.Get(fileRetrievalCtx, folderPath, getOptions); err == nil {
-				fileChan <- f
-				return
-			}
-		}
-		fileChan <- nil
-	}()
-
 	pathWithRoot := b.addRoot(folderPath)
 	resp, err := b.wrapped.List(ctx, pathWithRoot, b.pagingOptionsWithDefaults(paging), options)
 	if err != nil {
@@ -362,8 +344,15 @@ func (b wrapper) List(ctx context.Context, folderPath string, paging *Paging, op
 		return resp, err
 	}
 
-	file := <-fileChan
-	if file != nil {
+	if !options.WithFiles {
+		return resp, err
+	}
+
+	var getOptions *GetFileOptions
+	if options.WithContents {
+		getOptions = &GetFileOptions{WithContents: true}
+	}
+	if file, _, getErr := b.Get(ctx, folderPath, getOptions); getErr == nil && file != nil {
 		var contents []byte
 		if options.WithContents {
 			contents = file.Contents
