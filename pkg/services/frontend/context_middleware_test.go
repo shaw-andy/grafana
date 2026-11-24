@@ -2,6 +2,8 @@ package frontend
 
 import (
 	"bytes"
+	"context"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +20,15 @@ import (
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/web"
 )
+
+var testBaggageSigningKey = []byte("test-baggage-signing-key-placeholder")
+
+// setSignedBaggage sets the baggage header the way the trusted ingress hop does,
+// signed with testBaggageSigningKey.
+func setSignedBaggage(req *http.Request, value string) {
+	req.Header.Set("baggage", value)
+	req.Header.Set(baggageSignatureHeader, hex.EncodeToString(signBaggage(testBaggageSigningKey, value)))
+}
 
 func TestContextMiddleware(t *testing.T) {
 	t.Run("calls next handler with context", func(t *testing.T) {
@@ -47,10 +58,10 @@ func TestContextMiddleware(t *testing.T) {
 func TestSetRequestContext(t *testing.T) {
 	t.Run("parses namespace from baggage header", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("baggage", "namespace=stacks-123")
+		setSignedBaggage(req, "namespace=stacks-123")
 		rec := httptest.NewRecorder()
 
-		ctx := setRequestContext(req.Context(), rec, req, nil)
+		ctx := setRequestContext(req.Context(), rec, req, nil, testBaggageSigningKey)
 
 		namespace, ok := request.NamespaceFrom(ctx)
 		assert.True(t, ok, "Namespace should be present in context")
@@ -59,10 +70,10 @@ func TestSetRequestContext(t *testing.T) {
 
 	t.Run("handles baggage header with multiple members", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("baggage", "trace-id=abc123,namespace=tenant-456,user-id=xyz")
+		setSignedBaggage(req, "trace-id=abc123,namespace=tenant-456,user-id=xyz")
 		rec := httptest.NewRecorder()
 
-		ctx := setRequestContext(req.Context(), rec, req, nil)
+		ctx := setRequestContext(req.Context(), rec, req, nil, testBaggageSigningKey)
 
 		namespace, ok := request.NamespaceFrom(ctx)
 		assert.True(t, ok, "Namespace should be present in context")
@@ -73,7 +84,7 @@ func TestSetRequestContext(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		rec := httptest.NewRecorder()
 
-		ctx := setRequestContext(req.Context(), rec, req, nil)
+		ctx := setRequestContext(req.Context(), rec, req, nil, testBaggageSigningKey)
 
 		namespace, ok := request.NamespaceFrom(ctx)
 		assert.False(t, ok, "Namespace should not be present in context")
@@ -82,10 +93,10 @@ func TestSetRequestContext(t *testing.T) {
 
 	t.Run("handles invalid baggage header gracefully", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("baggage", "invalid-baggage-format;;;")
+		setSignedBaggage(req, "invalid-baggage-format;;;")
 		rec := httptest.NewRecorder()
 
-		ctx := setRequestContext(req.Context(), rec, req, nil)
+		ctx := setRequestContext(req.Context(), rec, req, nil, testBaggageSigningKey)
 
 		namespace, ok := request.NamespaceFrom(ctx)
 		assert.False(t, ok, "Namespace should not be present in context")
@@ -94,10 +105,10 @@ func TestSetRequestContext(t *testing.T) {
 
 	t.Run("handles baggage header without namespace member", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("baggage", "other-key=other-value")
+		setSignedBaggage(req, "other-key=other-value")
 		rec := httptest.NewRecorder()
 
-		ctx := setRequestContext(req.Context(), rec, req, nil)
+		ctx := setRequestContext(req.Context(), rec, req, nil, testBaggageSigningKey)
 
 		namespace, ok := request.NamespaceFrom(ctx)
 		assert.False(t, ok, "Namespace should not be present in context")
@@ -105,13 +116,71 @@ func TestSetRequestContext(t *testing.T) {
 	})
 }
 
+func TestSetRequestContextRejectsUntrustedBaggage(t *testing.T) {
+	assertUntrusted := func(t *testing.T, ctx context.Context) {
+		t.Helper()
+		_, ok := request.NamespaceFrom(ctx)
+		assert.False(t, ok, "untrusted baggage must not set a namespace")
+		attrs := openfeature.TransactionContext(ctx).Attributes()
+		assert.Equal(t, "default", attrs["namespace"])
+		assert.NotContains(t, attrs, "org_id", "untrusted baggage must not reach the evaluation context")
+	}
+
+	t.Run("ignores unsigned baggage", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("baggage", "namespace=stacks-123,org_id=42")
+
+		assertUntrusted(t, setRequestContext(req.Context(), httptest.NewRecorder(), req, []string{"org_id"}, testBaggageSigningKey))
+	})
+
+	t.Run("ignores baggage signed with a different key", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		value := "namespace=stacks-123,org_id=42"
+		req.Header.Set("baggage", value)
+		req.Header.Set(baggageSignatureHeader, hex.EncodeToString(signBaggage([]byte("other-key-placeholder"), value)))
+
+		assertUntrusted(t, setRequestContext(req.Context(), httptest.NewRecorder(), req, []string{"org_id"}, testBaggageSigningKey))
+	})
+
+	t.Run("ignores a signature for different baggage", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("baggage", "namespace=stacks-123,org_id=42")
+		req.Header.Set(baggageSignatureHeader, hex.EncodeToString(signBaggage(testBaggageSigningKey, "namespace=stacks-own")))
+
+		assertUntrusted(t, setRequestContext(req.Context(), httptest.NewRecorder(), req, []string{"org_id"}, testBaggageSigningKey))
+	})
+
+	t.Run("ignores a malformed signature", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("baggage", "namespace=stacks-123,org_id=42")
+		req.Header.Set(baggageSignatureHeader, "not-hex")
+
+		assertUntrusted(t, setRequestContext(req.Context(), httptest.NewRecorder(), req, []string{"org_id"}, testBaggageSigningKey))
+	})
+
+	t.Run("ignores an extra baggage header next to a signed one", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		setSignedBaggage(req, "namespace=stacks-own")
+		req.Header.Add("baggage", "namespace=stacks-123,org_id=42")
+
+		assertUntrusted(t, setRequestContext(req.Context(), httptest.NewRecorder(), req, []string{"org_id"}, testBaggageSigningKey))
+	})
+
+	t.Run("ignores signed baggage when no signing key is configured", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		setSignedBaggage(req, "namespace=stacks-123,org_id=42")
+
+		assertUntrusted(t, setRequestContext(req.Context(), httptest.NewRecorder(), req, []string{"org_id"}, nil))
+	})
+}
+
 func TestSetRequestContextBaggageEvalContext(t *testing.T) {
 	t.Run("copies configured baggage members into the evaluation context", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("baggage", "namespace=tenant-1,org_id=42,region=eu,ignored=nope")
+		setSignedBaggage(req, "namespace=tenant-1,org_id=42,region=eu,ignored=nope")
 		rec := httptest.NewRecorder()
 
-		ctx := setRequestContext(req.Context(), rec, req, []string{"org_id", "region"})
+		ctx := setRequestContext(req.Context(), rec, req, []string{"org_id", "region"}, testBaggageSigningKey)
 
 		attrs := openfeature.TransactionContext(ctx).Attributes()
 		assert.Equal(t, "tenant-1", attrs["namespace"])
@@ -122,10 +191,10 @@ func TestSetRequestContextBaggageEvalContext(t *testing.T) {
 
 	t.Run("omits configured members that are absent from the baggage header", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("baggage", "namespace=tenant-1")
+		setSignedBaggage(req, "namespace=tenant-1")
 		rec := httptest.NewRecorder()
 
-		ctx := setRequestContext(req.Context(), rec, req, []string{"org_id"})
+		ctx := setRequestContext(req.Context(), rec, req, []string{"org_id"}, testBaggageSigningKey)
 
 		attrs := openfeature.TransactionContext(ctx).Attributes()
 		assert.NotContains(t, attrs, "org_id", "absent baggage members should not be added")
@@ -136,7 +205,7 @@ func TestSetRequestContextBaggageEvalContext(t *testing.T) {
 		req.Host = "example.com"
 		rec := httptest.NewRecorder()
 
-		ctx := setRequestContext(req.Context(), rec, req, nil)
+		ctx := setRequestContext(req.Context(), rec, req, nil, testBaggageSigningKey)
 
 		attrs := openfeature.TransactionContext(ctx).Attributes()
 		assert.Equal(t, "default", attrs["namespace"])
@@ -158,6 +227,20 @@ func TestReadBaggageEvalContextKeys(t *testing.T) {
 	t.Run("returns empty list when not configured", func(t *testing.T) {
 		cfg := setting.NewCfg()
 		assert.Empty(t, readBaggageEvalContextKeys(cfg))
+	})
+}
+
+func TestReadBaggageSigningKey(t *testing.T) {
+	t.Run("returns configured key", func(t *testing.T) {
+		cfg := setting.NewCfg()
+		cfg.Raw.Section("frontend_service").Key("baggage_signing_key").SetValue("configured-key-placeholder")
+
+		assert.Equal(t, []byte("configured-key-placeholder"), readBaggageSigningKey(cfg))
+	})
+
+	t.Run("returns empty key when not configured", func(t *testing.T) {
+		cfg := setting.NewCfg()
+		assert.Empty(t, readBaggageSigningKey(cfg))
 	})
 }
 

@@ -57,6 +57,7 @@ func setupPreviewTestMux(t *testing.T, previewBaseURL string) *web.Mux {
 	raw := ini.Empty()
 	raw.Section("frontend_service").Key("preview_assets_base_url").SetValue(previewBaseURL)
 	raw.Section("frontend_service").Key("preview_assets_allowed_namespaces").SetValue(previewTestNamespace)
+	raw.Section("frontend_service").Key("baggage_signing_key").SetValue(string(testBaggageSigningKey))
 
 	cfg := &setting.Cfg{
 		Raw:            raw,
@@ -76,7 +77,7 @@ func setupPreviewTestMux(t *testing.T, previewBaseURL string) *web.Mux {
 // preview assets.
 func newPreviewRequest(target string) *http.Request {
 	req := httptest.NewRequest("GET", target, nil)
-	req.Header.Set("baggage", "namespace="+previewTestNamespace)
+	setSignedBaggage(req, "namespace="+previewTestNamespace)
 	return req
 }
 
@@ -271,7 +272,7 @@ func TestPreviewAssets_NamespaceLock(t *testing.T) {
 
 	t.Run("should 404 for a namespace that has not opted in", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/-/set-preview-assets?assets=pr_grafana_123456", nil)
-		req.Header.Set("baggage", "namespace=stacks-other")
+		setSignedBaggage(req, "namespace=stacks-other")
 		recorder := httptest.NewRecorder()
 		mux.ServeHTTP(recorder, req)
 

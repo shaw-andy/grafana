@@ -181,7 +181,7 @@ func TestFrontendService_WebAssets(t *testing.T) {
 		mux := setupPreviewTestMux(t, bucket.URL+"/")
 
 		req := httptest.NewRequest("GET", "/", nil)
-		req.Header.Set("baggage", "namespace=stacks-other")
+		setSignedBaggage(req, "namespace=stacks-other")
 		req.AddCookie(&http.Cookie{Name: previewAssetsCookieName, Value: folder})
 		recorder := httptest.NewRecorder()
 		mux.ServeHTTP(recorder, req)

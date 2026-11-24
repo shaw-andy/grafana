@@ -629,6 +629,7 @@ func TestFrontendService_CSP(t *testing.T) {
 			CSPTemplate:    "script-src 'self'; frame-ancestors $ALLOW_EMBEDDING_HOSTS",
 		}
 		service := createTestService(t, cfg)
+		service.baggageSigningKey = testBaggageSigningKey
 		service.settingsService = &mockSettingsService{
 			settings: []*settingservice.Setting{
 				{Section: "security", Key: "allow_embedding_hosts", Value: "tenant.example.com wiki.example.com"},
@@ -640,13 +641,48 @@ func TestFrontendService_CSP(t *testing.T) {
 		service.registerRoutes(mux)
 
 		req := httptest.NewRequest("GET", "/", nil)
-		req.Header.Set("baggage", "namespace=stacks-tenant-1")
+		setSignedBaggage(req, "namespace=stacks-tenant-1")
 		recorder := httptest.NewRecorder()
 		mux.ServeHTTP(recorder, req)
 
 		assert.Equal(t, 200, recorder.Code)
 		cspHeader := recorder.Header().Get("Content-Security-Policy")
 		assert.Contains(t, cspHeader, "frame-ancestors tenant.example.com wiki.example.com")
+	})
+
+	t.Run("should not fetch per-tenant overrides for an unsigned baggage namespace", func(t *testing.T) {
+		cfg := &setting.Cfg{
+			Raw:            ini.Empty(),
+			HTTPPort:       "3000",
+			StaticRootPath: publicDir,
+			BuildVersion:   "10.3.0",
+			AppURL:         "https://grafana.example.com",
+			CSPEnabled:     true,
+			CSPTemplate:    "script-src 'self'; frame-ancestors $ALLOW_EMBEDDING_HOSTS",
+		}
+		service := createTestService(t, cfg)
+		service.baggageSigningKey = testBaggageSigningKey
+		settingsService := &mockSettingsService{
+			settings: []*settingservice.Setting{
+				{Section: "security", Key: "allow_embedding_hosts", Value: "tenant.example.com"},
+			},
+		}
+		service.settingsService = settingsService
+
+		mux := web.New()
+		service.addMiddlewares(mux)
+		service.registerRoutes(mux)
+
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Header.Set("baggage", "namespace=stacks-tenant-1")
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, req)
+
+		assert.Equal(t, 200, recorder.Code)
+		assert.False(t, settingsService.called, "settings must not be fetched for an unsigned namespace")
+		cspHeader := recorder.Header().Get("Content-Security-Policy")
+		assert.Contains(t, cspHeader, "frame-ancestors 'none'")
+		assert.NotContains(t, cspHeader, "tenant.example.com")
 	})
 
 	t.Run("should expand $FORM_ACTION_ADDITIONAL_HOSTS in CSP template with specific hosts", func(t *testing.T) {
@@ -739,6 +775,7 @@ func TestFrontendService_CSP(t *testing.T) {
 			CSPTemplate:    "script-src 'self'; form-action 'self' $FORM_ACTION_ADDITIONAL_HOSTS",
 		}
 		service := createTestService(t, cfg)
+		service.baggageSigningKey = testBaggageSigningKey
 		service.settingsService = &mockSettingsService{
 			settings: []*settingservice.Setting{
 				{Section: "security", Key: "form_action_additional_hosts", Value: "tenant-login.example.com tenant-auth.example.com"},
@@ -750,7 +787,7 @@ func TestFrontendService_CSP(t *testing.T) {
 		service.registerRoutes(mux)
 
 		req := httptest.NewRequest("GET", "/", nil)
-		req.Header.Set("baggage", "namespace=stacks-tenant-1")
+		setSignedBaggage(req, "namespace=stacks-tenant-1")
 		recorder := httptest.NewRecorder()
 		mux.ServeHTTP(recorder, req)
 
