@@ -63,7 +63,13 @@ import { saveCorrelationsAction } from './explorePane';
 import { addHistoryItem, loadRichHistory } from './history';
 import { changeCorrelationEditorDetails } from './main';
 import { updateTime } from './time';
-import { createCacheKey, filterLogRowsByIndex, getCorrelationsData, getResultsFromCache } from './utils';
+import {
+  createCacheKey,
+  filterLogRowsByIndex,
+  getCorrelationsData,
+  getExecutedQueriesKey,
+  getResultsFromCache,
+} from './utils';
 
 /**
  * Derives from explore state if a given Explore pane is waiting for more data to be received
@@ -716,6 +722,21 @@ export const runQueries = createAsyncThunk<void, RunQueriesOptions>(
   }
 );
 
+/**
+ * Runs the pane's queries only if the same datasource and queries were already run in this session.
+ * Use it for pane state restored from the URL: a link can be crafted by anyone, so its queries
+ * must not run until the user runs them.
+ */
+export const runQueriesIfPreviouslyExecuted = (exploreId: string): ThunkResult<void> => {
+  return (dispatch, getState) => {
+    const { panes, executedQueries } = getState().explore;
+    const pane = panes[exploreId];
+    if (pane && executedQueries?.includes(getExecutedQueriesKey(pane))) {
+      dispatch(runQueries({ exploreId }));
+    }
+  };
+};
+
 interface RunLoadMoreLogsQueriesOptions {
   exploreId: string;
   absoluteRange: AbsoluteTimeRange;
@@ -1068,7 +1089,7 @@ export const queryReducer = (state: ExploreItemState, action: AnyAction): Explor
     return {
       ...state,
       // mark existing request as done (may be incomplete)
-      ...(state.queryResponse
+      ...(state.queryResponse && state.queryResponse.state !== LoadingState.NotStarted
         ? {
             queryResponse: {
               ...state.queryResponse,

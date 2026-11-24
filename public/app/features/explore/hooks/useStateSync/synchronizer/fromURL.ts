@@ -10,7 +10,7 @@ import {
   updateEditSavedQueryRefAction,
 } from 'app/features/explore/state/explorePane';
 import { splitClose, syncTimesAction } from 'app/features/explore/state/main';
-import { cancelQueries, runQueries, setQueriesAction } from 'app/features/explore/state/query';
+import { cancelQueries, runQueriesIfPreviouslyExecuted, setQueriesAction } from 'app/features/explore/state/query';
 import { updateTime } from 'app/features/explore/state/time';
 import { fromURLRange } from 'app/features/explore/state/utils';
 import { withUniqueRefIds } from 'app/features/explore/utils/queries';
@@ -78,7 +78,7 @@ export function syncFromURL(
 
           if (update.queries || update.range) {
             await dispatch(cancelQueries(exploreId));
-            dispatch(runQueries({ exploreId }));
+            dispatch(runQueriesIfPreviouslyExecuted(exploreId));
           }
 
           if (update.panelsState && panelsState) {
@@ -90,7 +90,7 @@ export function syncFromURL(
       // In this case we want to initialize the pane with the data from the URL
       // if it's not present in the store. This may happen if the user has navigated
       // from split view to non-split view and then back to split view.
-      dispatch(
+      await dispatch(
         initializeExplore({
           exploreId,
           datasource: datasource || '',
@@ -104,6 +104,7 @@ export function syncFromURL(
           addingSavedQuery: i === 0 ? addingSavedQuery : undefined,
         })
       );
+      dispatch(runQueriesIfPreviouslyExecuted(exploreId));
     }
   });
 

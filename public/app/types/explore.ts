@@ -104,6 +104,12 @@ export interface ExploreState {
    * If a minimize pane button is pressed, it will do an even split of panes. Will be undefined if split or on a manual resize
    */
   evenSplitPanes?: boolean;
+
+  /**
+   * Datasource and queries (see getExecutedQueriesKey) that were run in this session. Pane state restored from
+   * the URL is only run automatically when it is in this list, because anyone can craft an Explore URL.
+   */
+  executedQueries?: string[];
 }
 
 export const EXPLORE_GRAPH_STYLES = ['lines', 'bars', 'points', 'stacked_lines', 'stacked_bars'] as const;

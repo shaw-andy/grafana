@@ -16,7 +16,8 @@ import { withUniqueRefIds } from '../utils/queries';
 
 import { DEFAULT_RANGE } from './constants';
 import { initializeExplore, type InitializeExploreOptions, paneReducer } from './explorePane';
-import { makeExplorePaneState } from './utils';
+import { runQueries } from './query';
+import { getExecutedQueriesKey, makeExplorePaneState, MAX_EXECUTED_QUERIES } from './utils';
 
 //
 // Actions and Payloads
@@ -109,8 +110,11 @@ export const splitOpen = createAsyncThunk(
  */
 const createNewSplitOpenPane = createAsyncThunk(
   'explore/createNewSplitOpen',
-  async (options: InitializeExploreOptions, { dispatch }) => {
+  async (options: InitializeExploreOptions, { dispatch, getState }) => {
     await dispatch(initializeExplore(options));
+    if (getState().explore.panes[options.exploreId]?.datasourceInstance) {
+      dispatch(runQueries({ exploreId: options.exploreId }));
+    }
   }
 );
 
@@ -280,6 +284,16 @@ export const exploreReducer = (state = initialExploreState, action: AnyAction): 
       ...state,
       panes,
     };
+  }
+
+  if (runQueries.pending.match(action)) {
+    const pane = state.panes[action.meta.arg.exploreId];
+    if (!pane) {
+      return state;
+    }
+    const key = getExecutedQueriesKey(pane);
+    const executedQueries = (state.executedQueries ?? []).filter((executed) => executed !== key);
+    return { ...state, executedQueries: [...executedQueries, key].slice(-MAX_EXECUTED_QUERIES) };
   }
 
   if (clearPanes.match(action)) {

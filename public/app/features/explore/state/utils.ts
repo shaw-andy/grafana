@@ -29,7 +29,7 @@ import { MIXED_DATASOURCE_NAME } from 'app/plugins/datasource/mixed/MixedDataSou
 import { type ExploreItemState, type ExplorePanelData, type RichHistoryQuery } from 'app/types/explore';
 import { type StoreState } from 'app/types/store';
 
-import { setLastUsedDatasourceUID } from '../../../core/utils/explore';
+import { clearQueryKeys, setLastUsedDatasourceUID } from '../../../core/utils/explore';
 import { loadSupplementaryQueries } from '../utils/supplementaryQueries';
 
 import { DEFAULT_RANGE } from './constants';
@@ -79,6 +79,15 @@ export const makeExplorePaneState = (overrides?: Partial<ExploreItemState>): Exp
   queriesChangedIndexAtRun: 0,
   ...overrides,
 });
+
+export const MAX_EXECUTED_QUERIES = 100;
+
+/**
+ * Identifies what a pane would execute: its datasource and its queries.
+ */
+export function getExecutedQueriesKey(pane: ExploreItemState): string {
+  return JSON.stringify([pane.datasourceInstance?.uid ?? '', pane.queries.map(clearQueryKeys)]);
+}
 
 export const createEmptyQueryResponse = (): ExplorePanelData => ({
   state: LoadingState.NotStarted,
