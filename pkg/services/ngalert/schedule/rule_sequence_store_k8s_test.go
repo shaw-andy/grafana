@@ -184,6 +184,21 @@ func TestConvertRuleSequence(t *testing.T) {
 			},
 			wantErr: "invalid interval",
 		},
+		{
+			name: "interval above the maximum returns error",
+			seq: alertingv0alpha1.RuleSequence{
+				ObjectMeta: metav1.ObjectMeta{Name: "seq-slow"},
+				Spec: alertingv0alpha1.RuleSequenceSpec{
+					Trigger: alertingv0alpha1.RuleSequenceIntervalTrigger{
+						Interval: alertingv0alpha1.RuleSequencePromDuration("10000h"),
+					},
+					RecordingRules: []alertingv0alpha1.RuleSequenceRuleRef{
+						{Name: "rec-1"},
+					},
+				},
+			},
+			wantErr: "outside",
+		},
 	}
 
 	for _, tc := range tests {

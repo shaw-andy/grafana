@@ -4,12 +4,17 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	model "github.com/grafana/grafana/apps/alerting/rules/pkg/apis/alerting/v0alpha1"
 	"github.com/grafana/grafana/apps/alerting/rules/pkg/app/config"
 	"github.com/grafana/grafana/apps/alerting/rules/pkg/app/util"
 	"github.com/grafana/grafana/apps/alerting/rules/pkg/app/validation"
 )
+
+// MaxInterval bounds the sequence interval, which replaces the evaluation
+// interval of every rule the sequence lists.
+const MaxInterval = 24 * time.Hour
 
 func ValidateWrite(cfg config.RuntimeConfig) validation.ValidateFunc[*model.RuleSequence] {
 	return func(ctx context.Context, req validation.Request[*model.RuleSequence]) error {
@@ -24,6 +29,11 @@ func ValidateWrite(cfg config.RuntimeConfig) validation.ValidateFunc[*model.Rule
 		// labels (grafana.com/group, grafana.com/group-index) are not applicable.
 		if err := util.ValidateInterval(cfg.BaseEvaluationInterval, &r.Spec.Trigger.Interval); err != nil {
 			return err
+		}
+		if interval, err := r.Spec.Trigger.Interval.ToDuration(); err != nil {
+			return fmt.Errorf("invalid trigger interval: %w", err)
+		} else if interval > MaxInterval {
+			return fmt.Errorf("trigger interval must not exceed %s", MaxInterval)
 		}
 
 		if len(r.Spec.RecordingRules) == 0 {

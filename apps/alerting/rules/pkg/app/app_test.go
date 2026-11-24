@@ -661,6 +661,16 @@ func TestRuleSequenceValidation_Errors(t *testing.T) {
 		require.Error(t, err)
 	})
 
+	t.Run("interval above the maximum", func(t *testing.T) {
+		err := mk(func(r *v1.RuleSequence) { r.Spec.Trigger.Interval = v1.RuleSequencePromDuration("10000h") })
+		require.ErrorContains(t, err, "must not exceed")
+	})
+
+	t.Run("interval at the maximum", func(t *testing.T) {
+		err := mk(func(r *v1.RuleSequence) { r.Spec.Trigger.Interval = v1.RuleSequencePromDuration("24h") })
+		require.NoError(t, err)
+	})
+
 	t.Run("empty recording rules nil", func(t *testing.T) {
 		err := mk(func(r *v1.RuleSequence) { r.Spec.RecordingRules = nil })
 		require.Error(t, err)
