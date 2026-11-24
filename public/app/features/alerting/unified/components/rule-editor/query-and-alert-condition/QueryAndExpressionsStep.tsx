@@ -1,6 +1,6 @@
 import { css } from '@emotion/css';
 import { cloneDeep } from 'lodash';
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Controller, useFormContext } from 'react-hook-form';
 import { useEffectOnce } from 'react-use';
 
@@ -186,6 +186,17 @@ export const QueryAndExpressionsStep = ({ editingExistingRule, onDataChange, mod
     [isCloudAlertRuleType, expressionQueries, simplifiedQueryStep, setValue, runQueries, getValues]
   );
 
+  // Queries can be prefilled from the `defaults` URL parameter, which anyone can craft, so they are only
+  // evaluated automatically after the user has asked for a preview.
+  const previewRequested = useRef(false);
+  const requestPreview = useCallback(
+    (condition?: string) => {
+      previewRequested.current = true;
+      runQueriesPreview(condition);
+    },
+    [runQueriesPreview]
+  );
+
   // whenever we update the queries we have to update the form too
   useEffect(() => {
     setValue('queries', queries, { shouldValidate: false });
@@ -223,11 +234,11 @@ export const QueryAndExpressionsStep = ({ editingExistingRule, onDataChange, mod
         return;
       }
 
-      runQueriesPreview(refId); //we need to run the queries to know if the condition is valid
+      requestPreview(refId); //we need to run the queries to know if the condition is valid
 
       setValue('condition', refId);
     },
-    [runQueriesPreview, setValue]
+    [requestPreview, setValue]
   );
 
   const onUpdateRefId = useCallback(
@@ -296,7 +307,9 @@ export const QueryAndExpressionsStep = ({ editingExistingRule, onDataChange, mod
       updateExpressionAndDatasource(updatedQueries);
 
       dispatch(setRecordingRulesQueries({ recordingRuleQueries: updatedQueries, expression }));
-      runQueriesPreview();
+      if (previewRequested.current) {
+        runQueriesPreview();
+      }
     },
     [runQueriesPreview, setValue, updateExpressionAndDatasource]
   );
@@ -309,9 +322,13 @@ export const QueryAndExpressionsStep = ({ editingExistingRule, onDataChange, mod
   useEffect(() => {
     if (!refIdExists(queries, condition)) {
       const lastRefId = queries.at(-1)?.refId ?? null;
-      handleSetCondition(lastRefId);
+      if (previewRequested.current) {
+        handleSetCondition(lastRefId);
+      } else if (lastRefId) {
+        setValue('condition', lastRefId);
+      }
     }
-  }, [condition, queries, handleSetCondition]);
+  }, [condition, queries, handleSetCondition, setValue]);
 
   const onClickType = useCallback(
     (type: ExpressionQueryType) => {
@@ -364,7 +381,9 @@ export const QueryAndExpressionsStep = ({ editingExistingRule, onDataChange, mod
     updateExpressionAndDatasource(newQueries);
 
     dispatch(setDataQueries(newQueries));
-    runQueriesPreview();
+    if (previewRequested.current) {
+      runQueriesPreview();
+    }
   };
 
   const removeExpressionsInQueries = useCallback(() => dispatch(removeExpressions()), [dispatch]);
@@ -472,7 +491,7 @@ export const QueryAndExpressionsStep = ({ editingExistingRule, onDataChange, mod
             <RecordingRuleEditor
               dataSourceName={dataSourceName}
               queries={queries}
-              runQueries={() => runQueriesPreview()}
+              runQueries={() => requestPreview()}
               onChangeQuery={onChangeRecordingRulesQueries}
               panelData={queryPreviewData}
             />
@@ -527,7 +546,7 @@ export const QueryAndExpressionsStep = ({ editingExistingRule, onDataChange, mod
             <QueryEditor
               queries={dataQueries}
               expressions={expressionQueries}
-              onRunQueries={() => runQueriesPreview()}
+              onRunQueries={() => requestPreview()}
               onChangeQueries={onChangeQueries}
               onDuplicateQuery={onDuplicateQuery}
               panelData={queryPreviewData}
@@ -621,7 +640,7 @@ export const QueryAndExpressionsStep = ({ editingExistingRule, onDataChange, mod
                     data-testid={selectors.components.AlertRules.previewButton}
                     icon="sync"
                     type="button"
-                    onClick={() => runQueriesPreview()}
+                    onClick={() => requestPreview()}
                     disabled={emptyQueries}
                   >
                     {!simplifiedQueryStep
