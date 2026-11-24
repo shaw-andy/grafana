@@ -21,7 +21,7 @@ import (
 
 // RequestConfigMiddleware manages per-request configuration.
 //
-// When Settings Service is configured and namespace is present in baggage header:
+// When Settings Service is configured and namespace is present in a signed baggage header:
 // - Fetches tenant-specific overrides from Settings Service
 // - Merges overrides with base configuration
 // - Stores final configuration in context

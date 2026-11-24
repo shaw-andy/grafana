@@ -2,6 +2,9 @@ package frontend
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 
 	"github.com/grafana/grafana/pkg/infra/log"
@@ -27,7 +30,7 @@ func (s *frontendService) contextMiddleware() web.Middleware {
 			ctx := r.Context()
 
 			span := trace.SpanFromContext(ctx)
-			ctx = setRequestContext(ctx, w, r, s.baggageEvalContextKeys)
+			ctx = setRequestContext(ctx, w, r, s.baggageEvalContextKeys, s.baggageSigningKey)
 
 			// Preserve the original span so the setRequestContext span doesn't get propagated as a parent of the rest of the request
 			ctx = trace.ContextWithSpan(ctx, span)
@@ -37,7 +40,7 @@ func (s *frontendService) contextMiddleware() web.Middleware {
 	}
 }
 
-func setRequestContext(ctx context.Context, w http.ResponseWriter, r *http.Request, baggageEvalContextKeys []string) context.Context {
+func setRequestContext(ctx context.Context, w http.ResponseWriter, r *http.Request, baggageEvalContextKeys []string, baggageSigningKey []byte) context.Context {
 	ctx, span := tracing.Start(ctx, "setRequestContext")
 	defer span.End()
 
@@ -76,14 +79,10 @@ func setRequestContext(ctx context.Context, w http.ResponseWriter, r *http.Reque
 		reqContext.Logger = reqContext.Logger.New("user_agent", userAgent)
 	}
 
-	// Parse the W3C baggage header once. It carries the namespace plus any
-	// additional members configured for the evaluation context below.
-	var bag baggage.Baggage
-	if baggageHeader := r.Header.Get("baggage"); baggageHeader != "" {
-		if parsed, err := baggage.Parse(baggageHeader); err == nil {
-			bag = parsed
-		}
-	}
+	// The baggage header carries the namespace plus any additional members
+	// configured for the evaluation context below. It is only trusted when the
+	// ingress hop signed it, since the namespace selects tenant settings.
+	bag := trustedBaggage(r, baggageSigningKey)
 
 	namespace := bag.Member("namespace").Value()
 	if namespace != "" {
@@ -124,4 +123,54 @@ func setRequestContext(ctx context.Context, w http.ResponseWriter, r *http.Reque
 func readBaggageEvalContextKeys(cfg *setting.Cfg) []string {
 	sec := cfg.SectionWithEnvOverrides("frontend_service")
 	return sec.Key("baggage_eval_context_keys").Strings(" ")
+}
+
+// baggageSignatureHeader carries the hex-encoded HMAC-SHA256 of the raw
+// baggage header value, computed by the ingress hop with the shared
+// baggage_signing_key.
+const baggageSignatureHeader = "X-Grafana-Baggage-Signature"
+
+// readBaggageSigningKey returns the key used to authenticate the inbound
+// baggage header. When it is empty, inbound baggage is ignored.
+//
+// [frontend_service]
+// baggage_signing_key = <shared secret>
+func readBaggageSigningKey(cfg *setting.Cfg) []byte {
+	sec := cfg.SectionWithEnvOverrides("frontend_service")
+	return []byte(sec.Key("baggage_signing_key").String())
+}
+
+// trustedBaggage returns the request's baggage only when it is a single header
+// whose signature matches signingKey. The verified bytes are the ones parsed,
+// so a caller can't pair a valid signature with different members.
+func trustedBaggage(r *http.Request, signingKey []byte) baggage.Baggage {
+	if len(signingKey) == 0 {
+		return baggage.Baggage{}
+	}
+
+	values := r.Header.Values("baggage")
+	if len(values) != 1 || values[0] == "" {
+		return baggage.Baggage{}
+	}
+	raw := values[0]
+
+	signature, err := hex.DecodeString(r.Header.Get(baggageSignatureHeader))
+	if err != nil || len(signature) == 0 {
+		return baggage.Baggage{}
+	}
+	if !hmac.Equal(signature, signBaggage(signingKey, raw)) {
+		return baggage.Baggage{}
+	}
+
+	parsed, err := baggage.Parse(raw)
+	if err != nil {
+		return baggage.Baggage{}
+	}
+	return parsed
+}
+
+func signBaggage(signingKey []byte, raw string) []byte {
+	mac := hmac.New(sha256.New, signingKey)
+	mac.Write([]byte(raw))
+	return mac.Sum(nil)
 }
