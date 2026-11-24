@@ -226,8 +226,18 @@ func (ns *NotificationService) SendEmailCommandHandler(ctx context.Context, cmd 
 		return err
 	}
 
-	ns.mailQueue <- message
-	return nil
+	select {
+	case ns.mailQueue <- message:
+		return nil
+	default:
+	}
+
+	select {
+	case ns.mailQueue <- message:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("mail queue is full: %w", ctx.Err())
+	}
 }
 
 func (ns *NotificationService) SendResetPasswordEmail(ctx context.Context, cmd *SendResetPasswordEmailCommand) error {
