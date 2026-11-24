@@ -73,8 +73,9 @@ func (hs *HTTPServer) SignUp(c *contextmodel.ReqContext) response.Response {
 	}
 
 	if err := hs.bus.Publish(c.Req.Context(), &events.SignUpStarted{
-		Email: form.Email,
-		Code:  cmd.Code,
+		Email:      form.Email,
+		Code:       cmd.Code,
+		ClientAddr: cmd.RemoteAddr,
 	}); err != nil {
 		return response.Error(http.StatusInternalServerError, "Failed to publish event", err)
 	}
@@ -122,8 +123,9 @@ func (hs *HTTPServer) SignUpStep2(c *contextmodel.ReqContext) response.Response 
 
 	// publish signup event
 	if err := hs.bus.Publish(c.Req.Context(), &events.SignUpCompleted{
-		Email: usr.Email,
-		Name:  usr.NameOrFallback(),
+		Email:      usr.Email,
+		Name:       usr.NameOrFallback(),
+		ClientAddr: c.RemoteAddr(),
 	}); err != nil {
 		return response.Error(http.StatusInternalServerError, "Failed to publish event", err)
 	}

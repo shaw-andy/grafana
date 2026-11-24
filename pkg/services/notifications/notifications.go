@@ -8,7 +8,9 @@ import (
 	"html/template"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Masterminds/sprig/v3"
 
@@ -60,6 +62,7 @@ func ProvideService(bus bus.Bus, cfg *setting.Cfg, mailer Mailer, store TempUser
 		webhookQueue: make(chan *Webhook, 10),
 		mailer:       mailer,
 		store:        store,
+		limiter:      newMailLimiter(),
 	}
 
 	ns.Bus.AddEventListener(ns.signUpStartedHandler)
@@ -113,6 +116,7 @@ type NotificationService struct {
 	mailer       Mailer
 	log          log.Logger
 	store        TempUserStore
+	limiter      *mailLimiter
 }
 
 func (ns *NotificationService) Run(ctx context.Context) error {
@@ -226,11 +230,53 @@ func (ns *NotificationService) SendEmailCommandHandler(ctx context.Context, cmd 
 		return err
 	}
 
-	ns.mailQueue <- message
-	return nil
+	select {
+	case ns.mailQueue <- message:
+		return nil
+	default:
+	}
+
+	select {
+	case ns.mailQueue <- message:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("mail queue is full: %w", ctx.Err())
+	}
+}
+
+// allowUnauthenticatedMail reports whether mail that an anonymous caller triggered may be sent
+// to recipient, and records the send when it may.
+func (ns *NotificationService) allowUnauthenticatedMail(tmpl, recipient, clientAddr string, recipientWindow time.Duration) bool {
+	limits := []mailLimit{{
+		key:    tmpl + "|to|" + recipient,
+		max:    mailsPerRecipient,
+		window: recipientWindow,
+	}}
+	if clientAddr != "" {
+		limits = append(limits, mailLimit{
+			key:    tmpl + "|client|" + clientLimitKey(clientAddr),
+			max:    mailsPerClient,
+			window: mailLimitWindow,
+		})
+	}
+	if ns.limiter.allow(limits...) {
+		return true
+	}
+	ns.log.Info("Dropped email over the unauthenticated mail limit", "template", tmpl)
+	return false
 }
 
 func (ns *NotificationService) SendResetPasswordEmail(ctx context.Context, cmd *SendResetPasswordEmailCommand) error {
+	// A suppressed request leaves the earlier reset code as the one the user acts on, so the
+	// window must not outlast that code.
+	window := min(mailLimitWindow, time.Duration(ns.Cfg.EmailCodeValidMinutes)*time.Minute)
+	if window <= 0 {
+		window = mailLimitWindow
+	}
+	if !ns.allowUnauthenticatedMail(tmplResetPassword, "user:"+strconv.FormatInt(cmd.User.ID, 10), cmd.ClientAddr, window) {
+		return nil
+	}
+
 	code, err := createUserEmailCode(ns.Cfg, cmd.User, "")
 	if err != nil {
 		return err
@@ -294,6 +340,10 @@ func (ns *NotificationService) signUpStartedHandler(ctx context.Context, evt *ev
 		return nil
 	}
 
+	if !ns.allowUnauthenticatedMail(tmplSignUpStarted, recipientLimitKey(evt.Email), evt.ClientAddr, mailLimitWindow) {
+		return nil
+	}
+
 	err := ns.SendEmailCommandHandler(ctx, &SendEmailCommand{
 		To:       []string{evt.Email},
 		Template: tmplSignUpStarted,
@@ -313,6 +363,10 @@ func (ns *NotificationService) signUpStartedHandler(ctx context.Context, evt *ev
 
 func (ns *NotificationService) signUpCompletedHandler(ctx context.Context, evt *events.SignUpCompleted) error {
 	if evt.Email == "" || !ns.Cfg.Smtp.SendWelcomeEmailOnSignUp {
+		return nil
+	}
+
+	if !ns.allowUnauthenticatedMail(tmplWelcomeOnSignUp, recipientLimitKey(evt.Email), evt.ClientAddr, mailLimitWindow) {
 		return nil
 	}
 

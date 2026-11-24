@@ -8,15 +8,17 @@ import (
 // Treat these events as basically DTOs so changes has to be backward compatible
 
 type SignUpStarted struct {
-	Timestamp time.Time `json:"timestamp"`
-	Email     string    `json:"email"`
-	Code      string    `json:"code"`
+	Timestamp  time.Time `json:"timestamp"`
+	Email      string    `json:"email"`
+	Code       string    `json:"code"`
+	ClientAddr string    `json:"-"`
 }
 
 type SignUpCompleted struct {
-	Timestamp time.Time `json:"timestamp"`
-	Name      string    `json:"name"`
-	Email     string    `json:"email"`
+	Timestamp  time.Time `json:"timestamp"`
+	Name       string    `json:"name"`
+	Email      string    `json:"email"`
+	ClientAddr string    `json:"-"`
 }
 
 type DataSourceDeleted struct {
