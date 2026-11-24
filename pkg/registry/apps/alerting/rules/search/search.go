@@ -72,11 +72,15 @@ func (h *Handler) SearchRules(ctx context.Context, w app.CustomRouteResponseWrit
 		return err
 	}
 
+	items, err := h.parseHits(ctx, resp)
+	if err != nil {
+		return err
+	}
 	out := &model.CreateSearchRulesResponse{
 		TypeMeta: searchResultsTypeMeta,
 		CreateSearchRulesBody: model.CreateSearchRulesBody{
 			Metadata: h.metadata(resp, next),
-			Items:    h.parseHits(resp),
+			Items:    items,
 		},
 	}
 	return writeJSON(w, out)
@@ -311,10 +315,17 @@ func (r rowReader) jsonMap(name string) map[string]string {
 // (group/resource/kind/name) and the per-kind field payload. A row's kind is
 // discriminated by its type column, so a federated (cross-kind) response mixes
 // both kinds in one list.
-func (h *Handler) parseHits(resp *resourcepb.ResourceSearchResponse) []model.CreateSearchRulesSearchResultHit {
+//
+// The apiserver timeout only abandons the response, so decoding stops between
+// hits once the request context is done rather than finishing a page of large
+// rows nobody will read.
+func (h *Handler) parseHits(ctx context.Context, resp *resourcepb.ResourceSearchResponse) ([]model.CreateSearchRulesSearchResultHit, error) {
 	rows := h.newRowReaders(resp)
 	hits := make([]model.CreateSearchRulesSearchResultHit, 0, len(rows))
 	for _, r := range rows {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		// Score is intentionally left unset: the legacy backend does not compute
 		// relevance, and until both backends populate it consistently we omit it
 		// rather than return a score for unified hits only.
@@ -323,7 +334,7 @@ func (h *Handler) parseHits(resp *resourcepb.ResourceSearchResponse) []model.Cre
 			Fields:   r.fields(),
 		})
 	}
-	return hits
+	return hits, nil
 }
 
 // resource reports the identity of a hit. The kind is derived from the type
