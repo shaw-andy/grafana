@@ -118,6 +118,7 @@ type Wrapper struct {
 	inner              K8sStorage
 	authorizer         ResourceStorageAuthorizer
 	preserveIdentity   bool
+	authorizeDeleted   bool
 	tracer             trace.Tracer
 	observer           Observer
 	resource           schema.GroupResource
@@ -135,6 +136,18 @@ type Option func(*Wrapper)
 func WithPreserveIdentity() Option {
 	return func(w *Wrapper) {
 		w.preserveIdentity = true
+	}
+}
+
+// WithAuthorizeDeletedObject runs BeforeDelete again from the inner store's
+// delete validation, against the object version the store is about to delete.
+// Without it, BeforeDelete only sees the version fetched before the delete, so
+// a concurrent update (e.g. moving the object to another folder) between that
+// fetch and the delete is never authorized. Inner stores that do not call the
+// delete validation still get the check on the fetched version.
+func WithAuthorizeDeletedObject() Option {
+	return func(w *Wrapper) {
+		w.authorizeDeleted = true
 	}
 }
 
@@ -304,10 +317,36 @@ func (w *Wrapper) Delete(ctx context.Context, name string, deleteValidation k8sr
 		return nil, false, err
 	}
 
+	if w.authorizeDeleted {
+		requester, rerr := identity.GetRequester(ctx)
+		if rerr != nil {
+			return nil, false, ErrUnauthenticated
+		}
+		deleteValidation = w.authorizedDeleteValidation(requester, deleteValidation)
+	}
+
 	innerStart := time.Now()
 	result, deleted, err = w.inner.Delete(storeCtx, name, deleteValidation, options)
 	w.observeInner(OpDelete, innerStart, err)
 	return result, deleted, err
+}
+
+// authorizedDeleteValidation authorizes the object passed to the store's delete
+// validation, which is the version the store deletes conditionally on. The
+// store calls it with the service identity, so the caller is restored first.
+func (w *Wrapper) authorizedDeleteValidation(requester identity.Requester, next k8srest.ValidateObjectFunc) k8srest.ValidateObjectFunc {
+	return func(ctx context.Context, obj runtime.Object) error {
+		authzStart := time.Now()
+		err := w.authorizer.BeforeDelete(identity.WithRequester(ctx, requester), obj)
+		w.observeAuthz(OpBeforeDelete, authzStart, err)
+		if err != nil {
+			return err
+		}
+		if next != nil {
+			return next(ctx, obj)
+		}
+		return nil
+	}
 }
 
 func (w *Wrapper) Destroy() {
