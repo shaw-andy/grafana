@@ -68,6 +68,10 @@ var (
 	ErrChecksumMismatchBase = errutil.UnprocessableEntity("plugin.checksumMismatch").
 				MustTemplate(ErrChecksumMismatchMsg, errutil.WithPublic(ErrChecksumMismatchMsg))
 
+	ErrChecksumMissingMsg  = "the Grafana.com catalog did not provide a SHA256 checksum for {{.Public.PluginID}} v{{.Public.Version}}, so the downloaded archive cannot be verified"
+	ErrChecksumMissingBase = errutil.UnprocessableEntity("plugin.checksumMissing").
+				MustTemplate(ErrChecksumMissingMsg, errutil.WithPublic(ErrChecksumMissingMsg))
+
 	ErrCorePluginMsg  = "plugin {{.Public.PluginID}} is a core plugin and cannot be installed separately"
 	ErrCorePluginBase = errutil.Forbidden("plugin.forbiddenCorePluginInstall").
 				MustTemplate(ErrCorePluginMsg, errutil.WithPublic(ErrCorePluginMsg))
@@ -102,6 +106,10 @@ func ErrArcNotFound(pluginID, systemInfo string) error {
 
 func ErrChecksumMismatch(archiveURL, expectedSHA256, computedSHA256 string) error {
 	return ErrChecksumMismatchBase.Build(errutil.TemplateData{Public: map[string]any{"ArchiveURL": archiveURL, "ExpectedSHA256": expectedSHA256, "ComputedSHA256": computedSHA256}})
+}
+
+func ErrChecksumMissing(pluginID, version string) error {
+	return ErrChecksumMissingBase.Build(errutil.TemplateData{Public: map[string]any{"PluginID": pluginID, "Version": version}})
 }
 
 func ErrCorePlugin(pluginID string) error {

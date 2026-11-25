@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/grafana/grafana/pkg/plugins"
@@ -93,39 +94,58 @@ func (m *PluginInstaller) Add(ctx context.Context, pluginID, version string, opt
 }
 
 func (m *PluginInstaller) install(ctx context.Context, pluginID, version string, opts plugins.AddOpts) (*storage.ExtractedPluginArchive, error) {
-	var pluginArchive *repo.PluginArchive
 	compatOpts, err := RepoCompatOpts(opts)
 	if err != nil {
 		return nil, err
 	}
-	if plugin, exists := m.plugin(ctx, pluginID, version); exists {
-		if plugin.IsCorePlugin() {
+
+	installed, exists := m.plugin(ctx, pluginID, version)
+	if exists {
+		if installed.IsCorePlugin() {
 			return nil, plugins.ErrInstallCorePlugin
 		}
 
-		if plugin.Info.Version == version {
+		if installed.Info.Version == version {
 			return nil, plugins.DuplicateError{
-				PluginID: plugin.ID,
+				PluginID: installed.ID,
 			}
 		}
-		if opts.URL() != "" {
-			pluginArchive, err = m.updateFromURL(ctx, plugin, opts.URL(), compatOpts)
-		} else {
-			pluginArchive, err = m.updateFromCatalog(ctx, plugin, version, compatOpts)
+	}
+
+	var pluginArchive *repo.PluginArchive
+	fromCatalog := opts.URL() == ""
+	catalogVersion := ""
+	if fromCatalog {
+		pluginArchive, catalogVersion, err = m.catalogArchive(ctx, pluginID, version, installed, compatOpts)
+	} else {
+		if exists {
+			m.log.Info("Updating plugin", "pluginId", installed.ID, "from", installed.Info.Version, "url", opts.URL())
 		}
-		if err != nil {
+		pluginArchive, err = m.pluginRepo.GetPluginArchiveByURL(ctx, opts.URL(), compatOpts)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if exists {
+		// The installed plugin is only removed once the replacement is known to be the one requested,
+		// so a rejected archive leaves it in place.
+		if fromCatalog {
+			pluginJSON, err := storage.ArchivePluginJSON(pluginArchive.File, pluginID, m.pluginStorageDirFunc)
+			if err == nil {
+				err = checkCatalogArchive(pluginID, catalogVersion, pluginJSON.ID, pluginJSON.Info.Version)
+			}
+			if err != nil {
+				closeArchive(pluginArchive)
+				return nil, err
+			}
+		}
+
+		if err = m.Remove(ctx, installed.ID, installed.Info.Version); err != nil {
+			closeArchive(pluginArchive)
 			return nil, err
 		}
 	} else {
-		var err error
-		if opts.URL() != "" {
-			pluginArchive, err = m.pluginRepo.GetPluginArchiveByURL(ctx, opts.URL(), compatOpts)
-		} else {
-			pluginArchive, err = m.pluginRepo.GetPluginArchive(ctx, pluginID, version, compatOpts)
-		}
-		if err != nil {
-			return nil, err
-		}
 		m.log.Info("Installing plugin", "pluginId", pluginID, "version", version)
 	}
 
@@ -134,9 +154,19 @@ func (m *PluginInstaller) install(ctx context.Context, pluginID, version string,
 		return nil, err
 	}
 
-	// Check that the extracted plugin archive has the expected ID and version
-	// but avoid a hard error for backwards compatibility with older plugins
-	// and because in the case of an update, the previous version has been already uninstalled
+	if fromCatalog {
+		// Extract reads the manifest back from disk, which is what the loader will see.
+		if err = checkCatalogArchive(pluginID, catalogVersion, extractedArchive.ID, extractedArchive.Version); err != nil {
+			if rmErr := os.RemoveAll(extractedArchive.Path); rmErr != nil {
+				m.log.Error("Failed to remove rejected plugin archive", "path", extractedArchive.Path, "error", rmErr)
+			}
+			return nil, err
+		}
+		return extractedArchive, nil
+	}
+
+	// An archive from an admin-supplied URL has no catalog record to hold it to, so a mismatch is
+	// only logged for backwards compatibility with older plugins.
 	if extractedArchive.ID != pluginID {
 		m.log.Error("Installed plugin ID mismatch", "expected", pluginID, "got", extractedArchive.ID)
 	}
@@ -147,48 +177,49 @@ func (m *PluginInstaller) install(ctx context.Context, pluginID, version string,
 	return extractedArchive, nil
 }
 
-func (m *PluginInstaller) updateFromURL(ctx context.Context, plugin *plugins.Plugin, url string, compatOpts repo.CompatOpts) (*repo.PluginArchive, error) {
-	m.log.Info("Updating plugin", "pluginId", plugin.ID, "from", plugin.Info.Version, "url", url)
-
-	// remove existing installation of plugin
-	err := m.Remove(ctx, plugin.ID, plugin.Info.Version)
+// catalogArchive downloads the archive named by the catalog record for pluginID and verifies it against
+// that same record's checksum. It returns the archive along with the version the record names.
+func (m *PluginInstaller) catalogArchive(ctx context.Context, pluginID, version string, installed *plugins.Plugin, compatOpts repo.CompatOpts) (*repo.PluginArchive, string, error) {
+	info, err := m.pluginRepo.GetPluginArchiveInfo(ctx, pluginID, version, compatOpts)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	return m.pluginRepo.GetPluginArchiveByURL(ctx, url, compatOpts)
-}
+	if installed != nil {
+		m.log.Info("Updating plugin", "pluginId", installed.ID, "from", installed.Info.Version, "to", info.Version)
 
-func (m *PluginInstaller) updateFromCatalog(ctx context.Context, plugin *plugins.Plugin, version string, compatOpts repo.CompatOpts) (*repo.PluginArchive, error) {
-	// get plugin update information to confirm if target update is possible
-	pluginArchiveInfo, err := m.pluginRepo.GetPluginArchiveInfo(ctx, plugin.ID, version, compatOpts)
-	if err != nil {
-		return nil, err
-	}
+		if info.Version == installed.Info.Version {
+			return nil, "", plugins.DuplicateError{
+				PluginID: installed.ID,
+			}
+		}
 
-	m.log.Info("Updating plugin", "pluginId", plugin.ID, "from", plugin.Info.Version, "to", pluginArchiveInfo.Version)
-
-	// if existing plugin version is the same as the target update version
-	if pluginArchiveInfo.Version == plugin.Info.Version {
-		return nil, plugins.DuplicateError{
-			PluginID: plugin.ID,
+		if info.URL == "" && info.Version == "" {
+			return nil, "", fmt.Errorf("could not determine update options for %s", installed.ID)
 		}
 	}
 
-	if pluginArchiveInfo.URL == "" && pluginArchiveInfo.Version == "" {
-		return nil, fmt.Errorf("could not determine update options for %s", plugin.ID)
-	}
-
-	// remove existing installation of plugin
-	err = m.Remove(ctx, plugin.ID, plugin.Info.Version)
+	archive, err := m.pluginRepo.GetPluginArchiveByInfo(ctx, pluginID, info, compatOpts)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	if pluginArchiveInfo.URL != "" {
-		return m.pluginRepo.GetPluginArchiveByURL(ctx, pluginArchiveInfo.URL, compatOpts)
-	} else {
-		return m.pluginRepo.GetPluginArchive(ctx, plugin.ID, pluginArchiveInfo.Version, compatOpts)
+	return archive, info.Version, nil
+}
+
+func checkCatalogArchive(pluginID, catalogVersion, archiveID, archiveVersion string) error {
+	if archiveID != pluginID {
+		return fmt.Errorf("plugin archive for %s contains plugin %q", pluginID, archiveID)
+	}
+	if archiveVersion != catalogVersion {
+		return fmt.Errorf("plugin archive for %s v%s contains version %q", pluginID, catalogVersion, archiveVersion)
+	}
+	return nil
+}
+
+func closeArchive(archive *repo.PluginArchive) {
+	if archive != nil && archive.File != nil {
+		_ = archive.File.Close()
 	}
 }
 
