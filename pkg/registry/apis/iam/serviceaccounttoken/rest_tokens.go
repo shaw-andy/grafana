@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	claims "github.com/grafana/authlib/types"
@@ -25,9 +26,11 @@ import (
 	"github.com/grafana/grafana/pkg/components/satokengen"
 	"github.com/grafana/grafana/pkg/configprovider"
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/registry/apis/iam/common"
 	"github.com/grafana/grafana/pkg/registry/apis/iam/legacy"
 	"github.com/grafana/grafana/pkg/services/apiserver/endpoints/request"
+	"github.com/grafana/grafana/pkg/services/serviceaccounts"
 	settingsvc "github.com/grafana/grafana/pkg/services/setting"
 )
 
@@ -135,10 +138,13 @@ func (s *TokensREST) Connect(ctx context.Context, name string, options runtime.O
 			responder.Error(err)
 			return
 		}
-		if _, ok := obj.(*iamv0alpha1.ServiceAccount); !ok {
+		sa, ok := obj.(*iamv0alpha1.ServiceAccount)
+		if !ok {
 			responder.Error(apierrors.NewInternalError(fmt.Errorf("unexpected object type %T", obj)))
 			return
 		}
+		// Bind the authorized service account once; all token mutations below use this object.
+		saUID := sa.Name
 
 		// Extract optional tokenName from request info.
 		// Parts = ["serviceaccounts", "{saName}", "tokens"] or
@@ -151,14 +157,22 @@ func (s *TokensREST) Connect(ctx context.Context, name string, options runtime.O
 		switch r.Method {
 		case http.MethodGet:
 			if tokenName != "" {
-				s.handleGet(ctx, ns, name, tokenName, responder)
+				s.handleGet(ctx, ns, saUID, tokenName, responder)
 			} else {
-				s.handleList(ctx, ns, name, r, responder)
+				s.handleList(ctx, ns, saUID, r, responder)
 			}
 		case http.MethodPost:
-			s.handleCreate(ctx, ns, name, r, responder)
+			if err := validateExternalServiceAccountTokenMutation(ctx, sa); err != nil {
+				responder.Error(err)
+				return
+			}
+			s.handleCreate(ctx, ns, saUID, r, responder)
 		case http.MethodDelete:
-			s.handleDelete(ctx, ns, name, tokenName, responder)
+			if err := validateExternalServiceAccountTokenMutation(ctx, sa); err != nil {
+				responder.Error(err)
+				return
+			}
+			s.handleDelete(ctx, ns, saUID, tokenName, responder)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -380,6 +394,35 @@ func (s *TokensREST) handleDelete(ctx context.Context, ns claims.NamespaceInfo, 
 		},
 	}
 	responder.Object(http.StatusOK, resp)
+}
+
+func isPluginManagedServiceAccount(sa *iamv0alpha1.ServiceAccount) bool {
+	if sa.Spec.Plugin != "" {
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(sa.Spec.Title), serviceaccounts.ExtSvcPrefix)
+}
+
+// validateExternalServiceAccountTokenMutation mirrors ServiceAccountsProxy: only service
+// identities may create or delete tokens on plugin-managed service accounts.
+func validateExternalServiceAccountTokenMutation(ctx context.Context, sa *iamv0alpha1.ServiceAccount) error {
+	if !isPluginManagedServiceAccount(sa) {
+		return nil
+	}
+
+	requester, err := identity.GetRequester(ctx)
+	if err != nil {
+		return apierrors.NewUnauthorized("no identity found")
+	}
+	if requester.IsIdentityType(claims.TypeAccessPolicy) {
+		return nil
+	}
+
+	return apierrors.NewForbidden(
+		iamv0alpha1.ServiceAccountResourceInfo.GroupResource(),
+		sa.Name,
+		fmt.Errorf("only service identities can modify tokens for external service accounts"),
+	)
 }
 
 func mapListToken(t legacy.ServiceAccountToken) iamv0alpha1.ListServiceAccountTokensToken {
