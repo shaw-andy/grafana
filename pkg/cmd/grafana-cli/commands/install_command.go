@@ -166,7 +166,7 @@ func doInstallPlugin(ctx context.Context, pluginID, version string, o pluginInst
 			return nil
 		}
 
-		if archive, err = repository.GetPluginArchiveByURL(ctx, archiveInfo.URL, compatOpts); err != nil {
+		if archive, err = repository.GetPluginArchiveFromInfo(ctx, archiveInfo, compatOpts); err != nil {
 			return err
 		}
 	}
