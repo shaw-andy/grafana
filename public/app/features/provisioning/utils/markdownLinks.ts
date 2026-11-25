@@ -1,3 +1,4 @@
+import { textUtil } from '@grafana/data';
 import { type RepositoryView } from 'app/api/clients/provisioning/v0alpha1';
 
 import { isMarkdownFile } from './folderDocConventions';
@@ -32,6 +33,9 @@ export const RESOURCE_PATH_ATTR = 'data-provisioning-repo-path';
  * repos), the broken relative attribute is removed so it doesn't render as
  * a clickable but non-functional link or a broken image with the relative
  * path leaking into the page.
+ *
+ * README content comes from whoever can push to the repository, so images and
+ * other subresources are only kept when they load from the repository's host.
  */
 export function rewriteRelativeMarkdownLinks(html: string, options: RewriteOptions): string {
   if (typeof DOMParser === 'undefined') {
@@ -103,7 +107,40 @@ export function rewriteRelativeMarkdownLinks(html: string, options: RewriteOptio
     }
   });
 
-  return doc.body.innerHTML;
+  const repositoryHost = getHttpHostname(options.repository.url);
+  return textUtil.removeUnsafeResourceUrls(
+    doc.body.innerHTML,
+    (url) => textUtil.isUnsafeResourceUrl(url) || !isLoadedFromHost(url, repositoryHost)
+  );
+}
+
+function isLoadedFromHost(url: string, host: string | undefined): boolean {
+  const value = url.trim();
+  if (!value) {
+    return true;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value, document.baseURI);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return true;
+  }
+  return host !== undefined && parsed.hostname === host;
+}
+
+function getHttpHostname(url: string | undefined): string | undefined {
+  if (!url) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.hostname : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function isAbsoluteUrl(url: string): boolean {

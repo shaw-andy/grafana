@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import { textUtil } from '@grafana/data';
+
 import { getCellLinks } from '../../../utils/table';
 import { DataLinksActionsTooltip, renderSingleLink } from '../DataLinksActionsTooltip';
 import {
@@ -26,7 +28,9 @@ export const ImageCell = (props: TableCellProps) => {
   const shouldShowTooltip = hasMultipleLinksOrActions && tooltipCoords !== undefined;
 
   // The image element
-  const img = (
+  const img = textUtil.isUnsafeResourceUrl(displayValue.text) ? (
+    <>{alt ?? displayValue.text}</>
+  ) : (
     <img
       style={{ height: tableStyles.cellHeight - DATALINKS_HEIGHT_OFFSET, width: 'auto' }}
       src={displayValue.text}

@@ -104,9 +104,9 @@ function processContent(options: Options, interpolate: InterpolateFunction, disa
     case TextMode.Code:
       break; // nothing
     case TextMode.HTML:
-      if (!disableSanitizeHtml) {
-        content = textUtil.sanitizeTextPanelContent(content);
-      }
+      content = disableSanitizeHtml
+        ? textUtil.removeUnsafeResourceUrls(content)
+        : textUtil.sanitizeTextPanelContent(content);
       break;
     case TextMode.Markdown:
     default:
@@ -114,6 +114,9 @@ function processContent(options: Options, interpolate: InterpolateFunction, disa
       content = renderTextPanelMarkdown(content, {
         noSanitize: disableSanitizeHtml,
       });
+      if (disableSanitizeHtml) {
+        content = textUtil.removeUnsafeResourceUrls(content);
+      }
   }
 
   return content;

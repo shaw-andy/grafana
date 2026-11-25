@@ -2,6 +2,8 @@ import { sanitizeUrl as braintreeSanitizeUrl } from '@braintree/sanitize-url';
 import DOMPurify from 'dompurify';
 import * as xss from 'xss';
 
+import { isUnsafeResourceUrl, removeUnsafeResourceUrls, removeUnsafeResourceUrlsFromElement } from './resourceUrls';
+
 const XSSWL = Object.keys(xss.whiteList).reduce<xss.IWhiteList>((acc, element) => {
   acc[element] = xss.whiteList[element]?.concat(['class', 'style']);
   return acc;
@@ -64,6 +66,7 @@ export function sanitize(unsanitizedString: string): string {
       if (node.tagName === 'A' && node.getAttribute('target') === '_blank') {
         node.setAttribute('rel', 'noopener noreferrer');
       }
+      removeUnsafeResourceUrlsFromElement(node);
     });
 
     return DOMPurify.sanitize(unsanitizedString, {
@@ -89,7 +92,18 @@ function sanitizeTrustedTypesRSS(unsanitizedString: string): TrustedHTML {
 }
 
 function sanitizeTrustedTypes(unsanitizedString: string): TrustedHTML {
-  return DOMPurify.sanitize(unsanitizedString, { RETURN_TRUSTED_TYPE: true });
+  return withUnsafeResourceUrlsRemoved(() => DOMPurify.sanitize(unsanitizedString, { RETURN_TRUSTED_TYPE: true }));
+}
+
+function withUnsafeResourceUrlsRemoved<T>(purify: () => T): T {
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    removeUnsafeResourceUrlsFromElement(node);
+  });
+  try {
+    return purify();
+  } finally {
+    DOMPurify.removeHook('afterSanitizeAttributes');
+  }
 }
 
 /**
@@ -101,7 +115,7 @@ function sanitizeTrustedTypes(unsanitizedString: string): TrustedHTML {
  */
 export function sanitizeTextPanelContent(unsanitizedString: string): string {
   try {
-    return sanitizeTextPanelWhitelist.process(unsanitizedString);
+    return removeUnsafeResourceUrls(sanitizeTextPanelWhitelist.process(unsanitizedString));
   } catch (error) {
     console.error('String could not be sanitized', unsanitizedString);
     return 'Text string could not be sanitized';
@@ -110,7 +124,9 @@ export function sanitizeTextPanelContent(unsanitizedString: string): string {
 
 // Returns sanitized SVG, free from XSS attacks to be used when rendering SVG content.
 function sanitizeSVGContent(unsanitizedString: string): string {
-  return DOMPurify.sanitize(unsanitizedString, { USE_PROFILES: { svg: true, svgFilters: true } });
+  return withUnsafeResourceUrlsRemoved(() =>
+    DOMPurify.sanitize(unsanitizedString, { USE_PROFILES: { svg: true, svgFilters: true } })
+  );
 }
 
 // Return a sanitized URL, free from XSS attacks, such as javascript:alert(1)
@@ -182,6 +198,8 @@ export function validatePath<OriginalPath extends string>(path: OriginalPath): O
 export const textUtil = {
   escapeHtml,
   hasAnsiCodes,
+  isUnsafeResourceUrl,
+  removeUnsafeResourceUrls,
   sanitize,
   sanitizeTextPanelContent,
   sanitizeUrl,

@@ -35,8 +35,8 @@ const attributionsOf = (layer: TileLayer<XYZ>) => {
   return Array.isArray(attribution) ? attribution : [attribution];
 };
 
-const XSS_ATTRIBUTION = '<img src="x" onerror="window.__pwned = 1">';
-const SAFE_ATTRIBUTION = '<img src="x">';
+const XSS_ATTRIBUTION = '<img src="https://tiles.example/logo.png" onerror="window.__pwned = 1">';
+const SAFE_ATTRIBUTION = '<img src="https://tiles.example/logo.png">';
 const LEGITIMATE_ATTRIBUTION = '<a href="https://carto.com/attribution/">©CARTO</a>';
 
 const layerState = (layer: MapLayerState['layer'], options: Partial<MapLayerOptions> = {}): MapLayerState => ({
