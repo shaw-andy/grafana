@@ -226,10 +226,10 @@ func parseHitDocInfo(doc *search.DocumentMatch, resources map[string]string) (do
 // authorizes hits in rank order, and stops once the page is filled (page-fill
 // queries) or the candidate budget is hit. Count-only queries (Limit == 0, no
 // facets) have no page and stop only on exhaustion or the budget. TotalHits is
-// the exact authorized
-// count when the scan exhausts the index from the top (small sets, no incoming
-// cursor), else the unfiltered match count (page filled early / cap hit /
-// cursor pages — fast over exact). Facets are aggregated app-side over an
+// the exact authorized count when the scan exhausts the index from the top
+// (small sets, no incoming cursor), else the authorized hits observed so far
+// with TotalHitsExact=false (page filled early / cap hit / cursor pages — fast
+// over exact). Facets are aggregated app-side over an
 // authorized sample that always starts at the top of the full query. index may
 // be a single bleve index or an IndexAlias
 // (dashboards + folders); the globally-unique doc ID keeps the SortDocID
@@ -307,6 +307,8 @@ func (b *bleveIndex) runPostFilterAuthz(
 
 	var candidates int64
 	var authorized int64
+	// Bleve's MaxScore covers every match, including hits the caller may not see.
+	var maxScore float64
 	var exhausted bool
 	var firstRes *bleve.SearchResult
 	maxCandidates := int64(cfg.MaxCandidates)
@@ -356,6 +358,7 @@ func (b *bleveIndex) runPostFilterAuthz(
 				return nil, err
 			}
 			authorized++
+			maxScore = max(maxScore, info.doc.Score)
 			// Skip the first `offset` authorized hits, then fill the page.
 			if authorized > int64(offset) && len(page) < limit {
 				page = append(page, info.doc)
@@ -414,7 +417,7 @@ func (b *bleveIndex) runPostFilterAuthz(
 		exhausted = facetExhausted
 	}
 	return response, b.finalizePostFilter(ctx, response, page, selectFields, fieldValueSchema, firstReq.Sort, req, firstRes,
-		authorized, exhausted, reverseSort, wantFacets, trashAuthz != nil, agg, stats)
+		authorized, maxScore, exhausted, reverseSort, wantFacets, trashAuthz != nil, agg, stats)
 }
 
 // authorizeHits filters ranked hits by the trash rule when trashAuthz is set,
@@ -573,10 +576,11 @@ func applySearchBefore(req *resourcepb.ResourceSearchRequest, firstReq *bleve.Se
 }
 
 // finalizePostFilter sets TotalHits, reverses the page for SearchBefore, and
-// converts hits + facets into the response. Facet requests report the
-// authorized facet-sample count so TotalHits and facet counts have the same
-// lower-bound semantics when capped. Non-facet requests retain the unfiltered
-// upper-bound fallback when their page scan does not produce an exact total.
+// converts hits + facets into the response. TotalHits only ever counts
+// authorized hits: it is exact when the scan exhausted the match set from the
+// top, and otherwise a lower bound with TotalHitsExact=false. Facet requests
+// report the authorized facet-sample count so TotalHits and facet counts have
+// the same lower-bound semantics when capped.
 func (b *bleveIndex) finalizePostFilter(
 	ctx context.Context,
 	response *resourcepb.ResourceSearchResponse,
@@ -587,6 +591,7 @@ func (b *bleveIndex) finalizePostFilter(
 	req *resourcepb.ResourceSearchRequest,
 	firstRes *bleve.SearchResult,
 	authorized int64,
+	maxScore float64,
 	exhausted, reverseSort, wantFacets, trash bool,
 	agg *facetAggregator,
 	stats *resource.SearchStats,
@@ -609,14 +614,16 @@ func (b *bleveIndex) finalizePostFilter(
 		// solely to total, and only fall through when the budget cuts them off.
 		response.TotalHits = authorized
 	default:
+		// Bleve's match count includes hits the caller may not see, so reporting
+		// it would let them count hidden objects by varying filters. Report only
+		// the authorized hits this scan observed, as a lower bound; callers page
+		// on TotalHitsExact (or the continue token) rather than on this count.
 		exact = false
-		// Approximate: report the pre-authz match count (an over-count of the
-		// authorized total) instead of paying for a full scan.
-		response.TotalHits = int64(firstRes.Total)
+		response.TotalHits = authorized
 	}
 	response.TotalHitsExact = exact
 	response.QueryCost = float64(firstRes.Cost)
-	response.MaxScore = firstRes.MaxScore
+	response.MaxScore = maxScore
 	stats.AddReturnedDocuments(len(page))
 
 	if reverseSort {

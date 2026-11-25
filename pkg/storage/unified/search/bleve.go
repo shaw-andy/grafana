@@ -2351,7 +2351,7 @@ func (b *bleveIndex) Search(
 	// and stops once the page is full (page-fill) or the sample budget is hit
 	// (facets). A count-only request (Limit==0, no facets) authorizes up to
 	// MaxCandidates ranked hits: an exact authorized total when that exhausts
-	// the match set, otherwise Bleve's unfiltered count with
+	// the match set, otherwise the authorized hits it saw with
 	// TotalHitsExact=false.
 	postRank := b.postRankAuthzEnabled && access != nil
 

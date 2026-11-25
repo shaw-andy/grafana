@@ -2005,9 +2005,9 @@ func TestSearchPostRankAuthz(t *testing.T) {
 		names, res := searchNames(t, index, ac, listQuery(100))
 
 		require.Len(t, names, 100, "should return exactly the requested limit")
-		// totalHits stays the unfiltered match count.
-		require.Equal(t, int64(700), res.TotalHits)
-		require.False(t, res.TotalHitsExact, "page filled early -> approximate total")
+		// totalHits counts only the authorized hits the scan saw.
+		require.Equal(t, int64(100), res.TotalHits)
+		require.False(t, res.TotalHitsExact, "page filled early -> lower-bound total")
 		// Early-exit: we must not have authorized all 700 candidates. With a
 		// batch size of 500 the first batch already fills the page of 100.
 		require.LessOrEqual(t, ac.checked, 500)
@@ -2169,7 +2169,7 @@ func TestSearchPostRankAuthz(t *testing.T) {
 		require.Equal(t, 3, ac.checked, "every match is authorized once")
 	})
 
-	t.Run("count-only request approximates once the budget is hit", func(t *testing.T) {
+	t.Run("count-only request reports a lower bound once the budget is hit", func(t *testing.T) {
 		cfg := search.PostRankAuthzConfig{MaxWindow: 20, MaxCandidates: 40}
 		index := newTestDashboardsIndexPostRankWithConfig(t, 2, cfg)
 		docs := make([]*resource.BulkIndexItem, 0, 200)
@@ -2185,7 +2185,7 @@ func TestSearchPostRankAuthz(t *testing.T) {
 		ac := &countingAccessClient{allowedFolders: map[string]bool{"allowed": true}}
 		_, res := searchNames(t, index, ac, listQuery(0))
 
-		require.Equal(t, int64(200), res.TotalHits, "a capped count falls back to the unfiltered match count")
+		require.Equal(t, int64(20), res.TotalHits, "a capped count reports the authorized hits within the budget")
 		require.False(t, res.TotalHitsExact)
 		require.Equal(t, 40, ac.checked, "the scan stops at MaxCandidates")
 	})
@@ -2302,10 +2302,10 @@ func TestSearchPostRankAuthz(t *testing.T) {
 		require.Equal(t, int64(1), res1.TotalHits, "total stays exact at offset=1 — no phantom 2nd result")
 	})
 
-	t.Run("TotalHits on a cursor page that exhausts the tail stays the unfiltered match count", func(t *testing.T) {
+	t.Run("TotalHits on a cursor page that exhausts the tail is not exact", func(t *testing.T) {
 		// With req.SearchAfter set, the scan only authorizes the tail beyond the
 		// cursor; on exhaustion that's not the whole-query total, so the final
-		// short cursor page must fall back to firstRes.Total (unfiltered).
+		// short cursor page must not claim to be exact.
 		index := newTestDashboardsIndexPostRank(t, 2)
 		const n = 25
 		docs := make([]*resource.BulkIndexItem, 0, n)
@@ -2315,26 +2315,27 @@ func TestSearchPostRankAuthz(t *testing.T) {
 		indexDocs(t, index, docs)
 		ac := &countingAccessClient{allowAll: true}
 
-		// Page 1 (no cursor): fills early -> unfiltered total.
+		// Page 1 (no cursor): fills early -> authorized hits seen so far.
 		p1, r1 := searchNames(t, index, ac, listQuery(10))
 		require.Len(t, p1, 10)
-		require.Equal(t, int64(n), r1.TotalHits)
+		require.Equal(t, int64(10), r1.TotalHits)
+		require.False(t, r1.TotalHitsExact)
 
-		// Page 2: still fills early -> unfiltered total.
+		// Page 2: still fills early.
 		q2 := listQuery(10)
 		q2.SearchAfter = r1.Results.GetRows()[9].SortFields
 		p2, r2 := searchNames(t, index, ac, q2)
 		require.Len(t, p2, 10)
-		require.Equal(t, int64(n), r2.TotalHits)
+		require.Equal(t, int64(10), r2.TotalHits)
+		require.False(t, r2.TotalHitsExact)
 
-		// Page 3: the tail (5 docs) exhausts. Pre-fix this reported
-		// TotalHits=5 (the tail authorized count); it must stay n (25).
+		// Page 3: the tail (5 docs) exhausts, but only past the cursor.
 		q3 := listQuery(10)
 		q3.SearchAfter = r2.Results.GetRows()[9].SortFields
 		p3, r3 := searchNames(t, index, ac, q3)
 		require.Len(t, p3, 5)
-		require.Equal(t, int64(n), r3.TotalHits, "cursor page must report the unfiltered match count, not the tail authorized count")
-		require.False(t, r3.TotalHitsExact, "cursor-page total is approximate, not exact")
+		require.Equal(t, int64(5), r3.TotalHits, "cursor page counts only the authorized tail it saw")
+		require.False(t, r3.TotalHitsExact, "cursor-page total is a lower bound, not exact")
 	})
 
 	t.Run("low auth fraction continues past MaxCandidates until first authorized hit", func(t *testing.T) {
@@ -2363,7 +2364,8 @@ func TestSearchPostRankAuthz(t *testing.T) {
 		ac2 := &countingAccessClient{allowedFolders: map[string]bool{"allowed": true}}
 		names2, _ := searchNames(t, index, ac2, q)
 		require.Equal(t, names1, names2)
-		require.Equal(t, int64(2000), res1.TotalHits, "TotalHits stays the unfiltered match count")
+		require.Equal(t, int64(1), res1.TotalHits, "TotalHits counts only the authorized hit, not the denied matches")
+		require.False(t, res1.TotalHitsExact)
 	})
 
 	t.Run("tie-breaker keeps duplicate sort keys contiguous across windows", func(t *testing.T) {
@@ -2981,7 +2983,8 @@ func TestSearchPostRankAuthz(t *testing.T) {
 		// The 5 hits immediately before doc-14, in forward order.
 		names, res := backwardNames(t, index, ac, cursor, 5)
 		require.Equal(t, []string{"doc-09", "doc-10", "doc-11", "doc-12", "doc-13"}, names)
-		require.Equal(t, int64(30), res.TotalHits, "TotalHits stays the unfiltered match count")
+		require.Equal(t, int64(5), res.TotalHits, "TotalHits counts the authorized hits the backward scan saw")
+		require.False(t, res.TotalHitsExact)
 	})
 
 	t.Run("SearchBefore pages backwards contiguously with no dupes or skips", func(t *testing.T) {
@@ -3429,8 +3432,29 @@ func TestSearchPostRankAuthzFederated(t *testing.T) {
 		q.SearchBefore = cursor
 		got, res := searchFederated(t, dash, folder, ac, q)
 		require.Equal(t, merged[2:7], got, "SearchBefore must return the previous federated page in forward order")
-		require.Equal(t, int64(12), res.TotalHits, "TotalHits stays the unfiltered merged match count")
+		require.Equal(t, int64(5), res.TotalHits, "TotalHits counts the authorized merged hits the backward scan saw")
+		require.False(t, res.TotalHitsExact)
 	})
+}
+
+func TestSearchPostRankAuthzMaxScoreIgnoresUnauthorizedHits(t *testing.T) {
+	docs := []*resource.BulkIndexItem{newDoc("plan overview", "allowed"), newDoc("plan plan plan", "denied")}
+	q := listQuery(1)
+	q.Query = "plan"
+	q.QueryFields = []*resourcepb.ResourceSearchRequest_QueryField{{Name: resource.SEARCH_FIELD_TITLE, Boost: 1}}
+	ac := &countingAccessClient{allowedFolders: map[string]bool{"allowed": true}}
+
+	inSearcher := newTestDashboardsIndex(t, threshold, 2, noop)
+	indexDocs(t, inSearcher, docs)
+	names, want := searchNames(t, inSearcher, ac, q)
+	require.Equal(t, []string{"plan overview"}, names)
+
+	postRank := newTestDashboardsIndexPostRank(t, 2)
+	indexDocs(t, postRank, docs)
+	names, got := searchNames(t, postRank, ac, q)
+	require.Equal(t, []string{"plan overview"}, names)
+	require.Positive(t, got.MaxScore)
+	require.Equal(t, want.MaxScore, got.MaxScore, "the denied hit scores higher and must not set MaxScore")
 }
 
 // Deleted documents share an index with live ones, so every read path has to pick
