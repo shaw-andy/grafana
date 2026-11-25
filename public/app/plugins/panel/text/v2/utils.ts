@@ -29,15 +29,18 @@ export function transformContent(mode: TextMode, content: string, disableSanitiz
     case TextMode.Code:
       break;
     case TextMode.HTML:
-      if (!disableSanitizeHtml) {
-        content = textUtil.sanitizeTextPanelContent(content);
-      }
+      content = disableSanitizeHtml
+        ? textUtil.removeUnsafeResourceUrls(content)
+        : textUtil.sanitizeTextPanelContent(content);
       break;
     case TextMode.Markdown:
     default:
       content = renderTextPanelMarkdown(content, {
         noSanitize: disableSanitizeHtml,
       });
+      if (disableSanitizeHtml) {
+        content = textUtil.removeUnsafeResourceUrls(content);
+      }
   }
 
   return content || EMPTY_CONTENT;

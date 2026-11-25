@@ -38,7 +38,7 @@ function NewsComponent({ showImage, onClick, data, index, className, headingLeve
 
   return (
     <article aria-labelledby={titleId} className={cx(styles.item, className)}>
-      {showImage && newsItem.ogImage && (
+      {showImage && newsItem.ogImage && !textUtil.isUnsafeResourceUrl(newsItem.ogImage) && (
         <a
           tabIndex={-1}
           href={textUtil.sanitizeUrl(newsItem.link)}

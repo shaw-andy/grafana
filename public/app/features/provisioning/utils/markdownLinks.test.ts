@@ -269,12 +269,13 @@ describe('rewriteRelativeMarkdownLinks', () => {
       expect(out).toContain('src="https://bitbucket.org/workspace/repo/raw/main/docs/screenshot.png"');
     });
 
-    it('leaves absolute image URLs alone', () => {
-      const html = `<p><img src="https://example.com/cdn.png"> <img src="//cdn.example/logo.png"></p>`;
+    it('keeps absolute images hosted by the repository and drops images from other hosts', () => {
+      const html = `<p><img src="https://github.com/grafana/grafana-manifests/raw/main/logo.png"> <img src="https://example.com/cdn.png"> <img src="//cdn.example/logo.png"></p>`;
       const out = rewriteRelativeMarkdownLinks(html, { repository: githubRepo, baseDirInRepo: baseDir });
 
-      expect(out).toContain('src="https://example.com/cdn.png"');
-      expect(out).toContain('src="//cdn.example/logo.png"');
+      expect(out).toContain('src="https://github.com/grafana/grafana-manifests/raw/main/logo.png"');
+      expect(out).not.toContain('https://example.com/cdn.png');
+      expect(out).not.toContain('//cdn.example/logo.png');
     });
 
     it('strips a broken relative src for repos without a raw URL pattern', () => {

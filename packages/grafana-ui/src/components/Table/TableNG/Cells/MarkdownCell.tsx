@@ -1,7 +1,7 @@
 import { css } from '@emotion/css';
 import memoize from 'micro-memoize';
 
-import { renderMarkdown } from '@grafana/data';
+import { renderMarkdown, textUtil } from '@grafana/data';
 
 import { MaybeWrapWithLink } from '../components/MaybeWrapWithLink';
 import { getActiveCellSelector, isTableCellStylesKeyEqual } from '../styles';
@@ -14,15 +14,14 @@ export function MarkdownCell({ field, rowIdx, disableSanitizeHtml }: MarkdownCel
   }
 
   const renderValue = field.display!(rawValue);
+  let html = renderMarkdown(renderValue.text, { noSanitize: disableSanitizeHtml });
+  if (disableSanitizeHtml) {
+    html = textUtil.removeUnsafeResourceUrls(html);
+  }
 
   return (
     <MaybeWrapWithLink field={field} rowIdx={rowIdx}>
-      <div
-        className="markdown-container"
-        dangerouslySetInnerHTML={{
-          __html: renderMarkdown(renderValue.text, { noSanitize: disableSanitizeHtml }).trim(),
-        }}
-      />
+      <div className="markdown-container" dangerouslySetInnerHTML={{ __html: html.trim() }} />
     </MaybeWrapWithLink>
   );
 }

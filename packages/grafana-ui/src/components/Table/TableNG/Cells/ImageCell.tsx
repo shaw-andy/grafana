@@ -1,6 +1,8 @@
 import { css } from '@emotion/css';
 import { useState } from 'react';
 
+import { textUtil } from '@grafana/data';
+
 import { TableCellDisplayMode } from '../../types';
 import { MaybeWrapWithLink } from '../components/MaybeWrapWithLink';
 import { type ImageCellProps, type TableCellStyles } from '../types';
@@ -15,9 +17,11 @@ export const ImageCell = ({ cellOptions, field, value, rowIdx }: ImageCellProps)
     return null;
   }
 
+  const showImage = !error && !textUtil.isUnsafeResourceUrl(text);
+
   return (
     <MaybeWrapWithLink field={field} rowIdx={rowIdx}>
-      {error ? (alt ?? text) : <img alt={alt} src={text} title={title} onError={() => setError(true)} />}
+      {showImage ? <img alt={alt} src={text} title={title} onError={() => setError(true)} /> : (alt ?? text)}
     </MaybeWrapWithLink>
   );
 };

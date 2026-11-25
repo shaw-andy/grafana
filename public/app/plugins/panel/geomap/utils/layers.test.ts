@@ -319,12 +319,12 @@ describe('initLayer', () => {
       const child = new TileLayer({
         source: new XYZ({
           url: 'http://x/{z}/{x}/{y}',
-          attributions: '<img src="x" onerror="window.__pwned = 1">',
+          attributions: '<img src="https://tiles.example/logo.png" onerror="window.__pwned = 1">',
         }),
       });
       group.getLayers().push(child);
 
-      expect(attributionOf(child)).toEqual(['<img src="x">']);
+      expect(attributionOf(child)).toEqual(['<img src="https://tiles.example/logo.png">']);
     });
   });
 });

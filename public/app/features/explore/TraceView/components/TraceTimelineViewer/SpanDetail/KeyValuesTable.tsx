@@ -14,7 +14,6 @@
 
 import { css } from '@emotion/css';
 import cx from 'clsx';
-import DOMPurify from 'dompurify';
 import {
   type MouseEvent,
   type PropsWithChildren,
@@ -25,7 +24,7 @@ import {
   useState,
 } from 'react';
 
-import { type GrafanaTheme2, type PluginExtensionLink, type TraceKeyValuePair } from '@grafana/data';
+import { type GrafanaTheme2, type PluginExtensionLink, textUtil, type TraceKeyValuePair } from '@grafana/data';
 import { t } from '@grafana/i18n';
 import { config, reportInteraction, useReturnToPrevious } from '@grafana/runtime';
 import { Dropdown, Icon, Menu, useStyles2 } from '@grafana/ui';
@@ -371,7 +370,7 @@ export default function KeyValuesTable(props: KeyValuesTableProps) {
             }
 
             const jsonTable = (
-              <div className={styles.jsonTable} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
+              <div className={styles.jsonTable} dangerouslySetInnerHTML={{ __html: textUtil.sanitize(html) }} />
             );
             const links = linksGetter?.(data, i) ?? [];
             let valueMarkup =

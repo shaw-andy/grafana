@@ -1,4 +1,4 @@
-import { type DataFrame } from '@grafana/data';
+import { type DataFrame, textUtil } from '@grafana/data';
 import { type ResourceDimensionConfig, ResourceDimensionMode } from '@grafana/schema';
 
 import { type DimensionSupplier } from './types';
@@ -17,8 +17,9 @@ export function getPublicOrAbsoluteUrl(path: unknown): string {
   const isUrl = path.indexOf(':/') > 0;
   // Falls back to the default build directory when no entry point has set the global.
   const buildPath = window.__grafana_build_path__ || 'public/build/';
+  const url = isUrl ? path : `${buildPath}${path}`;
 
-  return isUrl ? path : `${buildPath}${path}`;
+  return textUtil.isUnsafeResourceUrl(url) ? '' : url;
 }
 
 export function getResourceDimension(
