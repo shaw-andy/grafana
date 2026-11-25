@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path"
 	"slices"
 	"strings"
 
@@ -30,6 +31,7 @@ type RepositoryValidator struct {
 	allowImageRendering bool
 	repoFactory         Factory
 	urlValidator        *URLValidator
+	instanceURLs        []*url.URL
 }
 
 type ValidatorOption func(*RepositoryValidator)
@@ -51,6 +53,20 @@ func NewValidator(allowImageRendering bool, repoFactory Factory, opts ...Validat
 func WithURLValidator(urlValidator *URLValidator) ValidatorOption {
 	return func(v *RepositoryValidator) {
 		v.urlValidator = urlValidator
+	}
+}
+
+// WithInstanceURLs sets the URLs this Grafana instance is served from, so repository URLs
+// that point back at the instance can be rejected. Empty or unparseable URLs are ignored.
+func WithInstanceURLs(rawURLs ...string) ValidatorOption {
+	return func(v *RepositoryValidator) {
+		for _, rawURL := range rawURLs {
+			parsed, err := url.Parse(strings.TrimSpace(rawURL))
+			if err != nil || parsed.Hostname() == "" {
+				continue
+			}
+			v.instanceURLs = append(v.instanceURLs, parsed)
+		}
 	}
 }
 
@@ -158,9 +174,102 @@ func (v *RepositoryValidator) Validate(ctx context.Context, cfg *provisioning.Re
 	if cfg.Spec.Webhook != nil && cfg.Spec.Webhook.BaseURL != "" {
 		list = append(list, validateWebhookBaseURL(cfg.Spec.Webhook.BaseURL)...)
 	}
+	list = append(list, v.validateURLTarget(cfg)...)
 	list = append(list, v.validatePrivateEndpoint(ctx, cfg)...)
 
 	return list
+}
+
+// logoutPath is the Grafana route that ends the caller's session on a plain GET.
+const logoutPath = "/logout"
+
+// validateURLTarget rejects repository URLs that the UI could turn into a link back to this
+// Grafana instance. Repository URLs are rendered as links for other users, and a same-site
+// navigation carries their session cookie, so a URL such as https://<this-host>/logout would sign
+// them out. Query strings and fragments are rejected so the provider path segments the UI appends
+// stay in the path, and dot segments are rejected because browsers resolve them before sending.
+func (v *RepositoryValidator) validateURLTarget(cfg *provisioning.Repository) field.ErrorList {
+	rawURL := cfg.URL()
+	if rawURL == "" {
+		return nil
+	}
+
+	fld := field.NewPath("spec", string(cfg.Spec.Type), "url")
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return field.ErrorList{field.Invalid(fld, rawURL, "repository URL must be a valid URL")}
+	}
+	if parsed.Hostname() == "" {
+		return nil
+	}
+
+	var list field.ErrorList
+	if parsed.ForceQuery || parsed.RawQuery != "" || parsed.Fragment != "" || strings.ContainsAny(rawURL, "?#") {
+		list = append(list, field.Invalid(fld, rawURL, "repository URL must not contain a query string or fragment"))
+	}
+
+	// Browsers treat a backslash as a path separator in http(s) URLs.
+	urlPath := strings.ReplaceAll(parsed.Path, `\`, "/")
+	for _, segment := range strings.Split(urlPath, "/") {
+		if segment == "." || segment == ".." {
+			list = append(list, field.Invalid(fld, rawURL, "repository URL path must not contain '.' or '..' segments"))
+			break
+		}
+	}
+
+	cleanPath := path.Clean("/" + urlPath)
+	if strings.EqualFold(cleanPath, logoutPath) || v.pointsAtInstance(parsed, cleanPath) {
+		list = append(list, field.Invalid(fld, rawURL, "repository URL must not point at this Grafana instance"))
+	}
+
+	return list
+}
+
+// pointsAtInstance reports whether u, with its cleaned path, addresses this Grafana instance:
+// same host, same port (http and https on their default ports count as the same server, since a
+// plain-http request is commonly redirected to https), and a path inside the instance sub path.
+func (v *RepositoryValidator) pointsAtInstance(u *url.URL, cleanPath string) bool {
+	for _, instance := range v.instanceURLs {
+		if !strings.EqualFold(normalizeHostname(u.Hostname()), normalizeHostname(instance.Hostname())) {
+			continue
+		}
+		if effectivePort(u) != effectivePort(instance) && (!isDefaultPort(u) || !isDefaultPort(instance)) {
+			continue
+		}
+		subPath := strings.TrimRight(path.Clean("/"+instance.Path), "/")
+		if subPath == "" || strings.EqualFold(cleanPath, subPath) ||
+			strings.HasPrefix(strings.ToLower(cleanPath), strings.ToLower(subPath)+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeHostname(hostname string) string {
+	return strings.TrimSuffix(hostname, ".")
+}
+
+func defaultPort(scheme string) string {
+	switch strings.ToLower(scheme) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
+}
+
+func effectivePort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	return defaultPort(u.Scheme)
+}
+
+func isDefaultPort(u *url.URL) bool {
+	port := effectivePort(u)
+	return port != "" && port == defaultPort(u.Scheme)
 }
 
 func (v *RepositoryValidator) validatePrivateEndpoint(ctx context.Context, cfg *provisioning.Repository) field.ErrorList {
