@@ -118,17 +118,7 @@ func (integration *Integration) Diff(incoming Integration) IntegrationDiffReport
 		}
 		return in
 	})
-	schemaCmp := cmp.Comparer(func(a, b schema.IntegrationSchemaVersion) bool {
-		isAZero := reflect.ValueOf(a).IsZero()
-		isBZero := reflect.ValueOf(b).IsZero()
-		if isAZero && isBZero {
-			return true
-		}
-		if isAZero || isBZero {
-			return false
-		}
-		return a.Type() == b.Type() && a.Version == b.Version
-	})
+	schemaCmp := cmp.Comparer(IsSameSchemaVersion)
 	var cur Integration
 	if integration != nil {
 		cur = *integration
@@ -161,8 +151,51 @@ func HasReceiversDifferentProtectedFields(existing, incoming *Receiver) map[stri
 	return result
 }
 
+// IsSameSchemaVersion returns true if both schema versions have the same integration type and version.
+func IsSameSchemaVersion(a, b schema.IntegrationSchemaVersion) bool {
+	isAZero := reflect.ValueOf(a).IsZero()
+	isBZero := reflect.ValueOf(b).IsZero()
+	if isAZero && isBZero {
+		return true
+	}
+	if isAZero || isBZero {
+		return false
+	}
+	return a.Type() == b.Type() && a.Version == b.Version
+}
+
+func getProtectedFieldsPaths(parentPath schema.IntegrationFieldPath, options []schema.Field) []schema.IntegrationFieldPath {
+	var result []schema.IntegrationFieldPath
+	for _, field := range options {
+		p := parentPath.With(field.PropertyName)
+		if field.Protected {
+			result = append(result, p)
+		}
+		if len(field.SubformOptions) > 0 {
+			result = append(result, getProtectedFieldsPaths(p, field.SubformOptions)...)
+		}
+	}
+	return result
+}
+
 // HasIntegrationsDifferentProtectedFields returns list of paths to protected fields that are different between two integrations.
+// If the integrations have different types or schema versions, every protected field of both schemas is considered changed.
 func HasIntegrationsDifferentProtectedFields(existing, incoming *Integration) []schema.IntegrationFieldPath {
+	if !IsSameSchemaVersion(existing.Config, incoming.Config) {
+		// Settings of one schema cannot be judged by the protection rules of another one.
+		var result []schema.IntegrationFieldPath
+		seen := map[string]struct{}{}
+		for _, cfg := range []schema.IntegrationSchemaVersion{existing.Config, incoming.Config} {
+			for _, path := range getProtectedFieldsPaths(nil, cfg.Options) {
+				if _, ok := seen[path.String()]; ok {
+					continue
+				}
+				seen[path.String()] = struct{}{}
+				result = append(result, path)
+			}
+		}
+		return result
+	}
 	diff := existing.Diff(*incoming)
 	// The incoming receiver always has both secret and non-secret fields in Settings.
 	// So, if it's specified and happens to be sensitive, we consider it changed

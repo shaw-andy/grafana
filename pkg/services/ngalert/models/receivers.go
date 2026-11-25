@@ -352,9 +352,13 @@ func (integration *Integration) Redact(redactFn RedactFn) {
 }
 
 // WithExistingSecureFields copies secure settings from an existing integration. Which fields to copy is determined by the
-// fields slice.
+// fields slice. Nothing is copied if the existing integration has a different type or schema version, because its
+// secrets are keyed by the fields of its own schema.
 // Any fields found in Settings or SecureSettings are removed, even if they don't appear in the existing integration.
 func (integration *Integration) WithExistingSecureFields(existing *Integration, fields []string) {
+	if existing != nil && !IsSameSchemaVersion(existing.Config, integration.Config) {
+		existing = nil
+	}
 	// Now for each field marked as secure, we copy the value from the existing receiver.
 	for _, secureField := range fields {
 		delete(integration.Settings, secureField) // Ensure secure fields are removed from new settings and secure settings.
