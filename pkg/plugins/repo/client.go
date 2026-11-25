@@ -116,9 +116,13 @@ func (c *Client) downloadFile(ctx context.Context, tmpFile *os.File, pluginURL, 
 				c.log.Warn("Failed to close file", "error", err)
 			}
 		}()
-		_, err = io.Copy(tmpFile, f)
+		h := sha256.New()
+		_, err = io.Copy(tmpFile, io.TeeReader(f, h))
 		if err != nil {
 			return fmt.Errorf("%v: %w", "Failed to copy plugin archive", err)
+		}
+		if computedChecksum := fmt.Sprintf("%x", h.Sum(nil)); len(expectedChecksum) > 0 && expectedChecksum != computedChecksum {
+			return ErrChecksumMismatch(pluginURL, expectedChecksum, computedChecksum)
 		}
 		return nil
 	}

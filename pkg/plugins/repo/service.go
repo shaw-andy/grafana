@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -58,7 +59,21 @@ func (m *Manager) GetPluginArchive(ctx context.Context, pluginID, version string
 		return nil, err
 	}
 
-	return m.client.Download(ctx, dlOpts.URL, dlOpts.Checksum, compatOpts)
+	return m.GetPluginArchiveFromInfo(ctx, dlOpts, compatOpts)
+}
+
+// GetPluginArchiveFromInfo downloads the archive described by `info` and verifies it against `info.Checksum`.
+// Callers that already looked up `info` must pass that same value so the archive is checked against the
+// record that selected it rather than against a second catalog lookup.
+func (m *Manager) GetPluginArchiveFromInfo(ctx context.Context, info *PluginArchiveInfo, compatOpts CompatOpts) (*PluginArchive, error) {
+	if info == nil || info.URL == "" {
+		return nil, errors.New("missing plugin archive download information")
+	}
+	if info.Checksum == "" {
+		return nil, ErrChecksumMissing(info.URL)
+	}
+
+	return m.client.Download(ctx, info.URL, info.Checksum, compatOpts)
 }
 
 // GetPluginArchiveByURL fetches the requested plugin archive from the provided `pluginZipURL`

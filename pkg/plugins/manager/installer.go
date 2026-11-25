@@ -175,21 +175,27 @@ func (m *PluginInstaller) updateFromCatalog(ctx context.Context, plugin *plugins
 		}
 	}
 
-	if pluginArchiveInfo.URL == "" && pluginArchiveInfo.Version == "" {
+	if pluginArchiveInfo.URL == "" {
 		return nil, fmt.Errorf("could not determine update options for %s", plugin.ID)
+	}
+
+	pluginArchive, err := m.pluginRepo.GetPluginArchiveFromInfo(ctx, pluginArchiveInfo, compatOpts)
+	if err != nil {
+		return nil, err
 	}
 
 	// remove existing installation of plugin
 	err = m.Remove(ctx, plugin.ID, plugin.Info.Version)
 	if err != nil {
+		if pluginArchive.File != nil {
+			if closeErr := pluginArchive.File.Close(); closeErr != nil {
+				m.log.Warn("Failed to close plugin archive", "pluginId", plugin.ID, "error", closeErr)
+			}
+		}
 		return nil, err
 	}
 
-	if pluginArchiveInfo.URL != "" {
-		return m.pluginRepo.GetPluginArchiveByURL(ctx, pluginArchiveInfo.URL, compatOpts)
-	} else {
-		return m.pluginRepo.GetPluginArchive(ctx, plugin.ID, pluginArchiveInfo.Version, compatOpts)
-	}
+	return pluginArchive, nil
 }
 
 func (m *PluginInstaller) Remove(ctx context.Context, pluginID, version string) error {

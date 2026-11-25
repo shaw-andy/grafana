@@ -14,6 +14,9 @@ type Service interface {
 	GetPluginArchiveByURL(ctx context.Context, archiveURL string, opts CompatOpts) (*PluginArchive, error)
 	// GetPluginArchiveInfo fetches information needed for downloading the requested plugin.
 	GetPluginArchiveInfo(ctx context.Context, pluginID, version string, opts CompatOpts) (*PluginArchiveInfo, error)
+	// GetPluginArchiveFromInfo fetches the archive described by info and verifies it against info.Checksum,
+	// failing when the checksum is empty.
+	GetPluginArchiveFromInfo(ctx context.Context, info *PluginArchiveInfo, opts CompatOpts) (*PluginArchive, error)
 	// PluginVersion will return plugin version based on the requested information.
 	PluginVersion(ctx context.Context, pluginID, version string, compatOpts CompatOpts) (VersionData, error)
 	// GetPluginsInfo will return a list of plugins from grafana.com/api/plugins.

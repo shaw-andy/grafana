@@ -234,10 +234,11 @@ func (f *FakePluginRegistry) Remove(_ context.Context, id, _ string) error {
 }
 
 type FakePluginRepo struct {
-	GetPluginArchiveFunc      func(_ context.Context, pluginID, version string, _ repo.CompatOpts) (*repo.PluginArchive, error)
-	GetPluginArchiveByURLFunc func(_ context.Context, archiveURL string, _ repo.CompatOpts) (*repo.PluginArchive, error)
-	GetPluginArchiveInfoFunc  func(_ context.Context, pluginID, version string, _ repo.CompatOpts) (*repo.PluginArchiveInfo, error)
-	PluginVersionFunc         func(_ context.Context, pluginID, version string, compatOpts repo.CompatOpts) (repo.VersionData, error)
+	GetPluginArchiveFunc         func(_ context.Context, pluginID, version string, _ repo.CompatOpts) (*repo.PluginArchive, error)
+	GetPluginArchiveByURLFunc    func(_ context.Context, archiveURL string, _ repo.CompatOpts) (*repo.PluginArchive, error)
+	GetPluginArchiveInfoFunc     func(_ context.Context, pluginID, version string, _ repo.CompatOpts) (*repo.PluginArchiveInfo, error)
+	GetPluginArchiveFromInfoFunc func(_ context.Context, info *repo.PluginArchiveInfo, _ repo.CompatOpts) (*repo.PluginArchive, error)
+	PluginVersionFunc            func(_ context.Context, pluginID, version string, compatOpts repo.CompatOpts) (repo.VersionData, error)
 }
 
 // GetPluginArchive fetches the requested plugin archive.
@@ -264,6 +265,14 @@ func (r *FakePluginRepo) GetPluginArchiveInfo(ctx context.Context, pluginID, ver
 		return r.GetPluginArchiveInfoFunc(ctx, pluginID, version, opts)
 	}
 	return &repo.PluginArchiveInfo{}, nil
+}
+
+// GetPluginArchiveFromInfo fetches the plugin archive described by info.
+func (r *FakePluginRepo) GetPluginArchiveFromInfo(ctx context.Context, info *repo.PluginArchiveInfo, opts repo.CompatOpts) (*repo.PluginArchive, error) {
+	if r.GetPluginArchiveFromInfoFunc != nil {
+		return r.GetPluginArchiveFromInfoFunc(ctx, info, opts)
+	}
+	return &repo.PluginArchive{}, nil
 }
 
 func (r *FakePluginRepo) PluginVersion(ctx context.Context, pluginID, version string, compatOpts repo.CompatOpts) (repo.VersionData, error) {

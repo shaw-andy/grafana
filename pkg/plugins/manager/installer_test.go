@@ -117,13 +117,15 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 				require.Equal(t, plugins.ClassExternal, src.PluginClass(ctx))
 				return []*plugins.Plugin{pluginV2}, nil
 			}
-			pluginRepo.GetPluginArchiveInfoFunc = func(_ context.Context, _, _ string, _ repo.CompatOpts) (*repo.PluginArchiveInfo, error) {
-				return &repo.PluginArchiveInfo{
-					URL: "https://grafanaplugins.com",
-				}, nil
+			archiveInfo := &repo.PluginArchiveInfo{
+				URL:      "https://grafanaplugins.com",
+				Checksum: "abcdef",
 			}
-			pluginRepo.GetPluginArchiveByURLFunc = func(_ context.Context, pluginZipURL string, _ repo.CompatOpts) (*repo.PluginArchive, error) {
-				require.Equal(t, "https://grafanaplugins.com", pluginZipURL)
+			pluginRepo.GetPluginArchiveInfoFunc = func(_ context.Context, _, _ string, _ repo.CompatOpts) (*repo.PluginArchiveInfo, error) {
+				return archiveInfo, nil
+			}
+			pluginRepo.GetPluginArchiveFromInfoFunc = func(_ context.Context, info *repo.PluginArchiveInfo, _ repo.CompatOpts) (*repo.PluginArchive, error) {
+				require.Same(t, archiveInfo, info)
 				return &repo.PluginArchive{
 					File: mockZipV2,
 				}, nil
