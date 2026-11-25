@@ -21,6 +21,7 @@ const escapeMultiExpr = `\$__escapeMulti\(('.*')\)`
 type kqlMacroEngine struct {
 	timeRange backend.TimeRange
 	query     backend.DataQuery
+	interval  string
 }
 
 //  Macros:
@@ -46,6 +47,7 @@ func KqlInterpolate(query backend.DataQuery, dsInfo types.DatasourceInfo, kql st
 func (m *kqlMacroEngine) Interpolate(query backend.DataQuery, dsInfo types.DatasourceInfo, kql string, defaultTimeField string) (string, error) {
 	m.timeRange = query.TimeRange
 	m.query = query
+	m.interval = ""
 	rExp, _ := regexp.Compile(sExpr)
 	escapeMultiRegex, _ := regexp.Compile(escapeMultiExpr)
 
@@ -108,33 +110,12 @@ func (m *kqlMacroEngine) evaluateMacro(name string, defaultTimeField string, arg
 	case "timeTo", "__to":
 		return fmt.Sprintf("datetime('%s')", m.timeRange.To.UTC().Format(time.RFC3339)), nil
 	case "interval":
-		var it time.Duration
-		if m.query.Interval.Milliseconds() == 0 {
-			to := m.timeRange.To.UnixNano()
-			from := m.timeRange.From.UnixNano()
-			// default to "100 datapoints" if nothing in the query is more specific
-			defaultInterval := time.Duration((to - from) / 60)
-			var queryInterval interval
-			err := json.Unmarshal(m.query.JSON, &queryInterval)
-			if err != nil {
-				it = defaultInterval
-			} else {
-				var (
-					dsInterval string
-					ok         bool
-				)
-				if dsInterval, ok = dsInfo.JSONData["interval"].(string); !ok {
-					dsInterval = ""
-				}
-				it, err = gtime.GetIntervalFrom(dsInterval, queryInterval.Interval, queryInterval.IntervalMs, defaultInterval)
-				if err != nil {
-					it = defaultInterval
-				}
-			}
-		} else {
-			it = time.Millisecond * time.Duration(m.query.Interval.Milliseconds())
+		// The value only depends on the query, so compute it once: otherwise every
+		// occurrence would re-parse the full query JSON.
+		if m.interval == "" {
+			m.interval = m.evaluateInterval(dsInfo)
 		}
-		return fmt.Sprintf("%dms", int(it/time.Millisecond)), nil
+		return m.interval, nil
 	case "contains":
 		if len(args) < 2 || args[0] == "" || args[1] == "" {
 			return "", fmt.Errorf("macro %v needs colName and variableSet", name)
@@ -153,12 +134,43 @@ func (m *kqlMacroEngine) evaluateMacro(name string, defaultTimeField string, arg
 	}
 }
 
+func (m *kqlMacroEngine) evaluateInterval(dsInfo types.DatasourceInfo) string {
+	var it time.Duration
+	if m.query.Interval.Milliseconds() == 0 {
+		to := m.timeRange.To.UnixNano()
+		from := m.timeRange.From.UnixNano()
+		// default to "100 datapoints" if nothing in the query is more specific
+		defaultInterval := time.Duration((to - from) / 60)
+		var queryInterval interval
+		err := json.Unmarshal(m.query.JSON, &queryInterval)
+		if err != nil {
+			it = defaultInterval
+		} else {
+			var (
+				dsInterval string
+				ok         bool
+			)
+			if dsInterval, ok = dsInfo.JSONData["interval"].(string); !ok {
+				dsInterval = ""
+			}
+			it, err = gtime.GetIntervalFrom(dsInterval, queryInterval.Interval, queryInterval.IntervalMs, defaultInterval)
+			if err != nil {
+				it = defaultInterval
+			}
+		}
+	} else {
+		it = time.Millisecond * time.Duration(m.query.Interval.Milliseconds())
+	}
+	return fmt.Sprintf("%dms", int(it/time.Millisecond))
+}
+
 func (m *kqlMacroEngine) ReplaceAllStringSubmatchFunc(re *regexp.Regexp, str string, repl func([]string) string) string {
-	result := ""
+	var result strings.Builder
+	result.Grow(len(str))
 	lastIndex := 0
 
 	for _, v := range re.FindAllStringSubmatchIndex(str, -1) {
-		groups := []string{}
+		groups := make([]string, 0, len(v)/2)
 		for i := 0; i < len(v); i += 2 {
 			if v[i] < 0 {
 				groups = append(groups, "")
@@ -167,9 +179,11 @@ func (m *kqlMacroEngine) ReplaceAllStringSubmatchFunc(re *regexp.Regexp, str str
 			}
 		}
 
-		result += str[lastIndex:v[0]] + repl(groups)
+		result.WriteString(str[lastIndex:v[0]])
+		result.WriteString(repl(groups))
 		lastIndex = v[1]
 	}
 
-	return result + str[lastIndex:]
+	result.WriteString(str[lastIndex:])
+	return result.String()
 }
