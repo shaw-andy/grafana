@@ -1503,6 +1503,19 @@ func TestGetChildrenBatchPagination(t *testing.T) {
 		require.True(t, hasMore)
 	})
 
+	t.Run("hasMore true when an inexact total only counts the rows read so far", func(t *testing.T) {
+		searcher := &mockSearchClient{folders: makeFolders(5), paginate: true, postRankTotals: true}
+		children, hasMore, err := getChildrenBatch(context.Background(), searcher, namespace, []string{parent}, 2, 0)
+		require.NoError(t, err)
+		require.Len(t, children, 2)
+		require.True(t, hasMore)
+
+		children, hasMore, err = getChildrenBatch(context.Background(), searcher, namespace, []string{parent}, 2, 4)
+		require.NoError(t, err)
+		require.Len(t, children, 1)
+		require.False(t, hasMore, "the final page exhausts the scan, so its total is exact")
+	})
+
 	t.Run("hasMore false when only one page exists and neither signal indicates more", func(t *testing.T) {
 		searcher := &mockSearchClient{folders: makeFolders(2), paginate: true}
 		children, hasMore, err := getChildrenBatch(context.Background(), searcher, namespace, []string{parent}, 10, 0)
@@ -1553,6 +1566,7 @@ type mockSearchClient struct {
 	paginate         bool
 	useNextPageToken bool
 	dropTotalHits    bool
+	postRankTotals   bool
 
 	searchCalls       int
 	lastSearchRequest *resourcepb.ResourceSearchRequest
@@ -1617,8 +1631,15 @@ func (m *mockSearchClient) Search(ctx context.Context, req *resourcepb.ResourceS
 	resp := &resourcepb.ResourceSearchResponse{
 		Results: &resourcepb.ResourceTable{Rows: pageRows, NextPageToken: nextToken},
 	}
-	if !m.dropTotalHits {
+	switch {
+	case m.dropTotalHits:
+	case m.postRankTotals && end < total:
+		// Post-rank authorization stops once the page is full and counts only
+		// the authorized hits it saw.
+		resp.TotalHits = end
+	default:
 		resp.TotalHits = total
+		resp.TotalHitsExact = true
 	}
 	return resp, nil
 }

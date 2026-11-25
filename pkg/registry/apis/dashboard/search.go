@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -592,7 +593,7 @@ func (s *SearchHandler) DoSearch(w http.ResponseWriter, r *http.Request) {
 		searchRequest.ResultFormat = resourcepb.ResourceSearchRequest_FIELD_VALUES
 	}
 
-	result, err := s.client.Search(ctx, searchRequest)
+	result, err := searchWithNextRow(ctx, s.client, searchRequest)
 	if err := resource.StatusErrorFromResponse(result.GetError(), err); err != nil {
 		errhttp.Write(ctx, err, w)
 		return
@@ -617,6 +618,31 @@ func (s *SearchHandler) DoSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.write(w, parsedResults)
+}
+
+// searchWithNextRow runs req with one extra row and drops that row from the
+// response. Clients of this endpoint page until the offset reaches totalHits.
+// When the backend reports a lower-bound total (it counts only the authorized
+// hits it checked before the page filled), the extra row lifts totalHits past
+// the current page exactly when another authorized result exists.
+func searchWithNextRow(ctx context.Context, client resourcepb.ResourceIndexClient, req *resourcepb.ResourceSearchRequest) (*resourcepb.ResourceSearchResponse, error) {
+	limit := req.Limit
+	if limit <= 0 || limit == math.MaxInt64 {
+		return client.Search(ctx, req)
+	}
+	req.Limit = limit + 1
+	resp, err := client.Search(ctx, req)
+	req.Limit = limit
+	if err != nil || resp == nil {
+		return resp, err
+	}
+	if table := resp.GetResults(); table != nil && int64(len(table.Rows)) > limit {
+		table.Rows = table.Rows[:limit]
+	}
+	if int64(len(resp.Rows)) > limit {
+		resp.Rows = resp.Rows[:limit]
+	}
+	return resp, nil
 }
 
 // DoVectorSearch serves the semantic (vector) search endpoint. It is registered

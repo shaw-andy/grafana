@@ -71,6 +71,66 @@ func TestSearch(t *testing.T) {
 	})
 }
 
+type limitRecordingClient struct {
+	resourcepb.ResourceIndexClient
+	limits []int64
+	resp   *resourcepb.ResourceSearchResponse
+}
+
+func (c *limitRecordingClient) Search(_ context.Context, in *resourcepb.ResourceSearchRequest, _ ...grpc.CallOption) (*resourcepb.ResourceSearchResponse, error) {
+	c.limits = append(c.limits, in.Limit)
+	return c.resp, nil
+}
+
+func TestDoSearchKeepsNextPageReachableWithInexactTotal(t *testing.T) {
+	doSearch := func(t *testing.T, client *limitRecordingClient, path string) v0alpha1.SearchResults {
+		t.Helper()
+		h := &SearchHandler{client: client, log: log.New("test"), tracer: tracing.NewNoopTracerService()}
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req = req.WithContext(identity.WithRequester(req.Context(), &user.SignedInUser{Namespace: "test"}))
+		h.DoSearch(rr, req)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		var out v0alpha1.SearchResults
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &out))
+		return out
+	}
+	row := func(name string) *resourcepb.ResourceTableRow {
+		return &resourcepb.ResourceTableRow{
+			Key:   &resourcepb.ResourceKey{Name: name, Resource: "dashboards"},
+			Cells: [][]byte{[]byte(name)},
+		}
+	}
+
+	t.Run("the extra row is requested and dropped", func(t *testing.T) {
+		// A post-rank backend stops once the page is full and counts only the
+		// authorized hits it saw, so the extra row is what lifts the total past
+		// this page.
+		client := &limitRecordingClient{resp: &resourcepb.ResourceSearchResponse{
+			Results: &resourcepb.ResourceTable{
+				Columns: []*resourcepb.ResourceTableColumnDefinition{{Name: resource.SEARCH_FIELD_TITLE}},
+				Rows:    []*resourcepb.ResourceTableRow{row("a"), row("b"), row("c")},
+			},
+			TotalHits: 3,
+		}}
+		out := doSearch(t, client, "/search?limit=2")
+
+		require.Equal(t, []int64{3}, client.limits)
+		require.Len(t, out.Hits, 2)
+		require.Equal(t, "a", out.Hits[0].Name)
+		require.Equal(t, "b", out.Hits[1].Name)
+		require.Equal(t, int64(3), out.TotalHits, "the total must point past this page so clients ask for the next one")
+	})
+
+	t.Run("count-only requests are unchanged", func(t *testing.T) {
+		client := &limitRecordingClient{resp: &resourcepb.ResourceSearchResponse{TotalHits: 4, TotalHitsExact: true}}
+		out := doSearch(t, client, "/search?limit=0")
+
+		require.Equal(t, []int64{0}, client.limits)
+		require.Equal(t, int64(4), out.TotalHits)
+	})
+}
+
 func TestSearchErrorStatus(t *testing.T) {
 	failure := &resourcepb.ErrorResult{
 		Code: http.StatusTooManyRequests, Reason: string(metav1.StatusReasonTooManyRequests), Message: "search is busy",

@@ -125,7 +125,7 @@ func (r *subChildrenREST) Connect(ctx context.Context, name string, _ runtime.Ob
 		}
 
 		total := resp.TotalHits
-		if offset+int64(len(rows)) < total {
+		if searchHasMore(resp, offset, limit, len(rows)) {
 			children.Continue = strconv.FormatInt(offset+int64(len(rows)), 10)
 		}
 		if total > 0 {
@@ -227,4 +227,15 @@ func decodeSearchRows(response *resourcepb.ResourceSearchResponse) ([]decodedSea
 	default:
 		return nil, fmt.Errorf("unsupported search result format %d", response.GetResultFormat())
 	}
+}
+
+// searchHasMore reports whether matches may exist past the rows read so far. A
+// total that is not exact only counts what the backend authorized before it
+// stopped scanning, so after a full page it cannot end an offset walk.
+func searchHasMore(response *resourcepb.ResourceSearchResponse, offset, limit int64, rowCount int) bool {
+	if rowCount == 0 {
+		return false
+	}
+	rows := int64(rowCount)
+	return offset+rows < response.GetTotalHits() || (!response.GetTotalHitsExact() && rows >= limit)
 }

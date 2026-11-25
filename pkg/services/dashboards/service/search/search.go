@@ -76,7 +76,8 @@ var (
 type SearchFunc func(ctx context.Context, orgID int64, request *resourcepb.ResourceSearchRequest) (*resourcepb.ResourceSearchResponse, error)
 
 // SearchAll executes a search request and paginates through all results by incrementing the offset until the offset is greater than total hits
-// or it hits an empty page.
+// or it hits an empty page. A total that is not exact only counts what the backend authorized before it stopped scanning, so after a full
+// page it cannot end the walk.
 func SearchAll(ctx context.Context, orgID int64, request *resourcepb.ResourceSearchRequest, searchFn SearchFunc) (v0alpha1.SearchResults, error) {
 	if request.Limit == 0 {
 		request.Limit = 100000
@@ -93,9 +94,10 @@ func SearchAll(ctx context.Context, orgID int64, request *resourcepb.ResourceSea
 		return v0alpha1.SearchResults{}, err
 	}
 
-	request.Offset += int64(len(results.Hits))
+	pageRows := int64(len(results.Hits))
+	request.Offset += pageRows
 	request.Page++
-	for request.Offset < res.TotalHits {
+	for request.Offset < res.TotalHits || (pageRows > 0 && pageRows >= request.Limit && !res.GetTotalHitsExact()) {
 		res, err = searchFn(ctx, orgID, request)
 		if err != nil {
 			return v0alpha1.SearchResults{}, err
@@ -111,7 +113,8 @@ func SearchAll(ctx context.Context, orgID int64, request *resourcepb.ResourceSea
 		}
 
 		results.Hits = append(results.Hits, page.Hits...)
-		request.Offset += int64(len(page.Hits))
+		pageRows = int64(len(page.Hits))
+		request.Offset += pageRows
 		request.Page++
 	}
 

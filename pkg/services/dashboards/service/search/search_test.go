@@ -212,7 +212,8 @@ func makeResponse(names []string, totalHits int64) *resourcepb.ResourceSearchRes
 			},
 			Rows: rows,
 		},
-		TotalHits: totalHits,
+		TotalHits:      totalHits,
+		TotalHitsExact: true,
 	}
 }
 
@@ -332,6 +333,35 @@ func TestSearchAll(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, results.Hits, 1)
 		assert.Equal(t, 2, callCount, "should stop after one empty page")
+	})
+
+	t.Run("inexact total after a full page does not end the walk", func(t *testing.T) {
+		// Post-rank authorization stops once the page is full and reports only
+		// the authorized hits it saw, so the total can equal the rows read so far.
+		inexact := func(res *resourcepb.ResourceSearchResponse) *resourcepb.ResourceSearchResponse {
+			res.TotalHitsExact = false
+			return res
+		}
+		var offsets []int64
+		searchFn := func(_ context.Context, _ int64, req *resourcepb.ResourceSearchRequest) (*resourcepb.ResourceSearchResponse, error) {
+			offsets = append(offsets, req.Offset)
+			switch req.Offset {
+			case 0:
+				return inexact(makeResponse([]string{"a", "b"}, 2)), nil
+			case 2:
+				return inexact(makeResponse([]string{"c", "d"}, 4)), nil
+			case 4:
+				return makeResponse([]string{"e"}, 5), nil
+			default:
+				return makeResponse([]string{}, 5), nil
+			}
+		}
+
+		req := &resourcepb.ResourceSearchRequest{Limit: 2}
+		results, err := SearchAll(context.Background(), 1, req, searchFn)
+		require.NoError(t, err)
+		assert.Len(t, results.Hits, 5)
+		assert.Equal(t, []int64{0, 2, 4}, offsets)
 	})
 
 	t.Run("propagates search error on first call", func(t *testing.T) {

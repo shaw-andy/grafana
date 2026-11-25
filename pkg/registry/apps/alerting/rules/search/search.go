@@ -128,9 +128,11 @@ func (h *Handler) run(ctx context.Context, body model.CreateSearchRulesRequestBo
 	// Offset paging rather than the generic search API's sort-value cursor,
 	// because rows from the legacy backend carry no sort values. Correct only
 	// while each backend paginates one globally-ordered set: pages ordered
-	// differently would skip or duplicate rows.
+	// differently would skip or duplicate rows. A total that is not exact only
+	// counts what the backend authorized before it stopped scanning, so after a
+	// full page it cannot rule out a next one.
 	next := ""
-	if rows := rowCount(resp); rows != 0 && offset+rows < resp.TotalHits {
+	if rows := rowCount(resp); rows != 0 && (offset+rows < resp.TotalHits || (!resp.GetTotalHitsExact() && rows >= searchReq.Limit)) {
 		next = encodeCursor(offset + rows)
 	}
 	return resp, next, nil

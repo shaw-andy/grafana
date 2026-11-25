@@ -123,6 +123,7 @@ func (c *LegacyTeamSearchClient) Search(ctx context.Context, req *resourcepb.Res
 	}
 
 	list.TotalHits = res.TotalCount
+	list.TotalHitsExact = true
 
 	return list, nil
 }
