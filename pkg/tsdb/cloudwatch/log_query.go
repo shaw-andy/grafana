@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
@@ -268,15 +269,15 @@ func copyRowWithoutValues(f *data.Frame, rowIdx int, removeIndices []int) []any 
 }
 
 func generateGroupKey(fields []*data.Field, row int) string {
-	groupKey := ""
+	var groupKey strings.Builder
 	for _, field := range fields {
 		if strField, ok := field.At(row).(*string); ok {
 			if strField != nil {
-				groupKey += *strField
+				groupKey.WriteString(*strField)
 			}
 		}
 	}
-	return groupKey
+	return groupKey.String()
 }
 
 func generateLabels(fields []*data.Field, row int) data.Labels {

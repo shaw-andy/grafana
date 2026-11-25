@@ -387,7 +387,36 @@ func (q *CloudWatchQuery) validateAndSetDefaults(refId string, metricsDataQuery 
 		q.Region = defaultRegionValue
 	}
 
+	if q.IsInferredSearchExpression() && searchExpressionDimensionsTooLong(q.Dimensions) {
+		return backend.DownstreamError(fmt.Errorf("dimensions are too long for a CloudWatch search expression, which is limited to %d characters", maxExpressionLength))
+	}
+
 	return nil
+}
+
+// GetMetricData rejects a MetricDataQuery whose Expression is longer than this.
+const maxExpressionLength = 2048
+
+// searchExpressionDimensionsTooLong reports whether the dimensions cannot fit in a
+// search expression. Every dimension name and every value is counted as if it were
+// quoted, which is how the expression includes them. Values of a wildcard dimension
+// are left out of the expression but are still counted, because they are still
+// iterated when labeling each returned series.
+func searchExpressionDimensionsTooLong(dimensions map[string][]string) bool {
+	length := 0
+	for key, values := range dimensions {
+		length += len(key) + len(`""`)
+		if length > maxExpressionLength {
+			return true
+		}
+		for _, value := range values {
+			length += len(value) + len(`""`)
+			if length > maxExpressionLength {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // getStatistic determines the value of Statistic in a CloudWatchQuery from the metricsDataQuery input
