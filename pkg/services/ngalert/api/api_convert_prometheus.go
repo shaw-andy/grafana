@@ -547,6 +547,9 @@ func (srv *ConvertPrometheusSrv) RouteConvertPrometheusPostRuleGroups(c *context
 	err = srv.alertRuleService.ReplaceRuleGroups(c.Req.Context(), c.SignedInUser, grafanaGroups, manager, versionMessage)
 	if err != nil {
 		logger.Error("Failed to replace rule groups", "error", err)
+		if errors.Is(err, models.ErrAlertRuleFailedValidation) {
+			return ErrResp(http.StatusBadRequest, err, "")
+		}
 		return errorToResponse(err)
 	}
 

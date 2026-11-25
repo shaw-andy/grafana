@@ -548,6 +548,10 @@ func (st DBstore) InsertAlertRules(ctx context.Context, user *ngmodels.UserUID, 
 		alertRules[i] = &rules[i].AlertRule
 	}
 
+	if err := st.validateRecordingRuleTargets(ctx, alertRules); err != nil {
+		return nil, err
+	}
+
 	orgNamespaces := collectNamespaceUIDsByOrg(alertRules)
 	folderFullpathsByOrg := st.fetchFolderFullpathsByOrg(ctx, orgNamespaces)
 
@@ -633,8 +637,16 @@ func (st DBstore) InsertAlertRules(ctx context.Context, user *ngmodels.UserUID, 
 // UpdateAlertRules is a handler for updating alert rules.
 func (st DBstore) UpdateAlertRules(ctx context.Context, user *ngmodels.UserUID, rules []ngmodels.UpdateRule) error {
 	alertRules := make([]*ngmodels.AlertRule, len(rules))
+	retargeted := make([]*ngmodels.AlertRule, 0)
 	for i := range rules {
 		alertRules[i] = &rules[i].New
+		if recordingTargetChanged(rules[i].Existing, &rules[i].New) {
+			retargeted = append(retargeted, &rules[i].New)
+		}
+	}
+
+	if err := st.validateRecordingRuleTargets(ctx, retargeted); err != nil {
+		return err
 	}
 
 	orgNamespaces := collectNamespaceUIDsByOrg(alertRules)

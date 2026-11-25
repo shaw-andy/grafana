@@ -9,6 +9,7 @@ import (
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/dashboards"
+	"github.com/grafana/grafana/pkg/services/datasources"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	"github.com/grafana/grafana/pkg/services/folder"
 	"github.com/grafana/grafana/pkg/services/ngalert/models"
@@ -43,6 +44,11 @@ type DBstore struct {
 	DashboardService dashboards.DashboardService
 	AccessControl    accesscontrol.AccessControl
 	Bus              bus.Bus
+	// DatasourceService resolves recording rule targets when rules are saved. When it is nil,
+	// the allowAsRecordingRulesTarget setting is only enforced when the rule writes.
+	DatasourceService datasources.DataSourceService
+	// DefaultAllowRecordingRulesTarget applies to data sources that do not set allowAsRecordingRulesTarget.
+	DefaultAllowRecordingRulesTarget bool
 }
 
 func ProvideDBStore(
@@ -53,16 +59,19 @@ func ProvideDBStore(
 	dashboards dashboards.DashboardService,
 	ac accesscontrol.AccessControl,
 	bus bus.Bus,
+	datasourceService datasources.DataSourceService,
 ) (*DBstore, error) {
 	store := DBstore{
-		Cfg:              cfg.UnifiedAlerting,
-		FeatureToggles:   featureToggles,
-		SQLStore:         sqlstore,
-		Logger:           log.New("ngalert.dbstore"),
-		FolderService:    folderService,
-		DashboardService: dashboards,
-		AccessControl:    ac,
-		Bus:              bus,
+		Cfg:                              cfg.UnifiedAlerting,
+		FeatureToggles:                   featureToggles,
+		SQLStore:                         sqlstore,
+		Logger:                           log.New("ngalert.dbstore"),
+		FolderService:                    folderService,
+		DashboardService:                 dashboards,
+		AccessControl:                    ac,
+		Bus:                              bus,
+		DatasourceService:                datasourceService,
+		DefaultAllowRecordingRulesTarget: cfg.DefaultAllowRecordingRulesTargetAlertsUIToggle,
 	}
 	if err := folderService.RegisterService(store); err != nil {
 		return nil, err

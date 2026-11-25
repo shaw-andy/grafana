@@ -652,7 +652,7 @@ func Initialize(ctx context.Context, cfg *setting.Cfg, opts server.Options, apiO
 	dashverService := dashverimpl.ProvideService(cfg, sqlStore, dashboardService, featureToggles, k8sHandlerWithFallback)
 	dashboardSnapshotStore := database3.ProvideStore(sqlStore, cfg)
 	serviceImpl := service9.ProvideService(dashboardSnapshotStore, secretsService, dashboardService)
-	dBstore, err := store3.ProvideDBStore(cfg, featureToggles, sqlStore, folderimplService, dashboardService, accessControl, inProcBus)
+	dBstore, err := store3.ProvideDBStore(cfg, featureToggles, sqlStore, folderimplService, dashboardService, accessControl, inProcBus, service13)
 	if err != nil {
 		return nil, err
 	}
@@ -1419,7 +1419,7 @@ func InitializeForTest(ctx context.Context, t sqlutil.ITestDB, testingT interfac
 	dashverService := dashverimpl.ProvideService(cfg, sqlStore, dashboardService, featureToggles, k8sHandlerWithFallback)
 	dashboardSnapshotStore := database3.ProvideStore(sqlStore, cfg)
 	serviceImpl := service9.ProvideService(dashboardSnapshotStore, secretsService, dashboardService)
-	dBstore, err := store3.ProvideDBStore(cfg, featureToggles, sqlStore, folderimplService, dashboardService, accessControl, inProcBus)
+	dBstore, err := store3.ProvideDBStore(cfg, featureToggles, sqlStore, folderimplService, dashboardService, accessControl, inProcBus, service13)
 	if err != nil {
 		return nil, err
 	}
