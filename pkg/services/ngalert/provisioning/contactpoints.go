@@ -302,11 +302,22 @@ func (ecp *ContactPointService) UpdateContactPoint(ctx context.Context, orgID in
 	if err != nil {
 		return err
 	}
-	for _, secretPath := range typeSchema.GetSecretFieldsPaths() {
-		secretKey := secretPath.String()
-		secretValue := contactPoint.Settings.Get(secretKey).MustString()
-		if secretValue == apimodels.RedactedValue {
-			contactPoint.Settings.Set(secretKey, rawContactPoint.Settings.Get(secretKey).MustString())
+	existingType, err := alertingNotify.IntegrationTypeFromString(rawContactPoint.Type)
+	if err != nil {
+		return err
+	}
+	existingTypeSchema, ok := alertingNotify.GetSchemaVersionForIntegration(existingType, schema.V1)
+	if !ok {
+		return fmt.Errorf("failed to get schema for existing contact point type %s", rawContactPoint.Type)
+	}
+	// Stored secrets belong to the stored integration type and must not be carried over to a different one.
+	if models.IsSameSchemaVersion(existingTypeSchema, typeSchema) {
+		for _, secretPath := range typeSchema.GetSecretFieldsPaths() {
+			secretKey := secretPath.String()
+			secretValue := contactPoint.Settings.Get(secretKey).MustString()
+			if secretValue == apimodels.RedactedValue {
+				contactPoint.Settings.Set(secretKey, rawContactPoint.Settings.Get(secretKey).MustString())
+			}
 		}
 	}
 
@@ -325,7 +336,7 @@ func (ecp *ContactPointService) UpdateContactPoint(ctx context.Context, orgID in
 	}
 
 	// Check protected fields authorization
-	if err := ecp.checkProtectedFields(ctx, user, typeSchema, rawContactPoint, contactPoint); err != nil {
+	if err := ecp.checkProtectedFields(ctx, user, existingTypeSchema, typeSchema, rawContactPoint, contactPoint); err != nil {
 		return err
 	}
 	// transform to internal model
@@ -547,7 +558,8 @@ func (ecp *ContactPointService) encryptValue(value string) (string, error) {
 func (ecp *ContactPointService) checkProtectedFields(
 	ctx context.Context,
 	user identity.Requester,
-	typeSchema schema.IntegrationSchemaVersion,
+	existingTypeSchema schema.IntegrationSchemaVersion,
+	incomingTypeSchema schema.IntegrationSchemaVersion,
 	existing apimodels.EmbeddedContactPoint,
 	incoming apimodels.EmbeddedContactPoint,
 ) error {
@@ -572,11 +584,11 @@ func (ecp *ContactPointService) checkProtectedFields(
 
 	// User doesn't have blanket permission, so we need to check if they're actually
 	// modifying any protected fields.
-	existingIntegration, err := EmbeddedContactPointToIntegration(existing, typeSchema)
+	existingIntegration, err := EmbeddedContactPointToIntegration(existing, existingTypeSchema)
 	if err != nil {
 		return fmt.Errorf("failed to convert existing contact point: %w", err)
 	}
-	incomingIntegration, err := EmbeddedContactPointToIntegration(incoming, typeSchema)
+	incomingIntegration, err := EmbeddedContactPointToIntegration(incoming, incomingTypeSchema)
 	if err != nil {
 		return fmt.Errorf("failed to convert incoming contact point: %w", err)
 	}
