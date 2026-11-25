@@ -23,6 +23,7 @@ import { RecentJobs } from '../Job/RecentJobs';
 import { QuotaLimitNote } from '../Shared/QuotaLimitNote';
 import { MissingFolderMetadataBanner } from '../components/Folders/MissingFolderMetadataBanner';
 import { hasMissingFolderMetadata } from '../utils/folderMetadata';
+import { getExternalRepoBaseUrl } from '../utils/git';
 import { isQuotaReachedOrExceeded } from '../utils/quota';
 import { isGitHubBased } from '../utils/repositoryTypes';
 import { getKindInfoByStat, getRepositoryRoute } from '../utils/resourceKinds';
@@ -252,15 +253,16 @@ const getStyles = (theme: GrafanaTheme2) => {
 
 function getWebhookURL(repo: Repository) {
   const { status, spec } = repo;
-  const repoUrl = spec?.github?.url ?? spec?.githubEnterprise?.url ?? spec?.gitlab?.url;
+  const repoUrl = getExternalRepoBaseUrl(spec?.github?.url ?? spec?.githubEnterprise?.url ?? spec?.gitlab?.url);
+  const bitbucketUrl = getExternalRepoBaseUrl(spec?.bitbucket?.url);
   if (isGitHubBased(spec?.type) && status?.webhook?.url && repoUrl) {
     return textUtil.sanitizeUrl(`${repoUrl}/settings/hooks/${status.webhook?.id}`);
   }
   if (spec?.type === 'gitlab' && status?.webhook?.url && repoUrl) {
     return textUtil.sanitizeUrl(`${repoUrl}/-/hooks/${status.webhook?.id}/edit`);
   }
-  if (spec?.type === 'bitbucket' && status?.webhook?.uuid && spec.bitbucket?.url) {
-    return textUtil.sanitizeUrl(`${spec.bitbucket.url}/admin/webhooks/${encodeURIComponent(status.webhook.uuid)}/edit`);
+  if (spec?.type === 'bitbucket' && status?.webhook?.uuid && bitbucketUrl) {
+    return textUtil.sanitizeUrl(`${bitbucketUrl}/admin/webhooks/${encodeURIComponent(status.webhook.uuid)}/edit`);
   }
   return undefined;
 }

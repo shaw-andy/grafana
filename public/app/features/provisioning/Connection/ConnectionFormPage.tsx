@@ -2,7 +2,6 @@ import { skipToken } from '@reduxjs/toolkit/query/react';
 import { useState } from 'react';
 import { useParams } from 'react-router-dom-v5-compat';
 
-import { textUtil } from '@grafana/data';
 import { Trans, t } from '@grafana/i18n';
 import { isFetchError } from '@grafana/runtime';
 import { Card, Collapse, EmptyState, Stack, Text, TextLink } from '@grafana/ui';
@@ -12,6 +11,7 @@ import { Page } from 'app/core/components/Page/Page';
 import { CONNECTIONS_URL, PROVISIONING_URL } from '../constants';
 import { useConnectionStatus } from '../hooks/useConnectionStatus';
 import { type ExternalRepository } from '../types';
+import { sanitizeRepoLink } from '../utils/git';
 
 import { ConnectionForm } from './ConnectionForm';
 
@@ -108,8 +108,9 @@ export default function ConnectionFormPage() {
                     <Stack direction="column" gap={0.5}>
                       {availableRepos.map((repo: ExternalRepository, index: number) => {
                         const label = repo.owner && repo.name ? `${repo.owner}/${repo.name}` : repo.name || repo.owner;
-                        return repo.url ? (
-                          <TextLink key={label || index} href={textUtil.sanitizeUrl(repo.url)} external>
+                        const href = sanitizeRepoLink(repo.url);
+                        return href ? (
+                          <TextLink key={label || index} href={href} external>
                             {label || repo.url}
                           </TextLink>
                         ) : (

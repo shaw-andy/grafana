@@ -1,12 +1,15 @@
 // repoType = string because this repoType is coming from URL param
-import { buildCleanBaseUrl } from '../../utils/git';
+import { getExternalRepoBaseUrl } from '../../utils/git';
 
 export const getBranchUrl = (baseUrl: string, branch: string, repoType?: string): string => {
   if (repoType === 'local') {
     return '';
   }
 
-  const cleanBaseUrl = buildCleanBaseUrl(baseUrl);
+  const cleanBaseUrl = getExternalRepoBaseUrl(baseUrl);
+  if (!cleanBaseUrl) {
+    return '';
+  }
 
   switch (repoType) {
     case 'githubEnterprise':

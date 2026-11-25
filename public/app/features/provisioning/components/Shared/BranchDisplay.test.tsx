@@ -40,10 +40,11 @@ describe('BranchDisplay', () => {
     );
   });
 
-  it('sanitizes unsafe branch URLs', () => {
+  it('renders unsafe branch URLs as plain text', () => {
     render(<BranchDisplay baseUrl="javascript:alert(1)" branch="x" repoType="github" />);
 
-    expect(screen.getByRole('link', { name: /x/ })).toHaveAttribute('href', 'about:blank');
+    expect(screen.getByText('x')).toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
 
   it('renders as plain text (no link) for local repos', () => {

@@ -9,6 +9,7 @@ import { RepoTypeDisplay } from 'app/features/provisioning/Wizard/types';
 import { isValidRepoType } from 'app/features/provisioning/guards';
 import { usePullRequestParam } from 'app/features/provisioning/hooks/usePullRequestParam';
 
+import { sanitizeRepoLink } from '../../utils/git';
 import { appendPullRequestTitleParam } from '../../utils/pullRequestTitle';
 import { isGitProvider } from '../../utils/repositoryTypes';
 import { getBranchUrl } from '../utils/url';
@@ -46,7 +47,15 @@ const commonAlertProps = {
 /**
  * @description This component is used to display a banner when a provisioned dashboard/folder is created, deleted, or loaded from a new branch in repo.
  */
-export function PreviewBannerViewPR({ prURL, isNewPr, behindBranch, repoUrl, branchInfo, action, originalUrl }: Props) {
+export function PreviewBannerViewPR({
+  prURL,
+  isNewPr,
+  behindBranch,
+  repoUrl: rawRepoUrl,
+  branchInfo,
+  action,
+  originalUrl,
+}: Props) {
   const styles = useStyles2(getStyles);
   const { repoType, action: paramAction, prTitle } = usePullRequestParam();
 
@@ -60,7 +69,9 @@ export function PreviewBannerViewPR({ prURL, isNewPr, behindBranch, repoUrl, bra
     branchInfo?.repoBaseUrl && branchInfo?.targetBranch
       ? getBranchUrl(branchInfo.repoBaseUrl, branchInfo.targetBranch, repoType)
       : '';
-  const linkUrl = prLink || branchLink || branchInfo?.repoBaseUrl || repoUrl;
+  const repoUrl = sanitizeRepoLink(rawRepoUrl);
+  const linkUrl =
+    sanitizeRepoLink(prLink) || sanitizeRepoLink(branchLink) || sanitizeRepoLink(branchInfo?.repoBaseUrl) || repoUrl;
 
   const bannerAction = action ?? paramAction;
   const actionText = getBannerText(bannerAction, isNewPr, capitalizedRepoType);

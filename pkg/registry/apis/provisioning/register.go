@@ -370,7 +370,10 @@ func RegisterAPIService(
 		return nil, fmt.Errorf("invalid allowed_git_urls configuration: %w", err)
 	}
 	urlValidator := repository.NewURLValidator(allowlist, net.DefaultResolver.LookupIPAddr)
-	repoValidatorOpts := []repository.ValidatorOption{repository.WithURLValidator(urlValidator)}
+	repoValidatorOpts := []repository.ValidatorOption{
+		repository.WithURLValidator(urlValidator),
+		repository.WithInstanceURLs(cfg.AppURL, cfg.ProvisioningPublicRootURL),
+	}
 
 	// Register v0alpha1 (preferred version)
 	builder, err := NewAPIBuilder(

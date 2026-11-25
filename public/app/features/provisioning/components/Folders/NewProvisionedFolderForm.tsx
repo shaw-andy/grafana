@@ -21,6 +21,7 @@ import { usePullRequestTitle } from '../../hooks/usePullRequestTitle';
 import { type BaseProvisionedFormData } from '../../types/form';
 import { type CommitTemplateVars } from '../../utils/commitMessage';
 import { getCurrentCommitUser } from '../../utils/currentUser';
+import { sanitizeRepoLink } from '../../utils/git';
 import { buildResourceBranchRedirectUrl } from '../../utils/redirect';
 import { ProvisionedFormGate } from '../ProvisionedFormGate';
 import { ResourceEditFormSharedFields } from '../Shared/ResourceEditFormSharedFields';
@@ -40,7 +41,7 @@ interface Props {
 }
 
 function FormContent({ initialValues, repository, canPushToConfiguredBranch, folder, onDismiss }: FormProps) {
-  const { prURL } = usePullRequestParam();
+  const prURL = sanitizeRepoLink(usePullRequestParam().prURL);
   const navigate = useNavigate();
   const [, updateUrlParams] = useUrlParams();
   const [create, request] = useCreateRepositoryFilesWithPathMutation();
