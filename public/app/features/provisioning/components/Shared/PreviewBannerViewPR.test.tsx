@@ -30,7 +30,7 @@ function setup(
     behindBranch?: boolean;
     repoUrl?: string;
   } = {
-    prURL: 'test-url',
+    prURL: 'https://github.com/org/repo/pull/1',
     repoType: 'github',
   }
 ) {
@@ -68,14 +68,14 @@ describe('PreviewBannerViewPR', () => {
 
   describe('Dashboard scenarios', () => {
     it('should render correct text for new PR dashboard', () => {
-      setup({ prURL: 'test-url', isNewPr: true });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: true });
 
       expect(screen.getByRole('status')).toBeInTheDocument();
       expect(screen.getByText('A new resource has been created in a branch in GitHub.')).toBeInTheDocument();
     });
 
     it('should render correct text for existing PR dashboard', () => {
-      setup({ prURL: 'test-url', isNewPr: false });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: false });
 
       expect(screen.getByRole('status')).toBeInTheDocument();
       expect(
@@ -86,13 +86,13 @@ describe('PreviewBannerViewPR', () => {
     });
 
     it('should render correct button text for new PR dashboard', () => {
-      setup({ prURL: 'test-url', isNewPr: true });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: true });
 
       expect(screen.getByText('Open pull request in GitHub')).toBeInTheDocument();
     });
 
     it('should render correct button text for existing PR dashboard', () => {
-      setup({ prURL: 'test-url', isNewPr: false });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: false });
 
       expect(screen.getByText('View pull request in GitHub')).toBeInTheDocument();
     });
@@ -100,14 +100,14 @@ describe('PreviewBannerViewPR', () => {
 
   describe('Additional scenarios', () => {
     it('should render correct text for new PR resource', () => {
-      setup({ prURL: 'test-url', isNewPr: true });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: true });
 
       expect(screen.getByRole('status')).toBeInTheDocument();
       expect(screen.getByText('A new resource has been created in a branch in GitHub.')).toBeInTheDocument();
     });
 
     it('should render correct text for existing PR resource', () => {
-      setup({ prURL: 'test-url', isNewPr: false });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: false });
 
       expect(screen.getByRole('status')).toBeInTheDocument();
       expect(
@@ -118,13 +118,13 @@ describe('PreviewBannerViewPR', () => {
     });
 
     it('should render correct button text for new PR resource', () => {
-      setup({ prURL: 'test-url', isNewPr: true });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: true });
 
       expect(screen.getByText('Open pull request in GitHub')).toBeInTheDocument();
     });
 
     it('should render correct button text for existing PR resource', () => {
-      setup({ prURL: 'test-url', isNewPr: false });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: false });
 
       expect(screen.getByText('View pull request in GitHub')).toBeInTheDocument();
     });
@@ -132,7 +132,7 @@ describe('PreviewBannerViewPR', () => {
 
   describe('Saved version action', () => {
     it('should render a link to the saved version when originalUrl is provided', () => {
-      setup({ prURL: 'test-url', isNewPr: false, originalUrl: '/d/original-uid' });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: false, originalUrl: '/d/original-uid' });
 
       const link = screen.getByRole('link', { name: 'View saved version' });
       expect(link).toBeInTheDocument();
@@ -140,7 +140,7 @@ describe('PreviewBannerViewPR', () => {
     });
 
     it('should not render the link when originalUrl is not provided', () => {
-      setup({ prURL: 'test-url', isNewPr: false });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: false });
 
       expect(screen.queryByRole('link', { name: 'View saved version' })).not.toBeInTheDocument();
     });
@@ -180,7 +180,7 @@ describe('PreviewBannerViewPR', () => {
 
   describe('Different repository types', () => {
     it('should handle GitLab repository type', () => {
-      setup({ prURL: 'test-url', isNewPr: false, repoType: 'gitlab' });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: false, repoType: 'gitlab' });
 
       expect(screen.getByRole('status')).toBeInTheDocument();
       expect(
@@ -191,7 +191,7 @@ describe('PreviewBannerViewPR', () => {
     });
 
     it('should handle Bitbucket repository type', () => {
-      setup({ prURL: 'test-url', isNewPr: false, repoType: 'bitbucket' });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: false, repoType: 'bitbucket' });
 
       expect(screen.getByRole('status')).toBeInTheDocument();
       expect(
@@ -204,13 +204,13 @@ describe('PreviewBannerViewPR', () => {
 
   describe('Delete action', () => {
     it('should render delete-specific title for new PR', () => {
-      setup({ prURL: 'test-url', isNewPr: true, action: 'delete' });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: true, action: 'delete' });
 
       expect(screen.getByText('A resource has been deleted in a branch in GitHub.')).toBeInTheDocument();
     });
 
     it('should render delete-specific body text', () => {
-      setup({ prURL: 'test-url', isNewPr: true, action: 'delete' });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: true, action: 'delete' });
 
       expect(
         screen.getByText(
@@ -220,7 +220,7 @@ describe('PreviewBannerViewPR', () => {
     });
 
     it('should still render PR button for delete action', () => {
-      setup({ prURL: 'test-url', isNewPr: true, action: 'delete' });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: true, action: 'delete' });
 
       expect(screen.getByText('Open pull request in GitHub')).toBeInTheDocument();
     });
@@ -228,38 +228,38 @@ describe('PreviewBannerViewPR', () => {
 
   describe('action prop precedence', () => {
     it('renders the update title from the action prop even when isNewPr is true', () => {
-      setup({ prURL: 'test-url', isNewPr: true, actionProp: 'update' });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: true, actionProp: 'update' });
 
       expect(screen.getByText('A resource has been updated in a branch in GitHub.')).toBeInTheDocument();
       expect(screen.queryByText('A new resource has been created in a branch in GitHub.')).not.toBeInTheDocument();
     });
 
     it('renders the move title from the action prop', () => {
-      setup({ prURL: 'test-url', isNewPr: true, actionProp: 'move' });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: true, actionProp: 'move' });
 
       expect(screen.getByText('A resource has been moved in a branch in GitHub.')).toBeInTheDocument();
     });
 
     it('renders the create title when the action prop is create', () => {
-      setup({ prURL: 'test-url', isNewPr: true, actionProp: 'create' });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: true, actionProp: 'create' });
 
       expect(screen.getByText('A new resource has been created in a branch in GitHub.')).toBeInTheDocument();
     });
 
     it('takes precedence over the action URL param', () => {
-      setup({ prURL: 'test-url', isNewPr: true, action: 'create', actionProp: 'update' });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: true, action: 'create', actionProp: 'update' });
 
       expect(screen.getByText('A resource has been updated in a branch in GitHub.')).toBeInTheDocument();
     });
 
     it('falls back to the action URL param when no action prop is provided', () => {
-      setup({ prURL: 'test-url', isNewPr: true, action: 'update' });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: true, action: 'update' });
 
       expect(screen.getByText('A resource has been updated in a branch in GitHub.')).toBeInTheDocument();
     });
 
     it('keeps the "View pull request" button for an existing-PR update (button tracks isNewPr, not action)', () => {
-      setup({ prURL: 'test-url', isNewPr: false, actionProp: 'update' });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: false, actionProp: 'update' });
 
       expect(screen.getByText('A resource has been updated in a branch in GitHub.')).toBeInTheDocument();
       expect(screen.getByText('View pull request in GitHub')).toBeInTheDocument();
@@ -267,7 +267,7 @@ describe('PreviewBannerViewPR', () => {
     });
 
     it('shows the "Open pull request" button for a new-branch update', () => {
-      setup({ prURL: 'test-url', isNewPr: true, actionProp: 'update' });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: true, actionProp: 'update' });
 
       expect(screen.getByText('Open pull request in GitHub')).toBeInTheDocument();
     });
@@ -281,7 +281,7 @@ describe('PreviewBannerViewPR', () => {
     };
 
     it('renders source and target branch pills with stable selectors', () => {
-      setup({ prURL: 'test-url', isNewPr: true, repoType: 'github', branchInfo });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: true, repoType: 'github', branchInfo });
 
       const source = screen.getByTestId(selectors.pages.Provisioning.PreviewBanner.sourceBranchLink);
       const target = screen.getByTestId(selectors.pages.Provisioning.PreviewBanner.targetBranchLink);
@@ -296,7 +296,7 @@ describe('PreviewBannerViewPR', () => {
     });
 
     it('exposes the branch-direction arrow to assistive technology', () => {
-      setup({ prURL: 'test-url', isNewPr: true, repoType: 'github', branchInfo });
+      setup({ prURL: 'https://github.com/org/repo/pull/1', isNewPr: true, repoType: 'github', branchInfo });
 
       expect(screen.getByLabelText('targets')).toBeInTheDocument();
     });

@@ -1,3 +1,4 @@
+import { config } from '@grafana/runtime';
 import { type RepositorySpec } from 'app/api/clients/provisioning/v0alpha1';
 
 import { type InstructionAvailability, type RepoType } from '../Wizard/types';
@@ -47,6 +48,67 @@ export function getServerOrigin(url?: string): string {
 // Remove leading and trailing slashes from a string.
 const stripSlashes = (s: string) => s.replace(/^\/+|\/+$/g, '');
 
+const normalizeHostname = (hostname: string) => hostname.toLowerCase().replace(/\.$/, '');
+
+function getInstanceHostnames(): Set<string> {
+  const hostnames = new Set<string>();
+  for (const candidate of [config.appUrl, window.location.href]) {
+    try {
+      const { hostname } = new URL(candidate);
+      if (hostname) {
+        hostnames.add(normalizeHostname(hostname));
+      }
+    } catch {
+      // Not an absolute URL; nothing to compare against.
+    }
+  }
+  return hostnames;
+}
+
+// Repository URLs are stored by repository admins and rendered as links for other users. Only absolute
+// http(s) URLs on a host other than this Grafana instance are accepted: the session cookie is scoped to
+// the host (not the port or scheme), so a link to this host could reach endpoints such as /logout with
+// the viewer's session.
+function parseExternalRepoUrl(url?: string | null): URL | undefined {
+  if (!url) {
+    return undefined;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
+    return undefined;
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return undefined;
+  }
+  if (!parsed.hostname || getInstanceHostnames().has(normalizeHostname(parsed.hostname))) {
+    return undefined;
+  }
+  return parsed;
+}
+
+/**
+ * Returns `url` unchanged when it is safe to render as an external repository link
+ * (absolute http(s) URL on a host other than this Grafana instance), otherwise undefined.
+ */
+export function sanitizeRepoLink(url?: string | null): string | undefined {
+  return parseExternalRepoUrl(url) ? url! : undefined;
+}
+
+// Rebuild the base from origin + path only, dropping any query, fragment, or credentials, so a saved
+// `?` or `#` cannot turn the appended provider segments into a query string or fragment.
+export function getExternalRepoBaseUrl(url?: string | null): string | undefined {
+  const parsed = parseExternalRepoUrl(url);
+  if (!parsed) {
+    return undefined;
+  }
+  const path = buildCleanBaseUrl(parsed.pathname);
+  return path ? `${parsed.origin}/${path}` : parsed.origin;
+}
+
 // Split a path into segments and URL-encode each segment.
 // Ensures the final URL remains valid for all providers (GitHub, GitLab, etc.).
 const splitAndEncode = (s: string) => stripSlashes(s).split('/').map(encodeURIComponent);
@@ -59,12 +121,11 @@ type BuildRepoUrlParams = {
 };
 
 const buildRepoUrl = ({ baseUrl, branch, providerSegments, path }: BuildRepoUrlParams) => {
-  if (!baseUrl) {
+  // Normalize base URL: trim whitespace + remove trailing slashes + remove .git suffix if present
+  const cleanBase = getExternalRepoBaseUrl(baseUrl);
+  if (!cleanBase) {
     return undefined;
   }
-
-  // Normalize base URL: trim whitespace + remove trailing slashes + remove .git suffix if present
-  const cleanBase = buildCleanBaseUrl(baseUrl);
 
   const cleanBranch = branch?.trim() || undefined;
 
@@ -123,7 +184,7 @@ export const getRepoHrefForProvider = (spec?: RepositorySpec) => {
     case 'git':
       // Generic git repositories don't have a standard URL pattern
       // Just return the base URL without branch/path segments
-      return spec.git?.url ? buildCleanBaseUrl(spec.git.url) : undefined;
+      return getExternalRepoBaseUrl(spec.git?.url);
     default:
       return undefined;
   }

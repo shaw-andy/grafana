@@ -1,18 +1,18 @@
-import { textUtil } from '@grafana/data';
 import { Trans } from '@grafana/i18n';
 import { LinkButton, Stack } from '@grafana/ui';
 import { type RepositoryUrLs } from 'app/api/clients/provisioning/v0alpha1';
 
 import { type JobType } from '../types';
+import { sanitizeRepoLink } from '../utils/git';
 
 interface Props {
   jobType?: JobType;
   urls?: RepositoryUrLs;
 }
 export function PullRequestButtons({ urls, jobType }: Props) {
-  const pullRequestURL = urls?.newPullRequestURL ? textUtil.sanitizeUrl(urls.newPullRequestURL) : undefined;
-  const compareURL = urls?.compareURL ? textUtil.sanitizeUrl(urls.compareURL) : undefined;
-  const branchURL = urls?.sourceURL ? textUtil.sanitizeUrl(urls.sourceURL) : undefined;
+  const pullRequestURL = toSafeLink(urls?.newPullRequestURL);
+  const compareURL = toSafeLink(urls?.compareURL);
+  const branchURL = toSafeLink(urls?.sourceURL);
 
   // Migrate is the only flow that reaches here via a sync job, and it just needs
   // the pull request. The branch/compare links are for delete/move jobs.
@@ -35,4 +35,11 @@ export function PullRequestButtons({ urls, jobType }: Props) {
       </LinkButton>
     </Stack>
   );
+}
+
+function toSafeLink(url?: string) {
+  if (!url) {
+    return undefined;
+  }
+  return sanitizeRepoLink(url) ?? 'about:blank';
 }

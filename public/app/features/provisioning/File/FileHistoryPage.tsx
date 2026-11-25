@@ -13,7 +13,7 @@ import { isNotFoundError } from 'app/features/alerting/unified/api/util';
 
 import { PROVISIONING_URL } from '../constants';
 import { type HistoryListResponse } from '../types';
-import { getRemoteConfig } from '../utils/git';
+import { getExternalRepoBaseUrl, getRemoteConfig } from '../utils/git';
 import { formatTimestamp } from '../utils/time';
 
 import { isFileHistorySupported } from './utils';
@@ -144,9 +144,6 @@ export function getAuthorProfileUrl(
   if (!repoUrl || !isFileHistorySupported(repoType)) {
     return undefined;
   }
-  try {
-    return `${new URL(repoUrl).origin}/${encodeURIComponent(username)}`;
-  } catch {
-    return undefined;
-  }
+  const base = getExternalRepoBaseUrl(repoUrl);
+  return base ? `${new URL(base).origin}/${encodeURIComponent(username)}` : undefined;
 }

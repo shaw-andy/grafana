@@ -1,4 +1,3 @@
-import { textUtil } from '@grafana/data';
 import { Trans, t } from '@grafana/i18n';
 import { Card, LinkButton, Stack, Text, TextLink } from '@grafana/ui';
 import { type Connection } from 'app/api/clients/provisioning/v0alpha1';
@@ -7,6 +6,7 @@ import { RepoIcon } from '../Shared/RepoIcon';
 import { type RepoType } from '../Wizard/types';
 import { CONNECTIONS_URL } from '../constants';
 import { connectionProviderType, isOAuthConnectionType } from '../utils/connectionOAuth';
+import { sanitizeRepoLink } from '../utils/git';
 
 import { ConnectionStatusBadge } from './ConnectionStatusBadge';
 
@@ -22,6 +22,7 @@ export function ConnectionListItem({ connection, isSelected, onClick }: Props) {
   const title = spec?.title || name;
   const description = spec?.description;
   const url = spec?.url;
+  const href = sanitizeRepoLink(url);
   const providerType: RepoType = connectionProviderType(spec?.type) ?? 'github';
   const kindLabel = isOAuthConnectionType(spec?.type)
     ? t('provisioning.connections.kind-oauth-app', 'OAuth App')
@@ -42,11 +43,14 @@ export function ConnectionListItem({ connection, isSelected, onClick }: Props) {
         <Stack direction="column">
           <Text color="secondary">{kindLabel}</Text>
           {description && <Text color="secondary">{description}</Text>}
-          {url && (
-            <TextLink external href={textUtil.sanitizeUrl(url)}>
-              {url}
-            </TextLink>
-          )}
+          {url &&
+            (href ? (
+              <TextLink external href={href}>
+                {url}
+              </TextLink>
+            ) : (
+              <Text color="secondary">{url}</Text>
+            ))}
         </Stack>
       </Card.Meta>
 
