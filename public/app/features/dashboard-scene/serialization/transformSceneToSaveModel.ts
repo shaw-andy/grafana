@@ -28,6 +28,7 @@ import {
 import { sortedDeepCloneWithoutNulls } from 'app/core/utils/object';
 import { getPanelDataFrames } from 'app/features/dashboard/components/HelpWizard/utils';
 import { DASHBOARD_SCHEMA_VERSION } from 'app/features/dashboard/state/DashboardMigrator';
+import { removeRequestsFromPanelOptions } from 'app/features/dashboard/utils/snapshot';
 import { GrafanaQueryType } from 'app/plugins/datasource/grafana/types';
 
 import { DashboardDataLayerSet } from '../scene/DashboardDataLayerSet';
@@ -1019,12 +1020,20 @@ export function trimDashboardForSnapshot(title: string, time: TimeRange, dash: D
     }
   }
 
-  // Remove links from all panels
-  result.panels?.forEach((panel) => {
+  const scrubPanel = (panel: Panel | RowPanel) => {
     if ('links' in panel) {
       panel.links = [];
     }
-  });
+    if ('options' in panel) {
+      panel.options = removeRequestsFromPanelOptions(panel.type, panel.options);
+    }
+    if (panel.type === 'row' && 'panels' in panel) {
+      panel.panels?.forEach(scrubPanel);
+    }
+  };
+
+  // Remove links and canvas requests from all panels, including those inside collapsed rows
+  result.panels?.forEach(scrubPanel);
 
   // Remove annotation queries, attach snapshotData: [] for backwards compatibility
   if (result.annotations) {

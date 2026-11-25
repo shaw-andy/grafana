@@ -16,6 +16,14 @@ export const callApi = (api: APIEditorConfig, updateLoadingStateCallback?: IsLoa
     return;
   }
 
+  // Snapshots are viewed by anyone with the link, and the snapshot API stores whatever dashboard JSON it is sent,
+  // so a saved request must never be sent with the viewer's session.
+  if (getDashboardSrv().getCurrent()?.meta?.isSnapshot) {
+    appEvents.emit(AppEvents.alertError, ['API calls are disabled in snapshots.']);
+    updateLoadingStateCallback && updateLoadingStateCallback(false);
+    return;
+  }
+
   const request = getRequest(api);
 
   getBackendSrv()
