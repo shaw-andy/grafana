@@ -37,6 +37,12 @@ func OrgRedirect(cfg *setting.Cfg, userSvc user.Service) web.Handler {
 			return
 		}
 
+		// Images, media and fetches can be triggered by dashboard markup without a click,
+		// so only page and frame navigations may change the active org.
+		if mode := req.Header.Get("Sec-Fetch-Mode"); mode != "" && mode != "navigate" {
+			return
+		}
+
 		if !validRedirectPath(c.Req.URL.Path) {
 			// Do not switch orgs or perform the redirect because the new path is not valid
 			return
