@@ -536,14 +536,16 @@ func FixedRoleRegistrations(viewersCanEdit, dsPermissionsEnforced bool) []ac.Rol
 
 	// Grants Viewer; BuiltInRolesWithParents also seeds Editor and Admin so stack-wide
 	// variables:read is available without variablesWriterRole (Admin-only CRUD).
+	// Scoped to the general folder only: folder-scoped variable reads must come from
+	// the folder ACL (FolderViewActions) so restricted folders stay restricted.
 	variablesReaderRole := ac.RoleRegistration{
 		Role: ac.RoleDTO{
 			Name:        "fixed:variables:reader",
-			DisplayName: "Reader",
-			Description: "Read all variables (root and folder-scoped).",
+			DisplayName: "Reader (root)",
+			Description: "Read stack-wide (root) variables.",
 			Group:       "Variables",
 			Permissions: []ac.Permission{
-				{Action: ac.ActionVariablesRead, Scope: folder.ScopeFoldersAll},
+				{Action: ac.ActionVariablesRead, Scope: folder.ScopeFoldersProvider.GetResourceScopeUID(ac.GeneralFolderUID)},
 			},
 		},
 		Grants: []string{"Viewer"},
@@ -559,6 +561,7 @@ func FixedRoleRegistrations(viewersCanEdit, dsPermissionsEnforced bool) []ac.Rol
 			Description: "Create, read, write or delete all variables (root and folder-scoped).",
 			Group:       "Variables",
 			Permissions: ac.ConcatPermissions(variablesReaderRole.Role.Permissions, []ac.Permission{
+				{Action: ac.ActionVariablesRead, Scope: folder.ScopeFoldersAll},
 				{Action: ac.ActionVariablesCreate, Scope: folder.ScopeFoldersAll},
 				{Action: ac.ActionVariablesWrite, Scope: folder.ScopeFoldersAll},
 				{Action: ac.ActionVariablesDelete, Scope: folder.ScopeFoldersAll},
