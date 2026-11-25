@@ -12,6 +12,7 @@ import { type GrafanaAlertingRuleDefinition, type RulerGrafanaRuleDTO } from 'ap
 
 import { Time } from '../../../../explore/Time';
 import { usePendingPeriod } from '../../hooks/rules/usePendingPeriod';
+import { getAnnotationLinkHref } from '../../utils/annotations';
 import { makeEditTimeIntervalLink } from '../../utils/misc';
 import { notificationPolicies } from '../../utils/navigation';
 import { getAnnotations, isPausedRule, prometheusRuleType, rulerRuleType } from '../../utils/rules';
@@ -250,12 +251,12 @@ interface AnnotationValueProps {
 }
 
 export function AnnotationValue({ value }: AnnotationValueProps) {
-  const needsExternalLink = value && value.startsWith('http');
+  const linkHref = getAnnotationLinkHref(value);
   const tokenizeValue = <Tokenize input={value} delimiter={['{{', '}}']} />;
 
-  if (needsExternalLink) {
+  if (linkHref) {
     return (
-      <TextLink href={value} external>
+      <TextLink href={linkHref} external>
         {value}
       </TextLink>
     );

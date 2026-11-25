@@ -2,6 +2,7 @@ import { css } from '@emotion/css';
 
 import { TextLink, Tooltip } from '@grafana/ui';
 
+import { getAnnotationLinkHref } from '../utils/annotations';
 import { type Annotation, annotationLabels } from '../utils/constants';
 
 import { DetailsField } from './DetailsField';
@@ -35,7 +36,7 @@ export const AnnotationDetailsField = ({ annotationKey, value, valueLink }: Prop
 
 const AnnotationValue = ({ annotationKey, value, valueLink }: Props) => {
   const needsWell = wellableAnnotationKeys.includes(annotationKey);
-  const needsExternalLink = value && value.startsWith('http');
+  const linkHref = getAnnotationLinkHref(value);
 
   const tokenizeValue = <Tokenize input={value} delimiter={['{{', '}}']} />;
 
@@ -51,9 +52,9 @@ const AnnotationValue = ({ annotationKey, value, valueLink }: Props) => {
     return <Well className={styles.well}>{tokenizeValue}</Well>;
   }
 
-  if (needsExternalLink) {
+  if (linkHref) {
     return (
-      <TextLink href={value} external>
+      <TextLink href={linkHref} external>
         {value}
       </TextLink>
     );
