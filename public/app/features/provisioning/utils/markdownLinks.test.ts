@@ -231,6 +231,29 @@ describe('rewriteRelativeMarkdownLinks', () => {
   });
 
   describe('images', () => {
+    it('does not rewrite a relative image or link into this instance logout URL', () => {
+      const out = rewriteRelativeMarkdownLinks(
+        `<p><a href="./page.md">page</a><img src="./diagram.png" alt="diagram"></p>`,
+        {
+          repository: {
+            ...githubRepo,
+            url: 'https://grafana.example/foo/../logout?',
+          },
+          baseDirInRepo: 'docs',
+        }
+      );
+      const doc = new DOMParser().parseFromString(out, 'text/html');
+      const targets = [doc.querySelector('a')?.getAttribute('href'), doc.querySelector('img')?.getAttribute('src')];
+      for (const target of targets) {
+        if (!target) {
+          continue;
+        }
+        const parsed = new URL(target, 'https://grafana.example/');
+        const path = parsed.pathname.length > 1 ? parsed.pathname.replace(/\/+$/, '') : parsed.pathname;
+        expect(parsed.origin === 'https://grafana.example' && path === '/logout').toBe(false);
+      }
+    });
+
     it('rewrites a relative image src to the host raw URL', () => {
       const html = `<p><img src="./diagram.png" alt="diagram"></p>`;
       const out = rewriteRelativeMarkdownLinks(html, { repository: githubRepo, baseDirInRepo: baseDir });

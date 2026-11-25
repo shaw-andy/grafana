@@ -242,6 +242,35 @@ describe('ManagedBadge', () => {
       expect(screen.queryByRole('button')).not.toBeInTheDocument();
     });
 
+    it('does not point the editor source-file action at this instance logout', async () => {
+      setPermissions({ isEditor: true, canManageRepositories: false });
+      mockRepositories([
+        makeRepository({
+          url: 'https://grafana.example/foo/../logout?',
+          branch: 'main',
+        }),
+      ]);
+      const originalAppUrl = config.appUrl;
+      config.appUrl = 'https://grafana.example/';
+
+      const { user } = render(
+        <ManagedBadge managerKind={ManagerKind.Repo} repositoryName="my-repo" sourcePath="dashboards/foo.json" />
+      );
+      const trigger = await screen.findByRole('button', { name: /managed by: repository/i }).catch(() => null);
+      if (trigger) {
+        await user.click(trigger);
+      }
+      const source = screen.queryByRole('menuitem', { name: /view source file/i });
+      const href = source?.getAttribute('href');
+      config.appUrl = originalAppUrl;
+      if (!href) {
+        return;
+      }
+      const target = new URL(href, 'https://grafana.example/');
+      const path = target.pathname.length > 1 ? target.pathname.replace(/\/+$/, '') : target.pathname;
+      expect(target.origin === 'https://grafana.example' && path === '/logout').toBe(false);
+    });
+
     it('renders a plain badge when the provisioning feature toggle is off', () => {
       setPermissions({ isEditor: true, canManageRepositories: true });
       config.provisioningEnabled = false;
