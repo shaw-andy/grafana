@@ -1,6 +1,14 @@
+import { config } from '@grafana/runtime';
 import { type RepositorySpec } from 'app/api/clients/provisioning/v0alpha1';
 
-import { getRepoEditFileUrl, getRepoFileUrl, getRepoHrefForProvider, getRepoNewFileUrl } from './git';
+import {
+  getRepoCommitUrl,
+  getRepoEditFileUrl,
+  getRepoFileUrl,
+  getRepoHrefForProvider,
+  getRepoNewFileUrl,
+  getRepoRawFileUrl,
+} from './git';
 
 // Partial specs for testing; getRepoHrefForProvider only reads type and provider url/branch/path.
 function spec(s: Partial<RepositorySpec>): RepositorySpec {
@@ -440,5 +448,141 @@ describe('getRepoNewFileUrl', () => {
         filePath: undefined,
       })
     ).toBeUndefined();
+  });
+});
+
+// This Grafana instance, as bootstrapped into the frontend. Link builders must
+// not send the browser here: GET /logout revokes the session cookie.
+const thisInstance = 'https://grafana.example/';
+
+function isSessionLogoutNavigation(href: string | undefined): boolean {
+  if (!href) {
+    return false;
+  }
+  const app = new URL(thisInstance);
+  const target = new URL(href, app);
+  if (target.origin !== app.origin) {
+    return false;
+  }
+  const prefix = app.pathname.replace(/\/+$/, '');
+  const path = target.pathname.length > 1 ? target.pathname.replace(/\/+$/, '') : target.pathname;
+  return path === `${prefix}/logout`;
+}
+
+describe('repository links must not sign the viewer out', () => {
+  const originalAppUrl = config.appUrl;
+
+  beforeAll(() => {
+    config.appUrl = thisInstance;
+  });
+
+  afterAll(() => {
+    config.appUrl = originalAppUrl;
+  });
+
+  it.each([
+    ['github', 'https://grafana.example/foo/../logout?'],
+    ['githubEnterprise', 'https://grafana.example/foo/../logout?'],
+    ['gitlab', 'https://grafana.example/foo/../logout?'],
+    ['bitbucket', 'https://grafana.example/foo/../logout?'],
+    ['git', 'https://grafana.example/logout'],
+    ['git', 'https://grafana.example:443/logout'],
+    ['git', 'https://Grafana.Example/logout'],
+  ])('view-repository href for %s %s is not this instance logout', (type, url) => {
+    const href = getRepoHrefForProvider(
+      spec({
+        type: type as RepositorySpec['type'],
+        github: type === 'github' ? { url, branch: 'main' } : undefined,
+        githubEnterprise: type === 'githubEnterprise' ? { url, branch: 'main' } : undefined,
+        gitlab: type === 'gitlab' ? { url, branch: 'main' } : undefined,
+        bitbucket: type === 'bitbucket' ? { url, branch: 'main' } : undefined,
+        git: type === 'git' ? { url, branch: 'main' } : undefined,
+      })
+    );
+    expect(isSessionLogoutNavigation(href)).toBe(false);
+  });
+
+  it.each(['github', 'githubEnterprise', 'gitlab', 'bitbucket'] as const)(
+    '%s file, raw, edit, new-file, and commit URLs are not this instance logout',
+    (repoType) => {
+      const url = 'https://grafana.example/foo/../logout?';
+      expect(
+        isSessionLogoutNavigation(
+          getRepoFileUrl({ repoType, url, branch: 'main', filePath: 'dashboards/a.json', pathPrefix: 'grafana' })
+        )
+      ).toBe(false);
+      expect(isSessionLogoutNavigation(getRepoRawFileUrl({ repoType, url, branch: 'main', filePath: 'img.png' }))).toBe(
+        false
+      );
+      expect(
+        isSessionLogoutNavigation(getRepoEditFileUrl({ repoType, url, branch: 'main', filePath: 'dashboards/a.json' }))
+      ).toBe(false);
+      expect(
+        isSessionLogoutNavigation(
+          getRepoNewFileUrl({ repoType, url, branch: 'main', filePath: 'README.md', template: 'hello' })
+        )
+      ).toBe(false);
+      const provider =
+        repoType === 'github'
+          ? { github: { url, branch: 'main' } }
+          : repoType === 'githubEnterprise'
+            ? { githubEnterprise: { url, branch: 'main' } }
+            : repoType === 'gitlab'
+              ? { gitlab: { url, branch: 'main' } }
+              : { bitbucket: { url, branch: 'main' } };
+      expect(isSessionLogoutNavigation(getRepoCommitUrl(spec({ type: repoType, ...provider }), 'abc1234').url)).toBe(
+        false
+      );
+    }
+  );
+
+  it('keeps appended provider segments in the path when the saved URL contains a question mark', () => {
+    const href = getRepoHrefForProvider(
+      spec({
+        type: 'github',
+        github: { url: 'https://github.com/owner/repo?', branch: 'main' },
+      })
+    );
+    const fileHref = getRepoFileUrl({
+      repoType: 'github',
+      url: 'https://github.com/owner/repo?',
+      branch: 'main',
+      filePath: 'dashboards/a.json',
+    });
+    const rawHref = getRepoRawFileUrl({
+      repoType: 'github',
+      url: 'https://github.com/owner/repo?',
+      branch: 'main',
+      filePath: 'img.png',
+    });
+    const editHref = getRepoEditFileUrl({
+      repoType: 'github',
+      url: 'https://github.com/owner/repo?',
+      branch: 'main',
+      filePath: 'dashboards/a.json',
+    });
+    const newHref = getRepoNewFileUrl({
+      repoType: 'github',
+      url: 'https://github.com/owner/repo?',
+      branch: 'main',
+      filePath: 'README.md',
+    });
+    const commitHref = getRepoCommitUrl(
+      spec({ type: 'github', github: { url: 'https://github.com/owner/repo?', branch: 'main' } }),
+      'abc1234'
+    ).url;
+
+    for (const built of [href, fileHref, rawHref, editHref, newHref, commitHref]) {
+      expect(built).toEqual(expect.any(String));
+      const parsed = new URL(built!);
+      expect(parsed.search.startsWith('?/')).toBe(false);
+      expect(parsed.pathname).toEqual(expect.stringMatching(/\/(tree|blob|raw|edit|new|commit)(\/|$)/));
+    }
+    expect(new URL(href!).pathname.endsWith('/tree/main')).toBe(true);
+    expect(new URL(fileHref!).pathname).toContain('/blob/main/dashboards/a.json');
+    expect(new URL(commitHref!).pathname).toContain('/commit/abc1234');
+    // The new-file editor adds its own query. That query must not be the smuggled path.
+    expect(new URL(newHref!).pathname).toContain('/new/main');
+    expect(new URL(newHref!).search).toContain('filename=README.md');
   });
 });
