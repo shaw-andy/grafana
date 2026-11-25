@@ -359,6 +359,7 @@ func (s *SearchHandler) DoSearch(w http.ResponseWriter, r *http.Request) {
 		errhttp.Write(ctx, err, w)
 		return
 	}
+	common.ExtendInexactSearchTotal(resp, request.Offset, request.Limit)
 
 	result, err := ParseResults(resp)
 	if err != nil {

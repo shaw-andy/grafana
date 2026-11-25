@@ -5,7 +5,24 @@ import (
 	"strconv"
 
 	"k8s.io/apimachinery/pkg/apis/meta/internalversion"
+
+	"github.com/grafana/grafana/pkg/storage/unified/resourcepb"
 )
+
+// ExtendInexactSearchTotal makes TotalHits safe to page on for clients that
+// only read the total. A total that is not exact counts only what the backend
+// authorized before it stopped scanning, so after a full page it can equal
+// offset+limit while more results exist. Reporting one past the page keeps the
+// next page reachable; it depends only on rows the caller was allowed to see.
+func ExtendInexactSearchTotal(resp *resourcepb.ResourceSearchResponse, offset, limit int64) {
+	if resp == nil || resp.GetTotalHitsExact() || limit <= 0 {
+		return
+	}
+	rows := int64(len(resp.GetRows()) + len(resp.GetResults().GetRows()))
+	if rows >= limit {
+		resp.TotalHits = max(resp.TotalHits, offset+rows+1)
+	}
+}
 
 type Pagination struct {
 	Limit    int64

@@ -394,6 +394,7 @@ func (s *SearchHandler) DoTeamSearch(w http.ResponseWriter, r *http.Request) {
 		errhttp.Write(ctx, err, w)
 		return
 	}
+	common.ExtendInexactSearchTotal(result, searchRequest.Offset, searchRequest.Limit)
 
 	searchResults, err := teamsearch.ParseResults(result, searchRequest.Offset)
 	if err != nil {

@@ -318,10 +318,10 @@ func (s *cascadeDeleteStorage) dashboardsInFolder(ctx context.Context, namespace
 
 		// The bleve Search path drives pagination off TotalHits + offset rather than a page token.
 		// Advance by the rows actually returned so a short page doesn't skip the remainder.
-		offset += int64(len(rows))
-		if offset >= resp.TotalHits {
+		if !searchHasMore(resp, offset, childFolderPageSize, len(rows)) {
 			return names, nil
 		}
+		offset += int64(len(rows))
 	}
 }
 
@@ -398,10 +398,10 @@ func (s *cascadeDeleteStorage) variablesInFolder(ctx context.Context, namespace,
 
 		// The bleve Search path drives pagination off TotalHits + offset rather than a page token.
 		// Advance by the rows actually returned so a short page doesn't skip the remainder.
-		offset += int64(len(rows))
-		if offset >= resp.TotalHits {
+		if !searchHasMore(resp, offset, childFolderPageSize, len(rows)) {
 			return names, nil
 		}
+		offset += int64(len(rows))
 	}
 }
 

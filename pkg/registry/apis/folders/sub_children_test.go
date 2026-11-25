@@ -77,7 +77,8 @@ func childrenResponseWith(rows []*resourcepb.ResourceTableRow, total int64) *res
 			},
 			Rows: rows,
 		},
-		TotalHits: total,
+		TotalHits:      total,
+		TotalHitsExact: true,
 	}
 }
 
@@ -103,7 +104,8 @@ func childrenFieldValueResponse(uid, title string) *resourcepb.ResourceSearchRes
 				StringValues: []string{title},
 			}},
 		}},
-		TotalHits: 1,
+		TotalHits:      1,
+		TotalHitsExact: true,
 	}
 }
 
@@ -196,6 +198,29 @@ func TestSubChildren_PaginationProducesContinue(t *testing.T) {
 	require.Equal(t, "5", list.Continue)
 	require.NotNil(t, list.RemainingItemCount)
 	require.Equal(t, int64(2), *list.RemainingItemCount)
+}
+
+func TestSubChildren_InexactTotalStillProducesContinue(t *testing.T) {
+	getter := &stubGetter{obj: &folders.Folder{ObjectMeta: metav1.ObjectMeta{Name: "parent"}}}
+	// Post-rank authorization stops once the page is full and reports only the
+	// authorized hits it saw, so the total can equal the rows read so far.
+	page := childrenResponseWith([]*resourcepb.ResourceTableRow{
+		childRow("c1", "A"),
+		childRow("c2", "B"),
+	}, 5)
+	page.TotalHitsExact = false
+	search := &capturingSearchClient{resp: page}
+	rest := &subChildrenREST{getter: getter, searcher: search}
+
+	resp := &recordingResponder{}
+	handler, err := rest.Connect(newChildrenCtx(), "parent", nil, resp)
+	require.NoError(t, err)
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/parent/children?limit=2&continue=3", nil))
+
+	require.NoError(t, resp.err)
+	list := resp.obj.(*folders.FolderList)
+	require.Equal(t, "5", list.Continue)
+	require.Nil(t, list.RemainingItemCount)
 }
 
 func TestSubChildren_InvalidContinueRejected(t *testing.T) {
