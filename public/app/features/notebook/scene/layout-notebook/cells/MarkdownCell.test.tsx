@@ -1,3 +1,4 @@
+import { credentialedResourceUrls } from 'test/credentialedResourceUrls';
 import { render, screen, waitFor } from 'test/test-utils';
 
 import { type CellContentKind } from 'app/features/notebook/types';
@@ -119,5 +120,20 @@ describe('MarkdownCell', () => {
 
       await waitFor(() => expect(screen.getByLabelText('Markdown')).toHaveFocus());
     });
+  });
+});
+
+describe('notebook markdown cells', () => {
+  it.each([
+    'visible ![alt](/logout)',
+    'visible <img src="/profile/switch-org/2">',
+    'visible <div style="background-image:url(/logout)"></div>',
+    'visible <iframe src="/logout"></iframe>',
+  ])('does not load a credentialed URL while the cell is being read: %s', async (text) => {
+    const markdown: CellContentKind = { kind: 'Markdown', spec: { text } };
+    const { container } = render(<MarkdownCell content={markdown} isEditing={false} onChange={jest.fn()} />);
+
+    expect(await screen.findByText('visible')).toBeInTheDocument();
+    expect(credentialedResourceUrls(container.innerHTML)).toEqual([]);
   });
 });
