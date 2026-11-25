@@ -816,8 +816,8 @@ export function trimDashboardForSnapshot(title: string, time: TimeRange, dash: D
   // Remove links from all panels
   spec.elements = Object.fromEntries(
     Object.entries(spec.elements).map(([key, element]) => {
-      if ('links' in element) {
-        element.links = [];
+      if (element.kind === 'Panel') {
+        return [key, { ...element, spec: { ...element.spec, links: [] } }];
       }
       return [key, element];
     })

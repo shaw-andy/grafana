@@ -153,6 +153,10 @@ export class ShareSnapshot extends PureComponent<Props, State> {
       panel.targets = [];
       panel.links = [];
       panel.datasource = null;
+      // Collapsed rows keep their panels on the row
+      panel.panels?.forEach((nested) => {
+        nested.links = [];
+      });
     });
 
     // remove annotation queries
