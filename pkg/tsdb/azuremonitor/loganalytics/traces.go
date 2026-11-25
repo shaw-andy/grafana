@@ -16,13 +16,60 @@ import (
 	"github.com/grafana/grafana/pkg/tsdb/azuremonitor/utils"
 )
 
+const (
+	maxTracesFilters      = 100
+	maxTracesFilterValues = 100
+)
+
 type TraceQueries struct {
 	TraceExploreQuery       string
 	TraceParentExploreQuery string
 	TraceLogsExploreQuery   string
 }
 
-func buildTracesQuery(operationId string, parentSpanID *string, traceTypes []string, filters []dataquery.AzureTracesFilter, resultFormat *dataquery.ResultFormat, resources []string) string {
+// validateTracesFilters bounds the filter input so the size of the KQL built from it
+// stays proportional to a reasonable query rather than to an arbitrarily large request body.
+func validateTracesFilters(filters []dataquery.AzureTracesFilter) error {
+	if len(filters) > maxTracesFilters {
+		return backend.DownstreamError(fmt.Errorf("too many filters in Azure traces query: %d (maximum %d)", len(filters), maxTracesFilters))
+	}
+	for i, filter := range filters {
+		if len(filter.Filters) > maxTracesFilterValues {
+			return backend.DownstreamError(fmt.Errorf("too many values in Azure traces filter %d: %d (maximum %d)", i+1, len(filter.Filters), maxTracesFilterValues))
+		}
+	}
+	return nil
+}
+
+func buildTracesFiltersClause(filters []dataquery.AzureTracesFilter) string {
+	var sb strings.Builder
+	for _, filter := range filters {
+		if len(filter.Filters) == 0 {
+			continue
+		}
+		operation := "in"
+		if filter.Operation == "ne" {
+			operation = "!in"
+		}
+		sb.WriteString("| where ")
+		sb.WriteString(filter.Property)
+		sb.WriteString(" ")
+		sb.WriteString(operation)
+		sb.WriteString(" (")
+		for i, val := range filter.Filters {
+			if i > 0 {
+				sb.WriteString(",")
+			}
+			sb.WriteString(`"`)
+			sb.WriteString(val)
+			sb.WriteString(`"`)
+		}
+		sb.WriteString(")")
+	}
+	return sb.String()
+}
+
+func buildTracesQuery(operationId string, parentSpanID *string, traceTypes []string, filtersClause string, resultFormat *dataquery.ResultFormat, resources []string) string {
 	types := traceTypes
 	if len(types) == 0 {
 		types = Tables
@@ -88,25 +135,6 @@ func buildTracesQuery(operationId string, parentSpanID *string, traceTypes []str
 		parentWhereClause = fmt.Sprintf("| where (operation_ParentId != '' and operation_ParentId == '%s')", *parentSpanID)
 	}
 
-	filtersClause := ""
-
-	if len(filters) > 0 {
-		for _, filter := range filters {
-			if len(filter.Filters) == 0 {
-				continue
-			}
-			operation := "in"
-			if filter.Operation == "ne" {
-				operation = "!in"
-			}
-			filterValues := []string{}
-			for _, val := range filter.Filters {
-				filterValues = append(filterValues, fmt.Sprintf(`"%s"`, val))
-			}
-			filtersClause += fmt.Sprintf("| where %s %s (%s)", filter.Property, operation, strings.Join(filterValues, ","))
-		}
-	}
-
 	propertiesFunc := "bag_merge(customDimensions, customMeasurements)"
 	if len(tags) > 0 {
 		propertiesFunc = fmt.Sprintf("bag_merge(bag_pack_columns(%s), customDimensions, customMeasurements)", strings.Join(tags, ","))
@@ -158,15 +186,16 @@ func buildTraceQueries(query backend.DataQuery, dsInfo types.DatasourceInfo, tra
 
 	traceQueries := TraceQueries{}
 
-	queryString := buildTracesQuery(operationId, nil, tracesQuery.TraceTypes, tracesQuery.Filters, &resultFormat, queryResources)
+	filtersClause := buildTracesFiltersClause(tracesQuery.Filters)
+	queryString := buildTracesQuery(operationId, nil, tracesQuery.TraceTypes, filtersClause, &resultFormat, queryResources)
 
 	if operationId == "" {
-		traceExploreQuery = buildTracesQuery(traceIdVariable, nil, tracesQuery.TraceTypes, tracesQuery.Filters, &resultFormat, queryResources)
-		traceParentExploreQuery = buildTracesQuery(traceIdVariable, &parentSpanIdVariable, tracesQuery.TraceTypes, tracesQuery.Filters, &resultFormat, queryResources)
+		traceExploreQuery = buildTracesQuery(traceIdVariable, nil, tracesQuery.TraceTypes, filtersClause, &resultFormat, queryResources)
+		traceParentExploreQuery = buildTracesQuery(traceIdVariable, &parentSpanIdVariable, tracesQuery.TraceTypes, filtersClause, &resultFormat, queryResources)
 		traceLogsExploreQuery = buildTracesLogsQuery(traceIdVariable, queryResources)
 	} else {
 		traceExploreQuery = queryString
-		traceParentExploreQuery = buildTracesQuery(operationId, &parentSpanIdVariable, tracesQuery.TraceTypes, tracesQuery.Filters, &resultFormat, queryResources)
+		traceParentExploreQuery = buildTracesQuery(operationId, &parentSpanIdVariable, tracesQuery.TraceTypes, filtersClause, &resultFormat, queryResources)
 		traceLogsExploreQuery = buildTracesLogsQuery(operationId, queryResources)
 	}
 
@@ -201,6 +230,10 @@ func buildAppInsightsQuery(ctx context.Context, query backend.DataQuery, dsInfo 
 	}
 
 	azureTracesTarget := queryJSONModel.AzureTraces
+
+	if err := validateTracesFilters(azureTracesTarget.Filters); err != nil {
+		return nil, err
+	}
 
 	resultFormat := ParseResultFormat(azureTracesTarget.ResultFormat, dataquery.AzureQueryTypeAzureTraces)
 
