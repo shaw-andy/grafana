@@ -1019,12 +1019,7 @@ export function trimDashboardForSnapshot(title: string, time: TimeRange, dash: D
     }
   }
 
-  // Remove links from all panels
-  result.panels?.forEach((panel) => {
-    if ('links' in panel) {
-      panel.links = [];
-    }
-  });
+  removePanelLinks(result.panels);
 
   // Remove annotation queries, attach snapshotData: [] for backwards compatibility
   if (result.annotations) {
@@ -1063,6 +1058,18 @@ export function trimDashboardForSnapshot(title: string, time: TimeRange, dash: D
   }
 
   return result;
+}
+
+// Collapsed rows keep their panels on the row, so nested panels must be walked as well.
+function removePanelLinks(panels: Array<Panel | RowPanel> | undefined) {
+  panels?.forEach((panel) => {
+    if ('links' in panel) {
+      panel.links = [];
+    }
+    if ('panels' in panel) {
+      removePanelLinks(panel.panels);
+    }
+  });
 }
 
 function removeDefaults<T>(object: T, defaults: T): T {
