@@ -16,6 +16,8 @@ import (
 
 const promFlavorCacheLifetime = time.Hour
 
+const promBuildInfoMaxBytes = 64 * 1024
+
 type memoPrometheusFlavor struct {
 	variants map[string]int64
 
@@ -155,10 +157,17 @@ func (s *Service) detectPrometheusVariant(ctx context.Context, ds *datasources.D
 		return "unknown", nil
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	// The datasource URL is user-controlled and the transport has already
+	// decoded any Content-Encoding, so the read must be capped here rather
+	// than relying on the dataproxy response_limit, which defaults to 0.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, promBuildInfoMaxBytes))
 	if err != nil {
 		s.log.Error("Failed to read Prometheus build info", "error", err)
 		return "", err
+	}
+	if len(body) >= promBuildInfoMaxBytes {
+		s.log.Debug("Prometheus build info response too large", "limit", promBuildInfoMaxBytes)
+		return "unknown", nil
 	}
 
 	bi := &buildInfo{}
