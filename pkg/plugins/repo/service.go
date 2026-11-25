@@ -58,7 +58,21 @@ func (m *Manager) GetPluginArchive(ctx context.Context, pluginID, version string
 		return nil, err
 	}
 
-	return m.client.Download(ctx, dlOpts.URL, dlOpts.Checksum, compatOpts)
+	return m.GetPluginArchiveByInfo(ctx, pluginID, dlOpts, compatOpts)
+}
+
+// GetPluginArchiveByInfo fetches the archive described by `info`, as returned by GetPluginArchiveInfo,
+// and rejects it unless it matches the catalog checksum in `info`.
+func (m *Manager) GetPluginArchiveByInfo(ctx context.Context, pluginID string, info *PluginArchiveInfo, compatOpts CompatOpts) (*PluginArchive, error) {
+	if info == nil || info.Checksum == "" {
+		version := ""
+		if info != nil {
+			version = info.Version
+		}
+		return nil, ErrChecksumMissing(pluginID, version)
+	}
+
+	return m.client.Download(ctx, info.URL, info.Checksum, compatOpts)
 }
 
 // GetPluginArchiveByURL fetches the requested plugin archive from the provided `pluginZipURL`

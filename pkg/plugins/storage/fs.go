@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -376,6 +377,54 @@ func extractFile(root *os.Root, file *zip.File, name string) (err error) {
 
 	_, err = io.Copy(dst, src)
 	return err
+}
+
+// ArchivePluginJSON reads the plugin.json that Extract would install from pluginArchive, without
+// writing anything. A manifest path claimed by more than one member, or by something other than a
+// regular file, is rejected: which content ends up on disk would then depend on extraction order.
+// Extract still reads the manifest back from disk, so callers must check its result as well.
+func ArchivePluginJSON(pluginArchive *zip.ReadCloser, pluginID string, dirNameFunc DirNameGeneratorFunc) (plugins.JSONData, error) {
+	pluginDirName := dirNameFunc(pluginID)
+	rootManifest := pluginDirName + "/plugin.json"
+	distManifest := pluginDirName + "/dist/plugin.json"
+
+	var root, dist *zip.File
+	for _, zf := range pluginArchive.File {
+		var slot **zip.File
+		switch path.Clean(removeGitBuildFromName(zf.Name, pluginDirName)) {
+		case rootManifest:
+			slot = &root
+		case distManifest:
+			slot = &dist
+		default:
+			continue
+		}
+		if *slot != nil {
+			return plugins.JSONData{}, fmt.Errorf("archive contains more than one plugin.json for %s", pluginID)
+		}
+		if !zf.Mode().IsRegular() {
+			return plugins.JSONData{}, fmt.Errorf("archive member %q is not a regular file", zf.Name)
+		}
+		*slot = zf
+	}
+
+	manifest := root
+	if manifest == nil {
+		manifest = dist
+	}
+	if manifest == nil {
+		return plugins.JSONData{}, fmt.Errorf("could not find plugin.json or dist/plugin.json in the archive for %s", pluginID)
+	}
+
+	rc, err := manifest.Open()
+	if err != nil {
+		return plugins.JSONData{}, fmt.Errorf("%v: %w", "failed to read plugin.json from archive", err)
+	}
+	defer func() {
+		_ = rc.Close()
+	}()
+
+	return plugins.ReadPluginJSON(rc)
 }
 
 func removeGitBuildFromName(filename, pluginID string) string {

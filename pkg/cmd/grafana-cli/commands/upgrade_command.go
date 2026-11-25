@@ -31,11 +31,15 @@ func upgradeCommand(c utils.CommandLine) error {
 	}
 
 	if shouldUpgrade(localPlugin, plugin) {
-		if err = uninstallPlugin(ctx, pluginID, c); err != nil {
-			return fmt.Errorf("failed to remove plugin '%s': %w", pluginID, err)
+		opts := newInstallPluginOpts(c)
+		opts.beforeExtract = func() error {
+			if err := uninstallPlugin(ctx, pluginID, c); err != nil {
+				return fmt.Errorf("failed to remove plugin '%s': %w", pluginID, err)
+			}
+			return nil
 		}
 
-		err = installPlugin(ctx, pluginID, "", newInstallPluginOpts(c))
+		err = installPlugin(ctx, pluginID, "", opts)
 		if err == nil {
 			logRestartNotice()
 		}

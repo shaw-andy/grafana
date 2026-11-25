@@ -49,10 +49,16 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 			},
 		}
 
+		v1Info := &repo.PluginArchiveInfo{URL: "https://grafanaplugins.com/v1", Version: v1, Checksum: "v1-checksum"}
 		pluginRepo := &pluginfakes.FakePluginRepo{
-			GetPluginArchiveFunc: func(_ context.Context, id, version string, _ repo.CompatOpts) (*repo.PluginArchive, error) {
+			GetPluginArchiveInfoFunc: func(_ context.Context, id, version string, _ repo.CompatOpts) (*repo.PluginArchiveInfo, error) {
 				require.Equal(t, pluginID, id)
 				require.Equal(t, v1, version)
+				return v1Info, nil
+			},
+			GetPluginArchiveByInfoFunc: func(_ context.Context, id string, info *repo.PluginArchiveInfo, _ repo.CompatOpts) (*repo.PluginArchive, error) {
+				require.Equal(t, pluginID, id)
+				require.Equal(t, v1Info, info)
 				return &repo.PluginArchive{
 					File: mockZipV1,
 				}, nil
@@ -110,23 +116,23 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 				plugin.Info.Version = v2
 			})
 
-			mockZipV2 := &zip.ReadCloser{Reader: zip.Reader{File: []*zip.File{{
-				FileHeader: zip.FileHeader{Name: zipNameV2},
-			}}}}
+			mockZipV2 := testPluginZip(t, pluginID, v2)
 			loader.LoadFunc = func(ctx context.Context, src plugins.PluginSource) ([]*plugins.Plugin, error) {
 				require.Equal(t, plugins.ClassExternal, src.PluginClass(ctx))
 				return []*plugins.Plugin{pluginV2}, nil
 			}
+			v2Info := &repo.PluginArchiveInfo{URL: "https://grafanaplugins.com", Version: v2, Checksum: "v2-checksum"}
 			pluginRepo.GetPluginArchiveInfoFunc = func(_ context.Context, _, _ string, _ repo.CompatOpts) (*repo.PluginArchiveInfo, error) {
-				return &repo.PluginArchiveInfo{
-					URL: "https://grafanaplugins.com",
-				}, nil
+				return v2Info, nil
 			}
-			pluginRepo.GetPluginArchiveByURLFunc = func(_ context.Context, pluginZipURL string, _ repo.CompatOpts) (*repo.PluginArchive, error) {
-				require.Equal(t, "https://grafanaplugins.com", pluginZipURL)
+			pluginRepo.GetPluginArchiveByInfoFunc = func(_ context.Context, _ string, info *repo.PluginArchiveInfo, _ repo.CompatOpts) (*repo.PluginArchive, error) {
+				require.Equal(t, v2Info, info)
 				return &repo.PluginArchive{
 					File: mockZipV2,
 				}, nil
+			}
+			pluginRepo.GetPluginArchiveByURLFunc = func(_ context.Context, _ string, _ repo.CompatOpts) (*repo.PluginArchive, error) {
+				return nil, errors.New("a catalog update must not download without the catalog checksum")
 			}
 			fs.ExtractFunc = func(_ context.Context, pluginID string, _ storage.DirNameGeneratorFunc, z *zip.ReadCloser) (*storage.ExtractedPluginArchive, error) {
 				require.Equal(t, pluginV1.ID, pluginID)
@@ -254,7 +260,7 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 		}
 
 		pluginRepo := &pluginfakes.FakePluginRepo{
-			GetPluginArchiveFunc: func(_ context.Context, id, version string, _ repo.CompatOpts) (*repo.PluginArchive, error) {
+			GetPluginArchiveByInfoFunc: func(_ context.Context, id string, _ *repo.PluginArchiveInfo, _ repo.CompatOpts) (*repo.PluginArchive, error) {
 				return &repo.PluginArchive{File: &zip.ReadCloser{Reader: zip.Reader{File: []*zip.File{{
 					FileHeader: zip.FileHeader{Name: fmt.Sprintf("%s.zip", id)},
 				}}}}}, nil
@@ -311,7 +317,7 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 		}
 
 		pluginRepo := &pluginfakes.FakePluginRepo{
-			GetPluginArchiveFunc: func(_ context.Context, id, version string, _ repo.CompatOpts) (*repo.PluginArchive, error) {
+			GetPluginArchiveByInfoFunc: func(_ context.Context, id string, _ *repo.PluginArchiveInfo, _ repo.CompatOpts) (*repo.PluginArchive, error) {
 				return &repo.PluginArchive{File: &zip.ReadCloser{Reader: zip.Reader{File: []*zip.File{{
 					FileHeader: zip.FileHeader{Name: fmt.Sprintf("%s.zip", id)},
 				}}}}}, nil
@@ -365,7 +371,7 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 		}
 
 		pluginRepo := &pluginfakes.FakePluginRepo{
-			GetPluginArchiveFunc: func(_ context.Context, id, version string, _ repo.CompatOpts) (*repo.PluginArchive, error) {
+			GetPluginArchiveByInfoFunc: func(_ context.Context, id string, _ *repo.PluginArchiveInfo, _ repo.CompatOpts) (*repo.PluginArchive, error) {
 				return &repo.PluginArchive{File: &zip.ReadCloser{Reader: zip.Reader{File: []*zip.File{{
 					FileHeader: zip.FileHeader{Name: fmt.Sprintf("%s.zip", id)},
 				}}}}}, nil
@@ -423,7 +429,7 @@ func TestPluginManager_Add_Remove(t *testing.T) {
 					FileHeader: zip.FileHeader{Name: "parent-plugin.zip"},
 				}}}}}, nil
 			},
-			GetPluginArchiveFunc: func(_ context.Context, id, version string, _ repo.CompatOpts) (*repo.PluginArchive, error) {
+			GetPluginArchiveByInfoFunc: func(_ context.Context, id string, _ *repo.PluginArchiveInfo, _ repo.CompatOpts) (*repo.PluginArchive, error) {
 				catalogMethodCalled = true
 				require.Equal(t, depPluginID, id, "Catalog method should only be called for dependency plugin")
 				return &repo.PluginArchive{File: &zip.ReadCloser{Reader: zip.Reader{File: []*zip.File{{
@@ -486,6 +492,26 @@ func createPlugin(t *testing.T, pluginID string, class plugins.Class, managed, b
 	}
 
 	return p
+}
+
+func testPluginZip(t *testing.T, pluginID, version string) *zip.ReadCloser {
+	t.Helper()
+
+	zipPath := filepath.Join(t.TempDir(), "plugin.zip")
+	f, err := os.Create(zipPath) // nolint:gosec
+	require.NoError(t, err)
+	zw := zip.NewWriter(f)
+	w, err := zw.Create(pluginID + "/plugin.json")
+	require.NoError(t, err)
+	_, err = fmt.Fprintf(w, `{"id":%q,"name":"Test","type":"panel","info":{"version":%q}}`, pluginID, version)
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+	require.NoError(t, f.Close())
+
+	rc, err := zip.OpenReader(zipPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rc.Close() })
+	return rc
 }
 
 func testCompatOpts() plugins.AddOpts {

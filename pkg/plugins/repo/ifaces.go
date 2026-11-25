@@ -12,6 +12,8 @@ type Service interface {
 	GetPluginArchive(ctx context.Context, pluginID, version string, opts CompatOpts) (*PluginArchive, error)
 	// GetPluginArchiveByURL fetches the requested plugin from the specified URL.
 	GetPluginArchiveByURL(ctx context.Context, archiveURL string, opts CompatOpts) (*PluginArchive, error)
+	// GetPluginArchiveByInfo fetches the archive described by info and verifies it against info.Checksum.
+	GetPluginArchiveByInfo(ctx context.Context, pluginID string, info *PluginArchiveInfo, opts CompatOpts) (*PluginArchive, error)
 	// GetPluginArchiveInfo fetches information needed for downloading the requested plugin.
 	GetPluginArchiveInfo(ctx context.Context, pluginID, version string, opts CompatOpts) (*PluginArchiveInfo, error)
 	// PluginVersion will return plugin version based on the requested information.

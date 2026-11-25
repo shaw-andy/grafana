@@ -234,10 +234,11 @@ func (f *FakePluginRegistry) Remove(_ context.Context, id, _ string) error {
 }
 
 type FakePluginRepo struct {
-	GetPluginArchiveFunc      func(_ context.Context, pluginID, version string, _ repo.CompatOpts) (*repo.PluginArchive, error)
-	GetPluginArchiveByURLFunc func(_ context.Context, archiveURL string, _ repo.CompatOpts) (*repo.PluginArchive, error)
-	GetPluginArchiveInfoFunc  func(_ context.Context, pluginID, version string, _ repo.CompatOpts) (*repo.PluginArchiveInfo, error)
-	PluginVersionFunc         func(_ context.Context, pluginID, version string, compatOpts repo.CompatOpts) (repo.VersionData, error)
+	GetPluginArchiveFunc       func(_ context.Context, pluginID, version string, _ repo.CompatOpts) (*repo.PluginArchive, error)
+	GetPluginArchiveByURLFunc  func(_ context.Context, archiveURL string, _ repo.CompatOpts) (*repo.PluginArchive, error)
+	GetPluginArchiveByInfoFunc func(_ context.Context, pluginID string, info *repo.PluginArchiveInfo, _ repo.CompatOpts) (*repo.PluginArchive, error)
+	GetPluginArchiveInfoFunc   func(_ context.Context, pluginID, version string, _ repo.CompatOpts) (*repo.PluginArchiveInfo, error)
+	PluginVersionFunc          func(_ context.Context, pluginID, version string, compatOpts repo.CompatOpts) (repo.VersionData, error)
 }
 
 // GetPluginArchive fetches the requested plugin archive.
@@ -253,6 +254,15 @@ func (r *FakePluginRepo) GetPluginArchive(ctx context.Context, pluginID, version
 func (r *FakePluginRepo) GetPluginArchiveByURL(ctx context.Context, archiveURL string, opts repo.CompatOpts) (*repo.PluginArchive, error) {
 	if r.GetPluginArchiveByURLFunc != nil {
 		return r.GetPluginArchiveByURLFunc(ctx, archiveURL, opts)
+	}
+
+	return &repo.PluginArchive{}, nil
+}
+
+// GetPluginArchiveByInfo fetches the plugin archive described by info.
+func (r *FakePluginRepo) GetPluginArchiveByInfo(ctx context.Context, pluginID string, info *repo.PluginArchiveInfo, opts repo.CompatOpts) (*repo.PluginArchive, error) {
+	if r.GetPluginArchiveByInfoFunc != nil {
+		return r.GetPluginArchiveByInfoFunc(ctx, pluginID, info, opts)
 	}
 
 	return &repo.PluginArchive{}, nil
