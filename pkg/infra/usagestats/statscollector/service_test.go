@@ -378,6 +378,11 @@ func createService(t testing.TB, cfg *setting.Cfg, store db.DB, statsService sta
 		opt(o)
 	}
 
+	provider := o.httpClientProvider
+	if provider == nil {
+		provider = httpclient.NewProvider(sdkhttpclient.ProviderOptions{Middlewares: []sdkhttpclient.Middleware{}})
+	}
+
 	return ProvideService(
 		&usagestats.UsageStatsMock{},
 		&validator.FakeUsageStatsValidator{},
@@ -388,14 +393,15 @@ func createService(t testing.TB, cfg *setting.Cfg, store db.DB, statsService sta
 		&pluginstore.FakePluginStore{},
 		featuremgmt.WithManager("feature1", "feature2"),
 		o.datasources,
-		httpclient.NewProvider(sdkhttpclient.ProviderOptions{Middlewares: []sdkhttpclient.Middleware{}}),
+		provider,
 		sandbox.ProvideService(cfg),
 		&mockAdvisor{},
 	)
 }
 
 type serviceOptions struct {
-	datasources datasources.DataSourceService
+	datasources        datasources.DataSourceService
+	httpClientProvider httpclient.Provider
 }
 
 func withDatasources(ds datasources.DataSourceService) func(*serviceOptions) {
