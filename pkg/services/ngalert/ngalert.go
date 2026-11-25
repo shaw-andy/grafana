@@ -387,7 +387,7 @@ func (ng *AlertNG) init() error {
 	evalFactory := eval.NewEvaluatorFactory(ng.Cfg.UnifiedAlerting, ng.DataSourceCache, ng.ExpressionService)
 	conditionValidator := eval.NewConditionValidator(ng.DataSourceCache, ng.ExpressionService, ng.pluginsStore)
 
-	recordingWriter, err := createRecordingWriter(ng.Cfg.UnifiedAlerting.RecordingRules, ng.httpClientProvider, ng.DataSourceService, ng.pluginContextProvider, clk, ng.Metrics.GetRemoteWriterMetrics())
+	recordingWriter, err := createRecordingWriter(ng.Cfg.UnifiedAlerting.RecordingRules, ng.Cfg.DefaultAllowRecordingRulesTargetAlertsUIToggle, ng.httpClientProvider, ng.DataSourceService, ng.pluginContextProvider, clk, ng.Metrics.GetRemoteWriterMetrics())
 	if err != nil {
 		return fmt.Errorf("failed to initialize recording writer: %w", err)
 	}
@@ -905,7 +905,8 @@ func configureHistorianBackend(
 			return nil, fmt.Errorf("invalid remote prometheus configuration: %w", err)
 		}
 		writerCfg := writer.DatasourceWriterConfig{
-			Timeout: cfg.PrometheusWriteTimeout,
+			Timeout:                    cfg.PrometheusWriteTimeout,
+			IgnoreRecordingRulesTarget: true,
 		}
 		logCtx := log.WithContextualAttributes(ctx, []any{"backend", "prometheus"})
 		prometheusBackendLogger := log.New("ngalert.state.historian").FromContext(logCtx)
@@ -952,14 +953,15 @@ func configureNotificationHistorian(
 	return nh, nil
 }
 
-func createRecordingWriter(settings setting.RecordingRuleSettings, httpClientProvider httpclient.Provider, datasourceService datasources.DataSourceService, pluginContextProvider *plugincontext.Provider, clock clock.Clock, m *metrics.RemoteWriter) (schedule.RecordingWriter, error) {
+func createRecordingWriter(settings setting.RecordingRuleSettings, defaultAllowTarget bool, httpClientProvider httpclient.Provider, datasourceService datasources.DataSourceService, pluginContextProvider *plugincontext.Provider, clock clock.Clock, m *metrics.RemoteWriter) (schedule.RecordingWriter, error) {
 	logger := log.New("ngalert.writer")
 
 	if settings.Enabled {
 		cfg := writer.DatasourceWriterConfig{
-			Timeout:              settings.Timeout,
-			CustomHeaders:        settings.CustomHeaders,
-			DefaultDatasourceUID: settings.DefaultDatasourceUID,
+			Timeout:                       settings.Timeout,
+			CustomHeaders:                 settings.CustomHeaders,
+			DefaultDatasourceUID:          settings.DefaultDatasourceUID,
+			DenyUnsetRecordingRulesTarget: !defaultAllowTarget,
 		}
 
 		logger.Info("Setting up remote write using data sources",

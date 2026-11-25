@@ -90,6 +90,15 @@ func (ds *DataSource) IsSecureSocksDSProxyEnabled() bool {
 	return *ds.isSecureSocksDSProxyEnabled
 }
 
+// AllowedAsRecordingRulesTarget reports whether Grafana-managed recording rules may write to
+// the data source. defaultAllow applies when jsonData holds no boolean allowAsRecordingRulesTarget.
+func (ds *DataSource) AllowedAsRecordingRulesTarget(defaultAllow bool) bool {
+	if allow, ok := ds.JsonDataMap()["allowAsRecordingRulesTarget"].(bool); ok {
+		return allow
+	}
+	return defaultAllow
+}
+
 // JsonDataMap returns JsonData as a map[string]any, or empty map if unset
 func (ds *DataSource) JsonDataMap() map[string]any {
 	def := map[string]any{}

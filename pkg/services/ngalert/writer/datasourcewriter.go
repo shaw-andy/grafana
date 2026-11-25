@@ -73,7 +73,17 @@ type DatasourceWriterConfig struct {
 	// CustomHeaders is a map of optional custom HTTP headers
 	// to include in recording rule write requests.
 	CustomHeaders map[string]string
+
+	// DenyUnsetRecordingRulesTarget refuses data sources whose jsonData does not set
+	// allowAsRecordingRulesTarget. It is true when default_allow_recording_rules_target_alerts_ui_toggle is false.
+	DenyUnsetRecordingRulesTarget bool
+
+	// IgnoreRecordingRulesTarget skips the allowAsRecordingRulesTarget check. Only writers
+	// whose target is fixed by server configuration, not by alert rules, may set it.
+	IgnoreRecordingRulesTarget bool
 }
+
+var ErrRecordingRulesTargetNotAllowed = errors.New("data source is not allowed as a recording rules target")
 
 type PluginContextProvider interface {
 	GetWithDataSource(ctx context.Context, pluginID string, user identity.Requester, ds *datasources.DataSource) (backend.PluginContext, error)
@@ -207,6 +217,12 @@ func (w *DatasourceWriter) makeWriter(ctx context.Context, orgID int64, dsUID st
 	if !supportedRemoteWriteTypes[ds.Type] {
 		return nil, fmt.Errorf("can only write to data sources of type prometheus "+
 			"or amazon managed prometheus, but got %q", ds.Type)
+	}
+
+	// Everything below must be derived from this ds value: looking the data source up
+	// again could return a different object than the one checked here.
+	if !w.cfg.IgnoreRecordingRulesTarget && !ds.AllowedAsRecordingRulesTarget(!w.cfg.DenyUnsetRecordingRulesTarget) {
+		return nil, fmt.Errorf("%w: %q", ErrRecordingRulesTargetNotAllowed, dsUID)
 	}
 
 	is, err := adapters.ModelToInstanceSettings(ds, w.decrypt)
