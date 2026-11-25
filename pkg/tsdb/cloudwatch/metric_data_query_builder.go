@@ -91,21 +91,22 @@ func buildSearchExpression(query *models.CloudWatchQuery, stat string) string {
 		}
 	}
 
-	searchTerm := fmt.Sprintf(`MetricName="%s"`, query.MetricName)
 	keys := make([]string, 0, len(knownDimensions))
 	for k := range knownDimensions {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	searchTerms := make([]string, 0, len(keys)+1)
+	searchTerms = append(searchTerms, fmt.Sprintf(`MetricName="%s"`, query.MetricName))
 	for _, key := range keys {
 		values := escapeQuotes(knownDimensions[key])
 		valueExpression := join(values, " OR ", `"`, `"`)
 		if len(knownDimensions[key]) > 1 {
 			valueExpression = fmt.Sprintf(`(%s)`, valueExpression)
 		}
-		keyFilter := fmt.Sprintf(`"%s"=%s`, key, valueExpression)
-		searchTerm = appendSearch(searchTerm, keyFilter)
+		searchTerms = append(searchTerms, fmt.Sprintf(`"%s"=%s`, key, valueExpression))
 	}
+	searchTerm := strings.Join(searchTerms, " ")
 
 	var account string
 	if query.AccountId != nil && *query.AccountId != "all" {
@@ -143,10 +144,12 @@ func buildSearchExpressionLabel(query *models.CloudWatchQuery) string {
 		}
 	}
 	sort.Strings(multiDims)
+	var sb strings.Builder
+	sb.WriteString(label)
 	for _, key := range multiDims {
-		label += fmt.Sprintf("%s${PROP('Dim.%s')}", keySeparator, key)
+		fmt.Fprintf(&sb, "%s${PROP('Dim.%s')}", keySeparator, key)
 	}
-	return label
+	return sb.String()
 }
 
 func escapeQuotes(arr []string) []string {
@@ -161,15 +164,17 @@ func escapeQuotes(arr []string) []string {
 }
 
 func join(arr []string, delimiter string, valuePrefix string, valueSuffix string) string {
-	result := ""
+	var sb strings.Builder
 	for index, value := range arr {
-		result += valuePrefix + value + valueSuffix
-		if index+1 != len(arr) {
-			result += delimiter
+		if index > 0 {
+			sb.WriteString(delimiter)
 		}
+		sb.WriteString(valuePrefix)
+		sb.WriteString(value)
+		sb.WriteString(valueSuffix)
 	}
 
-	return result
+	return sb.String()
 }
 
 func appendSearch(target string, value string) string {
