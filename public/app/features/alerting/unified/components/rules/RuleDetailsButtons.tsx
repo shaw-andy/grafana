@@ -13,6 +13,7 @@ import { Annotation } from '../../utils/constants';
 import { isCloudRulesSource } from '../../utils/datasource';
 import { createExploreLink } from '../../utils/misc';
 import { isFederatedRuleGroup, rulerRuleType } from '../../utils/rules';
+import { getExternalLinkHref } from '../../utils/url';
 
 interface Props {
   rule: CombinedRule;
@@ -55,7 +56,10 @@ const RuleDetailsButtons = ({ rule, rulesSource }: Props) => {
       </LinkButton>
     );
   }
-  if (rule.annotations[Annotation.runbookURL]) {
+  const runbookHref = rule.annotations[Annotation.runbookURL]
+    ? getExternalLinkHref(rule.annotations[Annotation.runbookURL])
+    : undefined;
+  if (runbookHref) {
     buttons.push(
       <LinkButton
         size="sm"
@@ -63,7 +67,7 @@ const RuleDetailsButtons = ({ rule, rulesSource }: Props) => {
         variant="primary"
         icon="book"
         target="_blank"
-        href={textUtil.sanitizeUrl(rule.annotations[Annotation.runbookURL])}
+        href={textUtil.sanitizeUrl(runbookHref)}
       >
         <Trans i18nKey="alerting.rule-details-buttons.view-runbook">View runbook</Trans>
       </LinkButton>
