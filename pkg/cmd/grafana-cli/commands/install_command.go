@@ -91,6 +91,9 @@ type pluginInstallOpts struct {
 	pluginURL string
 	pluginDir string
 	gcomToken string
+	// beforeExtract runs once the plugin's archive has been downloaded and verified, before anything is
+	// written to the plugins directory. It does not apply to dependencies.
+	beforeExtract func() error
 }
 
 func newInstallPluginOpts(c utils.CommandLine) pluginInstallOpts {
@@ -120,6 +123,9 @@ func doInstallPlugin(ctx context.Context, pluginID, version string, o pluginInst
 		installing[pluginID] = false
 	}()
 
+	beforeExtract := o.beforeExtract
+	o.beforeExtract = nil
+
 	// If a version is specified, check if it is already installed
 	if version != "" {
 		if p, ok := services.PluginVersionInstalled(pluginID, version, o.pluginDir); ok {
@@ -144,7 +150,9 @@ func doInstallPlugin(ctx context.Context, pluginID, version string, o pluginInst
 
 	var archive *repo.PluginArchive
 	var err error
-	if o.pluginURL != "" {
+	fromCatalog := o.pluginURL == ""
+	catalogVersion := ""
+	if !fromCatalog {
 		archive, err = repository.GetPluginArchiveByURL(ctx, o.pluginURL, compatOpts)
 		if err != nil {
 			return err
@@ -166,7 +174,24 @@ func doInstallPlugin(ctx context.Context, pluginID, version string, o pluginInst
 			return nil
 		}
 
-		if archive, err = repository.GetPluginArchiveByURL(ctx, archiveInfo.URL, compatOpts); err != nil {
+		if archive, err = repository.GetPluginArchiveByInfo(ctx, pluginID, archiveInfo, compatOpts); err != nil {
+			return err
+		}
+		catalogVersion = archiveInfo.Version
+
+		pluginJSON, err := storage.ArchivePluginJSON(archive.File, pluginID, storage.SimpleDirNameGeneratorFunc)
+		if err == nil {
+			err = checkCatalogArchive(pluginID, catalogVersion, pluginJSON.ID, pluginJSON.Info.Version)
+		}
+		if err != nil {
+			_ = archive.File.Close()
+			return err
+		}
+	}
+
+	if beforeExtract != nil {
+		if err = beforeExtract(); err != nil {
+			_ = archive.File.Close()
 			return err
 		}
 	}
@@ -175,6 +200,16 @@ func doInstallPlugin(ctx context.Context, pluginID, version string, o pluginInst
 	extractedArchive, err := pluginFs.Extract(ctx, pluginID, storage.SimpleDirNameGeneratorFunc, archive.File)
 	if err != nil {
 		return err
+	}
+
+	if fromCatalog {
+		// Extract reads the manifest back from disk, which is what Grafana will load.
+		if err = checkCatalogArchive(pluginID, catalogVersion, extractedArchive.ID, extractedArchive.Version); err != nil {
+			if rmErr := os.RemoveAll(extractedArchive.Path); rmErr != nil {
+				services.Logger.Warnf("Failed to remove rejected plugin archive %s: %s", extractedArchive.Path, rmErr)
+			}
+			return err
+		}
 	}
 
 	for _, dep := range extractedArchive.Dependencies {
@@ -187,6 +222,16 @@ func doInstallPlugin(ctx context.Context, pluginID, version string, o pluginInst
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func checkCatalogArchive(pluginID, catalogVersion, archiveID, archiveVersion string) error {
+	if archiveID != pluginID {
+		return fmt.Errorf("plugin archive for %s contains plugin %q", pluginID, archiveID)
+	}
+	if archiveVersion != catalogVersion {
+		return fmt.Errorf("plugin archive for %s v%s contains version %q", pluginID, catalogVersion, archiveVersion)
 	}
 	return nil
 }

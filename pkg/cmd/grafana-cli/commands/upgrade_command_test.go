@@ -15,7 +15,7 @@ import (
 )
 
 func TestUpgradeCommand(t *testing.T) {
-	t.Run("Plugin is removed even if upgrade fails", func(t *testing.T) {
+	t.Run("Plugin is kept if the upgrade download fails", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		pluginID := "test-upgrade-plugin"
 		pluginDir := filepath.Join(tmpDir, pluginID)
@@ -54,7 +54,7 @@ func TestUpgradeCommand(t *testing.T) {
 			}
 
 			// For any other request (like installation), return 500 to cause the upgrade to fail
-			// after the removal attempt, which is what we want to test
+			// before the replacement archive is available
 			w.WriteHeader(http.StatusInternalServerError)
 			_, err = w.Write([]byte("Server error"))
 			require.NoError(t, err)
@@ -72,9 +72,9 @@ func TestUpgradeCommand(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "API returned invalid status: 500 Internal Server Error")
 
-		// Verify plugin directory was removed during the removal step
-		_, err = os.Stat(pluginDir)
-		require.True(t, os.IsNotExist(err))
+		got, err := os.ReadFile(filepath.Join(pluginDir, "plugin.json")) // nolint:gosec
+		require.NoError(t, err)
+		require.Equal(t, pluginJSON, string(got))
 	})
 }
 
