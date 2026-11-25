@@ -1,6 +1,5 @@
 import { Fragment, type JSX } from 'react';
 
-import { textUtil } from '@grafana/data';
 import { Trans } from '@grafana/i18n';
 import { useReturnToPrevious } from '@grafana/runtime';
 import { Button, LinkButton, Stack } from '@grafana/ui';
@@ -8,6 +7,7 @@ import { type CombinedRule, type RulesSource } from 'app/types/unified-alerting'
 
 import { AlertRuleAction, useAlertRuleAbility } from '../../hooks/useAbilities';
 import { useStateHistoryModal } from '../../hooks/useStateHistoryModal';
+import { getAnnotationLinkHref, isLinkableDashboardUID } from '../../utils/annotations';
 import { useIsStateHistoryAvailable } from '../../utils/config';
 import { Annotation } from '../../utils/constants';
 import { isCloudRulesSource } from '../../utils/datasource';
@@ -55,54 +55,46 @@ const RuleDetailsButtons = ({ rule, rulesSource }: Props) => {
       </LinkButton>
     );
   }
-  if (rule.annotations[Annotation.runbookURL]) {
+  const runbookHref = getAnnotationLinkHref(rule.annotations[Annotation.runbookURL]);
+  if (runbookHref) {
     buttons.push(
-      <LinkButton
-        size="sm"
-        key="runbook"
-        variant="primary"
-        icon="book"
-        target="_blank"
-        href={textUtil.sanitizeUrl(rule.annotations[Annotation.runbookURL])}
-      >
+      <LinkButton size="sm" key="runbook" variant="primary" icon="book" target="_blank" href={runbookHref}>
         <Trans i18nKey="alerting.rule-details-buttons.view-runbook">View runbook</Trans>
       </LinkButton>
     );
   }
-  if (rule.annotations[Annotation.dashboardUID]) {
-    const dashboardUID = rule.annotations[Annotation.dashboardUID];
-    if (dashboardUID) {
+  const dashboardUID = rule.annotations[Annotation.dashboardUID];
+  if (isLinkableDashboardUID(dashboardUID)) {
+    buttons.push(
+      <LinkButton
+        size="sm"
+        key="dashboard"
+        variant="primary"
+        icon="apps"
+        href={`d/${encodeURIComponent(dashboardUID)}`}
+        onClick={() => {
+          setReturnToPrevious(rule.name);
+        }}
+      >
+        <Trans i18nKey="alerting.rule-details-buttons.go-to-dashboard">Go to dashboard</Trans>
+      </LinkButton>
+    );
+    const panelId = rule.annotations[Annotation.panelID];
+    if (panelId) {
       buttons.push(
         <LinkButton
           size="sm"
-          key="dashboard"
+          key="panel"
           variant="primary"
           icon="apps"
-          href={`d/${encodeURIComponent(dashboardUID)}`}
+          href={`d/${encodeURIComponent(dashboardUID)}?viewPanel=${encodeURIComponent(panelId)}`}
           onClick={() => {
             setReturnToPrevious(rule.name);
           }}
         >
-          <Trans i18nKey="alerting.rule-details-buttons.go-to-dashboard">Go to dashboard</Trans>
+          <Trans i18nKey="alerting.rule-details-buttons.go-to-panel">Go to panel</Trans>
         </LinkButton>
       );
-      const panelId = rule.annotations[Annotation.panelID];
-      if (panelId) {
-        buttons.push(
-          <LinkButton
-            size="sm"
-            key="panel"
-            variant="primary"
-            icon="apps"
-            href={`d/${encodeURIComponent(dashboardUID)}?viewPanel=${encodeURIComponent(panelId)}`}
-            onClick={() => {
-              setReturnToPrevious(rule.name);
-            }}
-          >
-            <Trans i18nKey="alerting.rule-details-buttons.go-to-panel">Go to panel</Trans>
-          </LinkButton>
-        );
-      }
     }
   }
 

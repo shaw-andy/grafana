@@ -9,6 +9,7 @@ import { LoadingPlaceholder, Stack, Text, TextLink, Tooltip, useStyles2 } from '
 
 import { AlertEnrichments } from '../components/AlertEnrichments';
 import { StateTag } from '../components/StateTag';
+import { getAnnotationLinkHref } from '../utils/annotations';
 
 type AlertEntry = CreateNotificationsqueryalertsNotificationEntryAlert;
 
@@ -254,19 +255,11 @@ function AlertCard({ alert, groupLabels }: AlertCardProps) {
   );
 }
 
-function isUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
 function AnnotationValue({ value }: { value: string }) {
-  if (isUrl(value)) {
+  const linkHref = getAnnotationLinkHref(value);
+  if (linkHref) {
     return (
-      <TextLink href={value} external inline={false}>
+      <TextLink href={linkHref} external inline={false}>
         {value}
       </TextLink>
     );

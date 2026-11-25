@@ -46,6 +46,7 @@ import { useReturnTo } from '../../hooks/useReturnTo';
 import { getAlertRulesNavId } from '../../navigation/useAlertRulesNav';
 import { PluginOriginBadge } from '../../plugins/PluginOriginBadge';
 import { normalizeHealth, normalizeState } from '../../rule-list/components/util';
+import { getAnnotationLinkHref, isLinkableDashboardUID } from '../../utils/annotations';
 import { useIsStateHistoryAvailable } from '../../utils/config';
 import { Annotation } from '../../utils/constants';
 import {
@@ -209,7 +210,8 @@ const createMetadata = (rule: CombinedRule, styles: ReturnType<typeof getStyles>
   const metadata: PageInfoItem[] = [];
 
   const runbookUrl = annotations[Annotation.runbookURL];
-  const dashboardUID = annotations[Annotation.dashboardUID];
+  const annotatedDashboardUID = annotations[Annotation.dashboardUID];
+  const dashboardUID = isLinkableDashboardUID(annotatedDashboardUID) ? annotatedDashboardUID : undefined;
   const panelID = annotations[Annotation.panelID];
 
   const hasDashboardAndPanel = dashboardUID && panelID;
@@ -233,8 +235,9 @@ const createMetadata = (rule: CombinedRule, styles: ReturnType<typeof getStyles>
   if (runbookUrl) {
     /* TODO instead of truncating the string, we should use flex and text overflow properly to allow it to take up all of the horizontal space available */
     const truncatedUrl = truncate(runbookUrl, { length: 42 });
-    const valueToAdd = isValidRunbookURL(runbookUrl) ? (
-      <TextLink variant="bodySmall" className={styles.url} href={runbookUrl} external>
+    const runbookHref = getAnnotationLinkHref(runbookUrl);
+    const valueToAdd = runbookHref ? (
+      <TextLink variant="bodySmall" className={styles.url} href={runbookHref} external>
         {truncatedUrl}
       </TextLink>
     ) : (
@@ -584,20 +587,6 @@ const getStyles = (theme: GrafanaTheme2) => ({
     },
   }),
 });
-
-function isValidRunbookURL(url: string) {
-  const isRelative = url.startsWith('/');
-  let isAbsolute = false;
-
-  try {
-    new URL(url);
-    isAbsolute = true;
-  } catch (_) {
-    return false;
-  }
-
-  return isRelative || isAbsolute;
-}
 
 function getNamespaceString(rule: CombinedRule): string {
   // try rule.namespace.uid
