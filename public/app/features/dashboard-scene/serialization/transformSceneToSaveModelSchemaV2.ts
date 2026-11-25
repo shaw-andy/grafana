@@ -20,6 +20,7 @@ import {
 import { type DataSourceRef } from '@grafana/schema';
 import { sortedDeepCloneWithoutNulls } from 'app/core/utils/object';
 import { getPanelDataFrames } from 'app/features/dashboard/components/HelpWizard/utils';
+import { removeRequestsFromPanelOptions } from 'app/features/dashboard/utils/snapshot';
 import { GrafanaQueryType } from 'app/plugins/datasource/grafana/types';
 import { MIXED_DATASOURCE_NAME } from 'app/plugins/datasource/mixed/MixedDataSource';
 
@@ -813,13 +814,31 @@ export function trimDashboardForSnapshot(title: string, time: TimeRange, dash: D
     }
   }
 
-  // Remove links from all panels
+  // Remove links and canvas requests from all panels
   spec.elements = Object.fromEntries(
-    Object.entries(spec.elements).map(([key, element]) => {
-      if ('links' in element) {
-        element.links = [];
+    Object.entries(spec.elements).map(([key, element]): [string, Element] => {
+      if (element.kind !== 'Panel') {
+        return [key, element];
       }
-      return [key, element];
+
+      const { vizConfig } = element.spec;
+      return [
+        key,
+        {
+          ...element,
+          spec: {
+            ...element.spec,
+            links: [],
+            vizConfig: {
+              ...vizConfig,
+              spec: {
+                ...vizConfig.spec,
+                options: removeRequestsFromPanelOptions(vizConfig.group, vizConfig.spec.options),
+              },
+            },
+          },
+        },
+      ];
     })
   );
 

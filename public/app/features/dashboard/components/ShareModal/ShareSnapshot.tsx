@@ -9,6 +9,7 @@ import { Button, ClipboardButton, Field, Input, LinkButton, Modal, Select, Spinn
 import { getTimeSrv } from 'app/features/dashboard/services/TimeSrv';
 import { type DashboardModel } from 'app/features/dashboard/state/DashboardModel';
 import { type PanelModel } from 'app/features/dashboard/state/PanelModel';
+import { removeRequestsFromPanelOptions } from 'app/features/dashboard/utils/snapshot';
 import { DashboardInteractions } from 'app/features/dashboard-scene/utils/interactions';
 
 import { getDashboardSnapshotSrv } from '../../services/SnapshotSrv';
@@ -148,12 +149,27 @@ export class ShareSnapshot extends PureComponent<Props, State> {
     // Remove links
     dash.links = [];
 
-    // remove panel queries & links
-    dash.panels.forEach((panel) => {
+    // snapshot single panel
+    if (panel) {
+      const singlePanel = panel.getSaveModel();
+      singlePanel.gridPos.w = 24;
+      singlePanel.gridPos.x = 0;
+      singlePanel.gridPos.y = 0;
+      singlePanel.gridPos.h = 20;
+      dash.panels = [singlePanel];
+    }
+
+    // remove panel queries, links & canvas requests, including panels inside collapsed rows
+    const scrubPanel = (panel: PanelModel) => {
       panel.targets = [];
       panel.links = [];
       panel.datasource = null;
-    });
+      panel.options = removeRequestsFromPanelOptions(panel.type, panel.options);
+      if (panel.type === 'row') {
+        panel.panels?.forEach(scrubPanel);
+      }
+    };
+    dash.panels.forEach(scrubPanel);
 
     // remove annotation queries
     const annotations = dash.annotations.list.filter((annotation) => annotation.enable);
@@ -182,16 +198,6 @@ export class ShareSnapshot extends PureComponent<Props, State> {
         variable.refresh = VariableRefresh.never;
       }
     });
-
-    // snapshot single panel
-    if (panel) {
-      const singlePanel = panel.getSaveModel();
-      singlePanel.gridPos.w = 24;
-      singlePanel.gridPos.x = 0;
-      singlePanel.gridPos.y = 0;
-      singlePanel.gridPos.h = 20;
-      dash.panels = [singlePanel];
-    }
 
     // cleanup snapshotData
     delete this.dashboard.snapshot;
