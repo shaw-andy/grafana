@@ -13,12 +13,20 @@ import (
 
 var varRegex = regexp.MustCompile(`(\$\{.+?\})`)
 var ErrDashboardInputMissing = errors.New("missing dashboard input variable")
+var ErrDashboardInputExpansionTooLarge = errors.New("dashboard input expansion too large")
+
+// maxInputExpansionBytes caps the total bytes input values may add to a
+// dashboard. It matches the apiserver request body limit; without it the output
+// grows as placeholder occurrences * value length and can exhaust memory.
+const maxInputExpansionBytes = 16 << 20
 
 type DashTemplateEvaluator struct {
 	template  *simplejson.Json
 	inputs    []dashboardimport.ImportDashboardInput
 	variables map[string]string
 	result    *simplejson.Json
+	remaining int
+	exceeded  bool
 }
 
 func NewDashTemplateEvaluator(template *simplejson.Json, inputs []dashboardimport.ImportDashboardInput) *DashTemplateEvaluator {
@@ -63,7 +71,14 @@ func (e *DashTemplateEvaluator) Eval() (*simplejson.Json, error) {
 		e.variables["${"+inputName+"}"] = input.Value
 	}
 
-	return simplejson.NewFromAny(e.evalObject(e.template)), nil
+	e.remaining = maxInputExpansionBytes
+	e.exceeded = false
+	result := e.evalObject(e.template)
+	if e.exceeded {
+		return nil, fmt.Errorf("dashboard import failed: %w: input values would add more than %d bytes", ErrDashboardInputExpansionTooLarge, maxInputExpansionBytes)
+	}
+
+	return simplejson.NewFromAny(result), nil
 }
 
 func (e *DashTemplateEvaluator) evalValue(source *simplejson.Json) any {
@@ -71,12 +86,20 @@ func (e *DashTemplateEvaluator) evalValue(source *simplejson.Json) any {
 
 	switch v := sourceValue.(type) {
 	case string:
+		if e.exceeded {
+			return v
+		}
 		interpolated := varRegex.ReplaceAllStringFunc(v, func(match string) string {
 			replacement, exists := e.variables[match]
-			if exists {
-				return replacement
+			if !exists || e.exceeded {
+				return match
 			}
-			return match
+			if len(replacement) > e.remaining {
+				e.exceeded = true
+				return match
+			}
+			e.remaining -= len(replacement)
+			return replacement
 		})
 		return interpolated
 	case bool:
