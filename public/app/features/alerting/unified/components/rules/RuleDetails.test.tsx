@@ -1,3 +1,4 @@
+import { screen } from '@testing-library/react';
 import { render, waitFor } from 'test/test-utils';
 import { byRole } from 'testing-library-selector';
 
@@ -8,6 +9,7 @@ import { setupMswServer } from 'app/features/alerting/unified/mockApi';
 import { useIsRuleEditable } from '../../hooks/useIsRuleEditable';
 import { getCloudRule, getGrafanaRule } from '../../mocks';
 import { mimirDataSource } from '../../mocks/server/configure';
+import { sessionActionHrefs } from '../../testSetup/sessionActionHref';
 
 import { RuleDetails } from './RuleDetails';
 
@@ -150,4 +152,30 @@ describe('RuleDetails state history button', () => {
 
     expect(ui.actionButtons.stateHistory.query()).not.toBeInTheDocument();
   });
+});
+
+describe('rule detail annotation session actions', () => {
+  const annotationUrls = [
+    `${window.location.origin}/logout`,
+    `${window.location.origin}/%6Cogout`,
+    `${window.location.origin}/profile/switch-org/2`,
+  ];
+
+  it.each(annotationUrls)(
+    'does not link summary or runbook annotations to a session action: %s',
+    async (annotationUrl) => {
+      mocks.useIsRuleEditable.mockReturnValue({ loading: false, isEditable: false });
+      const rule = getGrafanaRule({
+        annotations: {
+          summary: annotationUrl,
+          runbook_url: annotationUrl,
+        },
+      });
+
+      const { container } = render(<RuleDetails rule={rule} />);
+
+      expect(await screen.findAllByText(annotationUrl)).not.toHaveLength(0);
+      expect(sessionActionHrefs(container)).toEqual([]);
+    }
+  );
 });
