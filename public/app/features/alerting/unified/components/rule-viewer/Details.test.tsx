@@ -3,12 +3,13 @@ import { render, screen } from 'test/test-utils';
 import { setupMockServer } from '@grafana/test-utils/server';
 
 import { setupBackendSrv } from '../../mockApi';
-import { mockCombinedRule } from '../../mocks';
+import { mockCombinedRule, mockPromAlertingRule } from '../../mocks';
 import { alertingFactory } from '../../mocks/server/db';
 import { setupDataSources } from '../../testSetup/datasources';
+import { sessionActionHrefs } from '../../testSetup/sessionActionHref';
 
 import { RECEIVER_NAME, listContactPointsScenario } from './ContactPointLink.scenario';
-import { Details } from './Details';
+import { AnnotationValue, Details } from './Details';
 
 const server = setupMockServer();
 
@@ -127,6 +128,36 @@ describe('Details', () => {
       render(<Details rule={rule} />);
 
       expect(screen.queryByText('Notification configuration')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('annotation session actions', () => {
+    const annotationUrls = [
+      `${window.location.origin}/logout`,
+      `${window.location.origin}/%6Cogout`,
+      `${window.location.origin}/profile/switch-org/2`,
+      `${window.location.origin}/profile/switch-org/%32`,
+    ];
+
+    it.each(annotationUrls)('does not link an annotation value to a session action: %s', (annotationUrl) => {
+      const { container } = render(<AnnotationValue value={annotationUrl} />);
+
+      expect(screen.getByText(annotationUrl)).toBeInTheDocument();
+      expect(sessionActionHrefs(container)).toEqual([]);
+    });
+
+    it('passes a stored rule annotation through to the viewer without a session-action link', async () => {
+      const logoutUrl = `${window.location.origin}/logout`;
+      const rule = mockCombinedRule({
+        promRule: mockPromAlertingRule({
+          annotations: { summary: logoutUrl },
+        }),
+      });
+
+      const { container } = render(<Details rule={rule} />);
+
+      expect(await screen.findByText(logoutUrl)).toBeInTheDocument();
+      expect(sessionActionHrefs(container)).toEqual([]);
     });
   });
 });
