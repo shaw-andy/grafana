@@ -937,6 +937,7 @@ func TestPluginEnvVarsProvider_azureEnvVars(t *testing.T) {
 			Raw: ini.Empty(),
 			Azure: &azsettings.AzureSettings{
 				AzureAuthEnabled:        true,
+				ForwardSettingsPlugins:  []string{"grafana-azure-monitor-datasource"},
 				Cloud:                   azsettings.AzurePublic,
 				ManagedIdentityEnabled:  true,
 				ManagedIdentityClientId: "mock_managed_identity_client_id",
@@ -961,7 +962,7 @@ func TestPluginEnvVarsProvider_azureEnvVars(t *testing.T) {
 		require.NoError(t, err)
 
 		provider := NewEnvVarsProvider(pCfg, nil, &fakeSSOSettingsProvider{}, newTestMarketplaceLicensing(""))
-		envVars := provider.PluginEnvVars(context.Background(), &plugins.Plugin{})
+		envVars := provider.PluginEnvVars(context.Background(), &plugins.Plugin{JSONData: plugins.JSONData{ID: "grafana-azure-monitor-datasource"}})
 		assert.ElementsMatch(t, []string{"GF_VERSION=", "GFAZPL_AZURE_CLOUD=AzureCloud", "GFAZPL_AZURE_AUTH_ENABLED=true",
 			"GFAZPL_MANAGED_IDENTITY_ENABLED=true",
 			"GFAZPL_MANAGED_IDENTITY_CLIENT_ID=mock_managed_identity_client_id",
@@ -983,6 +984,7 @@ func TestPluginEnvVarsProvider_azureEnvVars(t *testing.T) {
 			Raw: ini.Empty(),
 			Azure: &azsettings.AzureSettings{
 				AzureAuthEnabled:        true,
+				ForwardSettingsPlugins:  []string{"grafana-azure-monitor-datasource"},
 				Cloud:                   azsettings.AzurePublic,
 				ManagedIdentityEnabled:  true,
 				ManagedIdentityClientId: "mock_managed_identity_client_id",
@@ -1009,7 +1011,7 @@ func TestPluginEnvVarsProvider_azureEnvVars(t *testing.T) {
 		provider := NewEnvVarsProvider(pCfg, nil, &fakeSSOSettingsProvider{
 			GetForProviderFunc: getAzureSSOSettings,
 		}, newTestMarketplaceLicensing(""))
-		envVars := provider.PluginEnvVars(context.Background(), &plugins.Plugin{})
+		envVars := provider.PluginEnvVars(context.Background(), &plugins.Plugin{JSONData: plugins.JSONData{ID: "grafana-azure-monitor-datasource"}})
 		assert.ElementsMatch(t, []string{"GF_VERSION=", "GFAZPL_AZURE_CLOUD=AzureCloud", "GFAZPL_AZURE_AUTH_ENABLED=true",
 			"GFAZPL_MANAGED_IDENTITY_ENABLED=true",
 			"GFAZPL_MANAGED_IDENTITY_CLIENT_ID=mock_managed_identity_client_id",
@@ -1034,6 +1036,7 @@ func TestPluginEnvVarsProvider_azureEnvVars(t *testing.T) {
 			Raw: ini.Empty(),
 			Azure: &azsettings.AzureSettings{
 				AzureAuthEnabled:        true,
+				ForwardSettingsPlugins:  []string{"grafana-azure-monitor-datasource"},
 				Cloud:                   azsettings.AzurePublic,
 				ManagedIdentityEnabled:  true,
 				ManagedIdentityClientId: "mock_managed_identity_client_id",
@@ -1068,7 +1071,7 @@ func TestPluginEnvVarsProvider_azureEnvVars(t *testing.T) {
 		provider := NewEnvVarsProvider(pCfg, nil, &fakeSSOSettingsProvider{
 			GetForProviderFunc: getAzureSSOSettings,
 		}, newTestMarketplaceLicensing(""))
-		envVars := provider.PluginEnvVars(context.Background(), &plugins.Plugin{})
+		envVars := provider.PluginEnvVars(context.Background(), &plugins.Plugin{JSONData: plugins.JSONData{ID: "grafana-azure-monitor-datasource"}})
 		assert.ElementsMatch(t, []string{"GF_VERSION=", "GFAZPL_AZURE_CLOUD=AzureCloud", "GFAZPL_AZURE_AUTH_ENABLED=true",
 			"GFAZPL_MANAGED_IDENTITY_ENABLED=true",
 			"GFAZPL_MANAGED_IDENTITY_CLIENT_ID=mock_managed_identity_client_id",

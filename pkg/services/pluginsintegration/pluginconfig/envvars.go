@@ -76,9 +76,7 @@ func (p *EnvVarsProvider) PluginEnvVars(ctx context.Context, plugin *plugins.Plu
 
 	hostEnv = append(hostEnv, p.awsEnvVars(plugin.PluginID())...)
 	hostEnv = append(hostEnv, p.secureSocksProxyEnvVars()...)
-	azureSettings := p.getAzureSettings()
-	hostEnv = append(hostEnv, azsettings.WriteToEnvStr(azureSettings)...)
-	hostEnv = append(hostEnv, p.azureHostEnvVars(azureSettings, plugin.PluginID())...)
+	hostEnv = append(hostEnv, p.azureEnvVars(plugin.PluginID())...)
 	hostEnv = append(hostEnv, p.tracingEnvVars(plugin)...)
 	hostEnv = append(hostEnv, p.pluginSettingsEnvVars(plugin.PluginID())...)
 
@@ -224,14 +222,20 @@ var azureWorkloadIdentityHostEnvVarNames = []string{
 	"AZURE_AUTHORITY_HOST",
 }
 
-func (p *EnvVarsProvider) azureHostEnvVars(azureSettings *azsettings.AzureSettings, pluginID string) []string {
-	if azureSettings == nil {
-		return nil
-	}
-	if !slices.Contains(azureSettings.ForwardSettingsPlugins, pluginID) {
+// azureEnvVars returns the Azure settings, including client secrets, and the Azure host
+// identity variables, but only for plugins in the Azure forward_settings_to_plugins list.
+func (p *EnvVarsProvider) azureEnvVars(pluginID string) []string {
+	configured := p.cfg.Azure
+	if configured == nil || !slices.Contains(configured.ForwardSettingsPlugins, pluginID) {
 		return nil
 	}
 
+	azureSettings := p.mergeSSOAzureSettings(configured)
+	variables := azsettings.WriteToEnvStr(azureSettings)
+	return append(variables, p.azureHostEnvVars(azureSettings)...)
+}
+
+func (p *EnvVarsProvider) azureHostEnvVars(azureSettings *azsettings.AzureSettings) []string {
 	var variables []string
 	if azureSettings.ManagedIdentityEnabled {
 		for _, envVarName := range azureManagedIdentityHostEnvVarNames {
@@ -332,11 +336,7 @@ func envVarNames(envVars []string) []string {
 	return names
 }
 
-func (p *EnvVarsProvider) getAzureSettings() *azsettings.AzureSettings {
-	azureSettings := p.cfg.Azure
-	if azureSettings == nil {
-		azureSettings = &azsettings.AzureSettings{}
-	}
+func (p *EnvVarsProvider) mergeSSOAzureSettings(azureSettings *azsettings.AzureSettings) *azsettings.AzureSettings {
 	azureAdSettings, err := p.ssoSettings.GetForProvider(context.Background(), social.AzureADProviderName)
 	if err != nil {
 		p.logger.Error("Failed to get SSO settings", "error", err)
