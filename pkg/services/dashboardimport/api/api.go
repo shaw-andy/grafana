@@ -80,6 +80,9 @@ func (api *ImportDashboardAPI) InterpolateDashboard(c *contextmodel.ReqContext) 
 
 	resp, err := api.dashboardImportService.InterpolateDashboard(c.Req.Context(), &req)
 	if err != nil {
+		if errors.Is(err, utils.ErrDashboardInputExpansionTooLarge) {
+			return response.Error(http.StatusBadRequest, err.Error(), err)
+		}
 		return response.Error(http.StatusInternalServerError, "failed to interpolate dashboard", err)
 	}
 
@@ -123,7 +126,7 @@ func (api *ImportDashboardAPI) ImportDashboard(c *contextmodel.ReqContext) respo
 	req.User = c.SignedInUser
 	resp, err := api.dashboardImportService.ImportDashboard(c.Req.Context(), &req)
 	if err != nil {
-		if errors.Is(err, utils.ErrDashboardInputMissing) {
+		if errors.Is(err, utils.ErrDashboardInputMissing) || errors.Is(err, utils.ErrDashboardInputExpansionTooLarge) {
 			return response.Error(http.StatusBadRequest, err.Error(), err)
 		}
 		if errors.Is(err, libraryelementsmodel.ErrLibraryElementInsufficientPermissions) {

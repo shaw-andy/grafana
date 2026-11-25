@@ -67,7 +67,7 @@ func externallySharedExport() map[string]interface{} {
 func TestResolveConstantExportInputs(t *testing.T) {
 	t.Run("substitutes constant placeholders everywhere except __inputs", func(t *testing.T) {
 		dash := externallySharedExport()
-		resolveConstantExportInputs(dash)
+		require.NoError(t, resolveConstantExportInputs(dash))
 
 		variable := dash["templating"].(map[string]interface{})["list"].([]interface{})[0].(map[string]interface{})
 		require.Equal(t, "100", variable["query"])
@@ -84,7 +84,7 @@ func TestResolveConstantExportInputs(t *testing.T) {
 
 	t.Run("leaves datasource inputs unresolved", func(t *testing.T) {
 		dash := externallySharedExport()
-		resolveConstantExportInputs(dash)
+		require.NoError(t, resolveConstantExportInputs(dash))
 
 		panel := dash["panels"].([]interface{})[0].(map[string]interface{})
 		require.Equal(t, "${DS_PROMETHEUS}", panel["datasource"].(map[string]interface{})["uid"])
@@ -94,7 +94,7 @@ func TestResolveConstantExportInputs(t *testing.T) {
 		dash := map[string]interface{}{
 			"query": "${VAR_SPEED}",
 		}
-		resolveConstantExportInputs(dash)
+		require.NoError(t, resolveConstantExportInputs(dash))
 		require.Equal(t, "${VAR_SPEED}", dash["query"])
 	})
 
@@ -105,7 +105,7 @@ func TestResolveConstantExportInputs(t *testing.T) {
 			},
 			"query": "${VAR_SPEED}",
 		}
-		resolveConstantExportInputs(dash)
+		require.NoError(t, resolveConstantExportInputs(dash))
 		require.Equal(t, "${VAR_SPEED}", dash["query"])
 	})
 
@@ -116,7 +116,7 @@ func TestResolveConstantExportInputs(t *testing.T) {
 			},
 			"description": "from ${VAR_SPEED} to ${VAR_SPEED}",
 		}
-		resolveConstantExportInputs(dash)
+		require.NoError(t, resolveConstantExportInputs(dash))
 		require.Equal(t, "from 100 to 100", dash["description"])
 	})
 }
