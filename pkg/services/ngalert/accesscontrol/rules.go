@@ -59,26 +59,54 @@ func (r *RuleService) getRulesReadEvaluator(rules ...*models.AlertRule) accessco
 	return accesscontrol.EvalAll(evals...)
 }
 
-// getRulesQueryEvaluator constructs accesscontrol.Evaluator that checks all permissions to query data sources used by the provided rules
+// getRulesQueryEvaluator constructs accesscontrol.Evaluator that checks all permissions to query data sources used by the provided rules,
+// including the data source that a recording rule writes its results to.
 func (r *RuleService) getRulesQueryEvaluator(rules ...*models.AlertRule) accesscontrol.Evaluator {
 	added := make(map[string]struct{}, 2)
 	evals := make([]accesscontrol.Evaluator, 0, 2)
+	add := func(uid string) {
+		if _, ok := added[uid]; ok {
+			return
+		}
+		evals = append(evals, getDatasourceQueryEvaluator(uid))
+		added[uid] = struct{}{}
+	}
 	for _, rule := range rules {
 		for _, query := range rule.Data {
 			if query.DatasourceUID == expr.DatasourceUID || query.DatasourceUID == expr.OldDatasourceUID {
 				continue
 			}
-			if _, ok := added[query.DatasourceUID]; ok {
-				continue
-			}
-			evals = append(evals, accesscontrol.EvalPermission(datasources.ActionQuery, datasources.ScopeProvider.GetResourceScopeUID(query.DatasourceUID)))
-			added[query.DatasourceUID] = struct{}{}
+			add(query.DatasourceUID)
+		}
+		if target := recordTargetDatasourceUID(rule); target != "" {
+			add(target)
 		}
 	}
 	if len(evals) == 1 {
 		return evals[0]
 	}
 	return accesscontrol.EvalAll(evals...)
+}
+
+func getDatasourceQueryEvaluator(uid string) accesscontrol.Evaluator {
+	return accesscontrol.EvalPermission(datasources.ActionQuery, datasources.ScopeProvider.GetResourceScopeUID(uid))
+}
+
+// recordTargetDatasourceUID returns the data source UID that a recording rule writes to.
+// An empty result means the rule is not a recording rule or it writes to the default data source set in the server configuration.
+func recordTargetDatasourceUID(rule *models.AlertRule) string {
+	if rule == nil || rule.Record == nil {
+		return ""
+	}
+	return rule.Record.TargetDatasourceUID
+}
+
+// affectsRecordedSeries returns true if the update changes where a recording rule writes or the metric name and labels of the series it writes.
+func affectsRecordedSeries(delta store.RuleDelta) bool {
+	if recordTargetDatasourceUID(delta.New) != recordTargetDatasourceUID(delta.Existing) {
+		return true
+	}
+	return len(delta.Diff.GetDiffsForField("Record")) > 0 || len(delta.Diff.GetDiffsForField("Labels")) > 0
 }
 
 // CanReadAllRules returns true when user has access to all folders and can read rules in them.
@@ -245,6 +273,12 @@ func (r *RuleService) AuthorizeRuleChanges(ctx context.Context, user identity.Re
 		if rule.AffectsQuery() {
 			if err := r.HasAccessOrError(ctx, user, r.getRulesQueryEvaluator(rule.New), func() string {
 				return fmt.Sprintf("update alert rule query '%s' (UID: %s)", rule.Existing.Title, rule.Existing.UID)
+			}); err != nil {
+				return err
+			}
+		} else if target := recordTargetDatasourceUID(rule.New); target != "" && affectsRecordedSeries(rule) {
+			if err := r.HasAccessOrError(ctx, user, getDatasourceQueryEvaluator(target), func() string {
+				return fmt.Sprintf("update recording rule '%s' (UID: %s) that writes to data source '%s'", rule.Existing.Title, rule.Existing.UID, target)
 			}); err != nil {
 				return err
 			}
