@@ -16,6 +16,10 @@ import (
 )
 
 func ValidateDashboardSpec(obj *Dashboard) field.ErrorList {
+	if errs := ValidateElementReferences(&obj.Spec); len(errs) > 0 {
+		return errs
+	}
+
 	data, err := json.Marshal(obj.Spec)
 	if err != nil {
 		return field.ErrorList{
