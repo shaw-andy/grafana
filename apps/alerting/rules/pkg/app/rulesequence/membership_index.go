@@ -2,14 +2,18 @@ package rulesequence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/grafana/grafana-app-sdk/resource"
+	"k8s.io/apiserver/pkg/endpoints/request"
 
 	model "github.com/grafana/grafana/apps/alerting/rules/pkg/apis/alerting/v0alpha1"
 	"github.com/grafana/grafana/apps/alerting/rules/pkg/app/config"
 )
+
+var errNamespaceRequired = errors.New("rule sequence membership lookup requires a request namespace")
 
 // MembershipIndex maintains a watch-backed, in-memory index that maps rule UIDs
 // to the RuleSequence that owns them. It implements operator.ResourceWatcher so
@@ -18,6 +22,10 @@ import (
 //
 // Admission validators call Resolve to perform O(1) membership lookups instead
 // of listing all RuleSequences on every request.
+//
+// The informer may watch every namespace (on-prem, all orgs), and rule UIDs and
+// sequence names are only unique within a namespace, so every entry is keyed by
+// namespace. Lookups never cross namespaces.
 //
 // Before the informer's initial list has been processed the index is empty, so
 // Resolve returns "not found" for every UID. This is permissive by design:
@@ -38,11 +46,21 @@ import (
 type MembershipIndex struct {
 	// mu protects index and sequences.
 	mu sync.RWMutex
-	// index maps ruleUID -> sequenceUID (the Name field on the RuleSequence object).
-	index map[string]string
+	// index maps (namespace, ruleUID) -> owning sequence.
+	index map[ruleKey]sequenceKey
 	// sequences stores the full set of rule refs per sequence so Update and
 	// Delete can remove stale entries without re-scanning.
-	sequences map[string][]string
+	sequences map[sequenceKey][]string
+}
+
+type ruleKey struct {
+	namespace string
+	uid       string
+}
+
+type sequenceKey struct {
+	namespace string
+	name      string
 }
 
 // NewMembershipIndex creates an empty index. The caller must register it as a
@@ -50,23 +68,29 @@ type MembershipIndex struct {
 // it.
 func NewMembershipIndex() *MembershipIndex {
 	return &MembershipIndex{
-		index:     make(map[string]string),
-		sequences: make(map[string][]string),
+		index:     make(map[ruleKey]sequenceKey),
+		sequences: make(map[sequenceKey][]string),
 	}
 }
 
-// Resolve returns membership information for the requested rule UIDs. Each UID
-// is looked up in O(1) time against the in-memory index.
+// Resolve returns membership information for the requested rule UIDs within
+// the namespace of the request carried by ctx. Each UID is looked up in O(1)
+// time against the in-memory index.
 //
 // The returned map always contains an entry for every requested UID. If a UID
-// is not owned by any sequence, its entry has Found=false.
-func (m *MembershipIndex) Resolve(_ context.Context, uids []string) (map[string]config.RuleSequenceMembership, error) {
+// is not owned by any sequence in that namespace, its entry has Found=false.
+func (m *MembershipIndex) Resolve(ctx context.Context, uids []string) (map[string]config.RuleSequenceMembership, error) {
+	namespace, ok := request.NamespaceFrom(ctx)
+	if !ok || namespace == "" {
+		return nil, errNamespaceRequired
+	}
+
 	result := make(map[string]config.RuleSequenceMembership, len(uids))
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, uid := range uids {
-		if seqUID, ok := m.index[uid]; ok {
-			result[uid] = config.RuleSequenceMembership{SequenceUID: seqUID, Found: true}
+		if owner, ok := m.index[ruleKey{namespace: namespace, uid: uid}]; ok {
+			result[uid] = config.RuleSequenceMembership{SequenceUID: owner.name, Found: true}
 		} else {
 			result[uid] = config.RuleSequenceMembership{}
 		}
@@ -82,15 +106,13 @@ func (m *MembershipIndex) Add(_ context.Context, obj resource.Object) error {
 		return fmt.Errorf("membership index received non-RuleSequence object: %T", obj)
 	}
 
+	key := keyOf(seq)
 	refs := collectRuleUIDs(seq)
-	seqUID := seq.Name
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.sequences[seqUID] = refs
-	for _, uid := range refs {
-		m.index[uid] = seqUID
-	}
+	m.removeLocked(key)
+	m.addLocked(key, refs)
 	return nil
 }
 
@@ -106,30 +128,14 @@ func (m *MembershipIndex) Update(_ context.Context, old, new resource.Object) er
 		return fmt.Errorf("membership index received non-RuleSequence new object: %T", new)
 	}
 
-	oldUID := oldSeq.Name
-	newUID := newSeq.Name
+	newKey := keyOf(newSeq)
 	newRefs := collectRuleUIDs(newSeq)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	// Remove old entries. Only delete from index if the mapping still points to
-	// this sequence (another sequence could theoretically have claimed the UID
-	// in between, though admission should prevent this).
-	if oldRefs, exists := m.sequences[oldUID]; exists {
-		for _, uid := range oldRefs {
-			if m.index[uid] == oldUID {
-				delete(m.index, uid)
-			}
-		}
-		delete(m.sequences, oldUID)
-	}
-
-	// Index new entries.
-	m.sequences[newUID] = newRefs
-	for _, uid := range newRefs {
-		m.index[uid] = newUID
-	}
+	m.removeLocked(keyOf(oldSeq))
+	m.removeLocked(newKey)
+	m.addLocked(newKey, newRefs)
 	return nil
 }
 
@@ -140,20 +146,38 @@ func (m *MembershipIndex) Delete(_ context.Context, obj resource.Object) error {
 		return fmt.Errorf("membership index received non-RuleSequence object: %T", obj)
 	}
 
-	seqUID := seq.Name
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	if refs, exists := m.sequences[seqUID]; exists {
-		for _, uid := range refs {
-			if m.index[uid] == seqUID {
-				delete(m.index, uid)
-			}
-		}
-		delete(m.sequences, seqUID)
-	}
+	m.removeLocked(keyOf(seq))
 	return nil
+}
+
+func (m *MembershipIndex) addLocked(key sequenceKey, refs []string) {
+	m.sequences[key] = refs
+	for _, uid := range refs {
+		m.index[ruleKey{namespace: key.namespace, uid: uid}] = key
+	}
+}
+
+// removeLocked drops the entries recorded for key. An index entry is only
+// removed while it is still owned by key, so another sequence that has since
+// claimed the UID keeps it.
+func (m *MembershipIndex) removeLocked(key sequenceKey) {
+	refs, exists := m.sequences[key]
+	if !exists {
+		return
+	}
+	for _, uid := range refs {
+		rk := ruleKey{namespace: key.namespace, uid: uid}
+		if m.index[rk] == key {
+			delete(m.index, rk)
+		}
+	}
+	delete(m.sequences, key)
+}
+
+func keyOf(seq *model.RuleSequence) sequenceKey {
+	return sequenceKey{namespace: seq.Namespace, name: seq.Name}
 }
 
 // collectRuleUIDs extracts all referenced rule UIDs from a RuleSequence spec,
