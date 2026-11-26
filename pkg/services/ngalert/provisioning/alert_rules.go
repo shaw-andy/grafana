@@ -38,6 +38,11 @@ var errProvenanceMismatch = errutil.NewBase(errutil.StatusConflict, "alerting.pr
 	errutil.WithPublic("cannot {{ .Public.Operation }} with provided provenance '{{ .Public.ProvidedProvenance }}', needs '{{ .Public.StoredProvenance }}'"),
 )
 
+var errManagedRuleChangeForbidden = errutil.Forbidden("alerting.managedRuleChangeForbidden").MustTemplate(
+	"cannot {{ .Public.Operation }} alert rule with manager '{{ .Public.Manager }}': {{ .Public.Reason }}",
+	errutil.WithPublic("cannot {{ .Public.Operation }} alert rule with manager '{{ .Public.Manager }}': {{ .Public.Reason }}"),
+)
+
 type NotificationSettingsValidatorProvider interface {
 	Validator(ctx context.Context, orgID int64) (notifier.NotificationSettingsValidator, error)
 }
@@ -558,6 +563,60 @@ func (service *AlertRuleService) CreateAlertRule(ctx context.Context, user ident
 	return rule, nil
 }
 
+// CreateAlertRuleFromRequest is CreateAlertRule for callers that take the manager from the
+// request object instead of asserting it themselves, such as the Kubernetes API.
+// See authorizeRequestManager.
+func (service *AlertRuleService) CreateAlertRuleFromRequest(ctx context.Context, user identity.Requester, rule models.AlertRule, manager utils.ManagerProperties) (models.AlertRule, error) {
+	if err := service.authorizeRequestManager(ctx, user, "create", utils.ManagerProperties{}, manager); err != nil {
+		return models.AlertRule{}, err
+	}
+	return service.CreateAlertRule(ctx, user, rule, manager)
+}
+
+// authorizeRequestManager decides whether a caller whose manager comes from its own request
+// object may act on a rule stored with the stored manager. Such a caller can echo back
+// whatever manager it read, so a matching manager proves nothing about its authority.
+//
+// File-provisioned and Prometheus-converted rules belong to the system that imported them
+// and are never changed this way. Acting on any other managed rule, or assigning a manager,
+// requires organization-wide provisioning write. alert.provisioning.provenance:write is
+// not enough because the Editor role holds it by default.
+func (service *AlertRuleService) authorizeRequestManager(ctx context.Context, user identity.Requester, operation string, stored, incoming utils.ManagerProperties) error {
+	for _, m := range []utils.ManagerProperties{stored, incoming} {
+		switch m.Kind {
+		case utils.ManagerKindClassicFP, utils.ManagerKindClassicConvertedPrometheus: //nolint:staticcheck
+			return errManagedRuleChangeForbidden.Build(errutil.TemplateData{
+				Public: map[string]any{
+					"Operation": operation,
+					"Manager":   m.Kind,
+					"Reason":    "rules from this source can only be changed by the source that provisioned them",
+				},
+			})
+		}
+	}
+	if stored.Kind == utils.ManagerKindUnknown && incoming.Kind == utils.ManagerKindUnknown {
+		return nil
+	}
+	can, err := service.authz.CanWriteAllRules(ctx, user)
+	if err != nil {
+		return err
+	}
+	if !can {
+		manager := stored.Kind
+		if manager == utils.ManagerKindUnknown {
+			manager = incoming.Kind
+		}
+		return errManagedRuleChangeForbidden.Build(errutil.TemplateData{
+			Public: map[string]any{
+				"Operation": operation,
+				"Manager":   manager,
+				"Reason":    "requires alerting provisioning write permission",
+			},
+		})
+	}
+	return nil
+}
+
 // FilterOptions provides filtering for alert rule queries.
 // All fields are optional and will be applied as filters if provided.
 type FilterOptions struct {
@@ -942,6 +1001,21 @@ func (service *AlertRuleService) persistDelta(ctx context.Context, user identity
 
 // UpdateAlertRule updates an alert rule.
 func (service *AlertRuleService) UpdateAlertRule(ctx context.Context, user identity.Requester, rule models.AlertRule, manager utils.ManagerProperties) (models.AlertRule, error) {
+	return service.updateAlertRule(ctx, user, rule, manager, nil)
+}
+
+// UpdateAlertRuleFromRequest is UpdateAlertRule for callers that take the manager from the
+// request object instead of asserting it themselves, such as the Kubernetes API.
+// See authorizeRequestManager.
+func (service *AlertRuleService) UpdateAlertRuleFromRequest(ctx context.Context, user identity.Requester, rule models.AlertRule, manager utils.ManagerProperties) (models.AlertRule, error) {
+	return service.updateAlertRule(ctx, user, rule, manager, func(stored utils.ManagerProperties) error {
+		return service.authorizeRequestManager(ctx, user, "update", stored, manager)
+	})
+}
+
+// authorizeStoredManager, when set, is called with the stored manager the operation acts on,
+// before anything is written.
+func (service *AlertRuleService) updateAlertRule(ctx context.Context, user identity.Requester, rule models.AlertRule, manager utils.ManagerProperties, authorizeStoredManager func(stored utils.ManagerProperties) error) (models.AlertRule, error) {
 	var storedRule *models.AlertRule
 	if err := service.ensureNamespace(ctx, user, rule.OrgID, rule.NamespaceUID); err != nil {
 		return models.AlertRule{}, err
@@ -990,6 +1064,11 @@ func (service *AlertRuleService) UpdateAlertRule(ctx context.Context, user ident
 	storedManager, err := service.provenanceStore.GetManagerProperties(ctx, storedRule, storedRule.OrgID)
 	if err != nil {
 		return models.AlertRule{}, err
+	}
+	if authorizeStoredManager != nil {
+		if err := authorizeStoredManager(storedManager); err != nil {
+			return models.AlertRule{}, err
+		}
 	}
 	if storedManager.Kind != manager.Kind && storedManager.Kind != utils.ManagerKindUnknown {
 		return models.AlertRule{}, errProvenanceMismatch.Build(errutil.TemplateData{
@@ -1050,6 +1129,21 @@ func (service *AlertRuleService) UpdateAlertRule(ctx context.Context, user ident
 }
 
 func (service *AlertRuleService) DeleteAlertRule(ctx context.Context, user identity.Requester, ruleUID string, manager utils.ManagerProperties) error {
+	return service.deleteAlertRule(ctx, user, ruleUID, manager, nil)
+}
+
+// DeleteAlertRuleFromRequest is DeleteAlertRule for callers that take the manager from the
+// request object instead of asserting it themselves, such as the Kubernetes API.
+// See authorizeRequestManager.
+func (service *AlertRuleService) DeleteAlertRuleFromRequest(ctx context.Context, user identity.Requester, ruleUID string, manager utils.ManagerProperties) error {
+	return service.deleteAlertRule(ctx, user, ruleUID, manager, func(stored utils.ManagerProperties) error {
+		return service.authorizeRequestManager(ctx, user, "delete", stored, manager)
+	})
+}
+
+// authorizeStoredManager, when set, is called with the stored manager the operation acts on,
+// before anything is deleted.
+func (service *AlertRuleService) deleteAlertRule(ctx context.Context, user identity.Requester, ruleUID string, manager utils.ManagerProperties, authorizeStoredManager func(stored utils.ManagerProperties) error) error {
 	rule := &models.AlertRule{
 		OrgID: user.GetOrgID(),
 		UID:   ruleUID,
@@ -1057,6 +1151,11 @@ func (service *AlertRuleService) DeleteAlertRule(ctx context.Context, user ident
 	storedManager, err := service.provenanceStore.GetManagerProperties(ctx, rule, rule.OrgID)
 	if err != nil {
 		return err
+	}
+	if authorizeStoredManager != nil {
+		if err := authorizeStoredManager(storedManager); err != nil {
+			return err
+		}
 	}
 	if !validation.CanUpdateManagerInRuleGroup(storedManager, manager) {
 		return errProvenanceMismatch.Build(errutil.TemplateData{

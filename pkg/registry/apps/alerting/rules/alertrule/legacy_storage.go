@@ -290,7 +290,7 @@ func (s *legacyStorage) Create(ctx context.Context, obj runtime.Object, createVa
 		return nil, err
 	}
 
-	created, err := s.service.CreateAlertRule(ctx, user, *domainModel, managerProps)
+	created, err := s.service.CreateAlertRuleFromRequest(ctx, user, *domainModel, managerProps)
 	if err != nil {
 		return nil, toAPIError(p.GetName(), err)
 	}
@@ -334,7 +334,7 @@ func (s *legacyStorage) Update(ctx context.Context, name string, objInfo rest.Up
 		return old, false, err
 	}
 
-	_, err = s.service.UpdateAlertRule(ctx, user, *domainModel, managerProps)
+	_, err = s.service.UpdateAlertRuleFromRequest(ctx, user, *domainModel, managerProps)
 	if err != nil {
 		return nil, false, toAPIError(name, err)
 	}
@@ -385,7 +385,7 @@ func (s *legacyStorage) Delete(ctx context.Context, name string, deleteValidatio
 		return nil, false, err
 	}
 
-	err = s.service.DeleteAlertRule(ctx, user, name, managerProps)
+	err = s.service.DeleteAlertRuleFromRequest(ctx, user, name, managerProps)
 	if err != nil {
 		return old, false, err
 	}
