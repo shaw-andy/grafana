@@ -1338,6 +1338,7 @@ func (b *DashboardsAPIBuilder) storageForVersion(
 			Service:               b.snapshotService,
 			Namespacer:            b.namespacer,
 			ExternalSnapshotToken: b.snapshotOptions.ExternalSnapshotToken,
+			AccessControl:         b.accessControl,
 		}
 
 		selectableFieldsOpts := grafanaregistry.SelectableFieldsOptions{
@@ -1356,14 +1357,14 @@ func (b *DashboardsAPIBuilder) storageForVersion(
 		if err != nil {
 			return err
 		}
-		snapshotWrapper := snapshot.NewStorageWrapper(snapshotDualWrite, b.snapshotOptions)
+		snapshotWrapper := snapshot.NewStorageWrapper(snapshotDualWrite, b.snapshotOptions, snapshot.WithAccessControl(b.accessControl))
 		storage[snapshots.StoragePath()] = snapshotWrapper
 		b.snapshotStorage = snapshotDualWrite // for use in routes (needs rest.Creater)
 		storage[snapshots.StoragePath("dashboard")], err = snapshot.NewDashboardREST(snapshotDualWrite)
 		if err != nil {
 			return err
 		}
-		storage[snapshots.StoragePath("deletekey")], err = snapshot.NewDeleteKeyREST(snapshotDualWrite)
+		storage[snapshots.StoragePath("deletekey")], err = snapshot.NewDeleteKeyREST(snapshotDualWrite, snapshot.WithAccessControl(b.accessControl))
 		if err != nil {
 			return err
 		}

@@ -34,6 +34,7 @@ import (
 type storageWrapper struct {
 	inner   rest.Storage
 	options dashv0.SnapshotSharingOptions
+	access  accessOptions
 }
 
 var (
@@ -47,8 +48,8 @@ var (
 )
 
 // NewStorageWrapper wraps a storage to hide the rest.Creater interface.
-func NewStorageWrapper(s rest.Storage, options dashv0.SnapshotSharingOptions) rest.Storage {
-	return &storageWrapper{inner: s, options: options}
+func NewStorageWrapper(s rest.Storage, options dashv0.SnapshotSharingOptions, opts ...AccessOption) rest.Storage {
+	return &storageWrapper{inner: s, options: options, access: newAccessOptions(opts)}
 }
 
 func (n *storageWrapper) New() runtime.Object   { return n.inner.New() }
@@ -87,8 +88,12 @@ func (n *storageWrapper) Delete(ctx context.Context, name string, deleteValidati
 		return nil, false, fmt.Errorf("expected Snapshot, got %T", obj)
 	}
 
-	// Delete the local snapshot
-	result, deleted, err := n.inner.(rest.GracefulDeleter).Delete(ctx, name, deleteValidation, options)
+	if err := checkSnapshotDeleteAccess(ctx, n.access.accessControl, snap); err != nil {
+		return nil, false, err
+	}
+
+	// The inner store looks the snapshot up again; refuse unless it is the one authorized above.
+	result, deleted, err := n.inner.(rest.GracefulDeleter).Delete(ctx, name, requireSameSnapshot(snap, deleteValidation), options)
 	if err != nil {
 		return nil, false, err
 	}
