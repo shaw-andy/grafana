@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strconv"
+	"strings"
 
 	claims "github.com/grafana/authlib/types"
 
@@ -28,6 +29,8 @@ type TrashAuthorizer struct {
 	// A UID only identifies someone within their own namespace.
 	namespaceMatches bool
 
+	rootFolder string
+
 	// Cached because the check is a network call and a page of results usually
 	// spans far fewer folders than items. Must not outlive the request, or a
 	// permission change would never take effect.
@@ -48,6 +51,7 @@ func NewTrashAuthorizer(
 		user:             user,
 		key:              key,
 		namespaceMatches: claims.NamespaceMatches(user.GetNamespace(), key.Namespace),
+		rootFolder:       rootFolderFor(key.Group),
 		folderAdmin:      map[string]bool{},
 		onCheckError:     onCheckError,
 	}
@@ -60,6 +64,34 @@ func NewTrashAuthorizer(
 // Spelled here rather than imported from pkg/services/accesscontrol, which unified
 // storage does not depend on.
 const k6FolderUID = "k6-app"
+
+// generalFolderUID is the root folder. Spelled here for the same reason as
+// k6FolderUID.
+const generalFolderUID = "general"
+
+// rootFolderFor is the folder the admin check names for an object with no folder.
+//
+// A check with no folder and no name is read by authz as "may the caller do this
+// anywhere", which administering a single object satisfies. So the root is named
+// instead, and only an admin of the general folder, or of every folder, passes.
+// Authz ignores the folder for the kinds it maps without folder support.
+//
+// Plugin kinds keep the empty folder: storage refuses the root for those that
+// live in folders, so no folder means the kind has none, and authz then asks for
+// the namespace-wide role the plugin grants, which is the question meant here.
+func rootFolderFor(group string) string {
+	if strings.HasSuffix(group, ".ext.grafana.app") {
+		return ""
+	}
+	return generalFolderUID
+}
+
+func (a *TrashAuthorizer) checkedFolder(folder string) string {
+	if folder == "" {
+		return a.rootFolder
+	}
+	return folder
+}
 
 // TrashItem is one object Prepare may need a folder check for.
 type TrashItem struct {
@@ -75,14 +107,15 @@ func (a *TrashAuthorizer) Prepare(ctx context.Context, items []TrashItem) {
 	var pending []string
 	seen := make(map[string]bool, len(items))
 	for _, item := range items {
-		if a.deletedByCaller(item.DeletedBy) || seen[item.Folder] || item.Folder == k6FolderUID {
+		folder := a.checkedFolder(item.Folder)
+		if a.deletedByCaller(item.DeletedBy) || seen[folder] || folder == k6FolderUID {
 			continue
 		}
-		if _, decided := a.folderAdmin[item.Folder]; decided {
+		if _, decided := a.folderAdmin[folder]; decided {
 			continue
 		}
-		seen[item.Folder] = true
-		pending = append(pending, item.Folder)
+		seen[folder] = true
+		pending = append(pending, folder)
 	}
 
 	for batch := range slices.Chunk(pending, claims.MaxBatchCheckItems) {
@@ -141,11 +174,10 @@ func (a *TrashAuthorizer) deletedByCaller(deletedBy string) bool {
 	return a.namespaceMatches && deletedBy != "" && deletedBy == a.user.GetUID()
 }
 
-// FolderAdmin reports whether the caller administers folder.
-//
-// A kind with no folder is checked against the namespace instead, which is what
-// listFromTrash has always done.
+// FolderAdmin reports whether the caller administers folder. An empty folder is
+// the root; see rootFolderFor.
 func (a *TrashAuthorizer) FolderAdmin(ctx context.Context, folder string) bool {
+	folder = a.checkedFolder(folder)
 	if isAdmin, ok := a.folderAdmin[folder]; ok {
 		return isAdmin
 	}
