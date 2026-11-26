@@ -103,6 +103,7 @@ func migrateCloudWatchQueriesInPanel(panel map[string]interface{}) {
 
 	var newTargets []interface{}
 	var additionalTargets []interface{}
+	var refIds *refIdGenerator
 
 	for _, target := range targets {
 		t, ok := target.(map[string]interface{})
@@ -174,7 +175,10 @@ func migrateCloudWatchQueriesInPanel(panel map[string]interface{}) {
 				if i == 0 {
 					newTargets = append(newTargets, newQuery)
 				} else {
-					newQuery["refId"] = generateNextRefId(append(targets, additionalTargets...), len(additionalTargets))
+					if refIds == nil {
+						refIds = newRefIdGenerator(targets)
+					}
+					newQuery["refId"] = refIds.next(len(additionalTargets))
 					additionalTargets = append(additionalTargets, newQuery)
 				}
 			}
@@ -343,33 +347,44 @@ func isLegacyCloudWatchAnnotationQuery(annotation map[string]interface{}) bool {
 	return hasDimensions && hasNamespace && hasRegion && hasPrefixMatching && hasStatistics
 }
 
-// generateNextRefId generates a new refId for additional queries created during migration.
-func generateNextRefId(allTargets []interface{}, additionalIndex int) string {
-	// Collect all existing refIds
+const refIdLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+// refIdGenerator generates refIds for additional queries created during migration:
+// the first unused single letter, then the first unused double letter.
+// The used set is built once and the cursor never moves back, so splitting a
+// query into many statistics stays linear instead of rescanning every target
+// for each new query.
+type refIdGenerator struct {
+	used   map[string]bool
+	cursor int
+}
+
+func newRefIdGenerator(targets []interface{}) *refIdGenerator {
 	used := make(map[string]bool)
-	for _, target := range allTargets {
+	for _, target := range targets {
 		if t, ok := target.(map[string]interface{}); ok {
 			if refId, ok := t["refId"].(string); ok && refId != "" {
 				used[refId] = true
 			}
 		}
 	}
+	return &refIdGenerator{used: used}
+}
 
-	// Generate next available refId starting from A
-	for c := 'A'; c <= 'Z'; c++ {
-		candidate := string(c)
-		if !used[candidate] {
-			return candidate
+func (g *refIdGenerator) next(additionalIndex int) string {
+	n := len(refIdLetters)
+	for ; g.cursor < n+n*n; g.cursor++ {
+		var candidate string
+		if g.cursor < n {
+			candidate = refIdLetters[g.cursor : g.cursor+1]
+		} else {
+			i := g.cursor - n
+			candidate = string(refIdLetters[i/n]) + string(refIdLetters[i%n])
 		}
-	}
-
-	// If all single letters are taken, use double letters
-	for c1 := 'A'; c1 <= 'Z'; c1++ {
-		for c2 := 'A'; c2 <= 'Z'; c2++ {
-			candidate := string(c1) + string(c2)
-			if !used[candidate] {
-				return candidate
-			}
+		if !g.used[candidate] {
+			g.used[candidate] = true
+			g.cursor++
+			return candidate
 		}
 	}
 
