@@ -2203,16 +2203,14 @@ func transformPanelQueries(ctx context.Context, panelMap map[string]interface{},
 			}
 		}
 	}
+	refIds := refIdAllocator{existing: existingRefIds}
 	for _, target := range targets {
 		targetMap, ok := target.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		refId := schemaversion.GetStringValue(targetMap, "refId")
-		if refId == "" {
-			refId = nextAvailableRefId(existingRefIds)
-			targetMap["refId"] = refId
-			existingRefIds[refId] = true
+		if schemaversion.GetStringValue(targetMap, "refId") == "" {
+			targetMap["refId"] = refIds.next()
 		}
 	}
 
@@ -2228,23 +2226,36 @@ func transformPanelQueries(ctx context.Context, panelMap map[string]interface{},
 	return queries
 }
 
-// nextAvailableRefId returns the next unused refId using the same sequence as the
-// frontend helper (A, B, ..., Z, AA, AB, ...).
-func nextAvailableRefId(existing map[string]bool) string {
-	const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+// refIdAllocator hands out unused refIds using the same sequence as the
+// frontend helper (A, B, ..., Z, AA, AB, ...). The cursor never moves back, so
+// filling n missing refIds costs O(n + len(existing)) lookups; restarting the
+// scan from A for every target would make the conversion quadratic in the
+// number of targets, which dashboard authors control.
+type refIdAllocator struct {
+	existing map[string]bool
+	cursor   int
+}
 
-	var refIdFromIndex func(num int) string
-	refIdFromIndex = func(num int) string {
-		if num < len(letters) {
-			return string(letters[num])
-		}
-		return refIdFromIndex(num/len(letters)-1) + string(letters[num%len(letters)])
-	}
-
-	for i := 0; ; i++ {
-		refId := refIdFromIndex(i)
-		if !existing[refId] {
+func (a *refIdAllocator) next() string {
+	for {
+		refId := refIdFromIndex(a.cursor)
+		a.cursor++
+		if !a.existing[refId] {
 			return refId
+		}
+	}
+}
+
+func refIdFromIndex(num int) string {
+	const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	var buf [16]byte
+	i := len(buf)
+	for {
+		i--
+		buf[i] = letters[num%len(letters)]
+		num = num/len(letters) - 1
+		if num < 0 {
+			return string(buf[i:])
 		}
 	}
 }
