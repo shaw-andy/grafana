@@ -1903,12 +1903,18 @@ func (cfg *Cfg) handleAWSConfig() {
 	awsPluginSec := cfg.Raw.Section("aws")
 	cfg.AWSAssumeRoleEnabled = awsPluginSec.Key("assume_role_enabled").MustBool(true)
 	cfg.AWSPerDatasourceHTTPProxyEnabled = awsPluginSec.Key("per_datasource_http_proxy_enabled").MustBool(false)
-	allowedAuthProviders := awsPluginSec.Key("allowed_auth_providers").MustString("default,keys,credentials")
+	allowedAuthProviders := awsPluginSec.Key("allowed_auth_providers").MustString("keys")
 	for authProvider := range strings.SplitSeq(allowedAuthProviders, ",") {
 		authProvider = strings.TrimSpace(authProvider)
 		if authProvider != "" {
 			cfg.AWSAllowedAuthProviders = append(cfg.AWSAllowedAuthProviders, authProvider)
 		}
+	}
+	// An empty list is not forwarded to plugins, and the AWS SDK then falls back to its own
+	// built-in list, which includes the host credential providers.
+	if len(cfg.AWSAllowedAuthProviders) == 0 {
+		allowedAuthProviders = "keys"
+		cfg.AWSAllowedAuthProviders = []string{allowedAuthProviders}
 	}
 	cfg.AWSListMetricsPageLimit = awsPluginSec.Key("list_metrics_page_limit").MustInt(500)
 	cfg.AWSExternalId = awsPluginSec.Key("external_id").Value()

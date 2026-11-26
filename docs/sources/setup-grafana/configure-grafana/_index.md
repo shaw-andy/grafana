@@ -1365,9 +1365,13 @@ You can configure core and external AWS plugins.
 
 #### `allowed_auth_providers`
 
-Specify what authentication providers the AWS plugins allow. For a list of allowed providers, refer to the data source configuration page for a given plugin. If you configure a plugin by provisioning, only providers that are specified in `allowed_auth_providers` are allowed.
+Specify what authentication providers the AWS plugins allow. For a list of allowed providers, refer to the data source configuration page for a given plugin. Grafana refuses to save or query an AWS data source whose authentication provider isn't in `allowed_auth_providers`, including data sources configured by provisioning.
 
 Options: `default` (AWS SDK default), `keys` (Access and secret key), `credentials` (Credentials file), `ec2_iam_role` (EC2 IAM role)
+
+The default is `keys`.
+
+The `default`, `credentials`, and `ec2_iam_role` providers sign requests with the AWS identity of the Grafana server, such as its environment variables, credentials file, or EC2 instance, ECS task, or EKS pod role. When you enable them, anyone who can create or edit an AWS data source can use that identity, including the Admin of any organization. Only enable them when every organization admin may use the AWS identity of the Grafana server.
 
 #### `assume_role_enabled`
 
