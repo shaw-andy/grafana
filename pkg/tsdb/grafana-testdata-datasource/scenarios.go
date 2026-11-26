@@ -1498,7 +1498,7 @@ func doArrowQuery(query backend.DataQuery, model kinds.TestDataQuery) (*data.Fra
 	if err != nil {
 		return nil, err
 	}
-	return data.UnmarshalArrowFrame(arrow)
+	return unmarshalArrowFrame(arrow)
 }
 
 func newSeriesForQuery(query backend.DataQuery, model kinds.TestDataQuery, index int) *data.Frame {
