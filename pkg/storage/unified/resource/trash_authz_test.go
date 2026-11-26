@@ -154,17 +154,37 @@ func TestTrashAuthorizer_ReportsCheckFailuresAndDenies(t *testing.T) {
 	assert.ErrorIs(t, (*reported)[0], boom)
 }
 
-// Kinds outside the folder tree carry no folder, making the check namespace-wide.
-func TestTrashAuthorizer_FolderlessKindChecksTheWholeNamespace(t *testing.T) {
+// With no folder and no name, authz answers whether the caller holds the action
+// anywhere, which administering one dashboard satisfies.
+func TestTrashAuthorizer_RootObjectChecksTheGeneralFolder(t *testing.T) {
 	a, calls, _ := newRecordingAuthorizer(t, "carol", func(folder string) bool {
-		return folder == "" // granted namespace-wide
+		return folder == "" // what a scoped grant on any single object answers
 	}, nil)
 
-	assert.True(t, a.Allowed(t.Context(), "", "user:alice"))
+	assert.False(t, a.Allowed(t.Context(), "", "user:alice"))
+	assert.False(t, a.Allowed(t.Context(), "general", "user:alice"))
 
-	require.Len(t, *calls, 1)
-	assert.Equal(t, utils.VerbSetPermissions, (*calls)[0].verb)
-	assert.Empty(t, (*calls)[0].folder, "no folder means the check is not scoped to one")
+	assert.Equal(t, []recordedCheck{
+		{verb: utils.VerbSetPermissions, folder: "general"},
+	}, *calls, "no folder and general are the same root, so one check decides both")
+}
+
+// Storage refuses the root for plugin kinds that live in folders, so for a plugin
+// kind no folder means it has none and the check stays namespace-wide.
+func TestTrashAuthorizer_PluginKindWithoutFolderChecksTheWholeNamespace(t *testing.T) {
+	var calls []recordedCheck
+	ac := &callbackAccessClient{fn: func(req authlib.CheckRequest, folder string) (authlib.CheckResponse, error) {
+		calls = append(calls, recordedCheck{verb: req.Verb, folder: folder})
+		return authlib.CheckResponse{Allowed: folder == "", Zookie: authlib.NoopZookie{}}, nil
+	}}
+	a := NewTrashAuthorizer(ac, trashTestUser("carol"), &resourcepb.ResourceKey{
+		Namespace: "default",
+		Group:     "example.ext.grafana.app",
+		Resource:  "widgets",
+	}, func(error) {})
+
+	assert.True(t, a.Allowed(t.Context(), "", "user:alice"))
+	assert.Equal(t, []recordedCheck{{verb: utils.VerbSetPermissions, folder: ""}}, calls)
 }
 
 // batchAccessClient records round trips, so a test can tell one batch of many
@@ -225,6 +245,20 @@ func TestTrashAuthorizer_PrepareResolvesEveryFolderInOneCall(t *testing.T) {
 	assert.True(t, a.Allowed(t.Context(), "folder-1", "user:alice"))
 	assert.False(t, a.Allowed(t.Context(), "folder-2", "user:alice"))
 	assert.Len(t, ac.batches, 1, "the answers came from the cache")
+}
+
+func TestTrashAuthorizer_PrepareChecksRootObjectsAsTheGeneralFolder(t *testing.T) {
+	a, ac, _ := newBatchAuthorizer("carol", func(folder string) bool { return folder == "" })
+
+	a.Prepare(t.Context(), []TrashItem{
+		{Folder: "", DeletedBy: "user:alice"},
+		{Folder: "general", DeletedBy: "user:alice"},
+	})
+
+	require.Len(t, ac.batches, 1)
+	assert.Equal(t, []string{"general"}, ac.batches[0])
+	assert.False(t, a.Allowed(t.Context(), "", "user:alice"))
+	assert.Len(t, ac.batches, 1, "the answer came from the cache")
 }
 
 // Objects the caller deleted are decided from the indexed field, so their folders
