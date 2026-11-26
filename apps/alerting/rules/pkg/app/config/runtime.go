@@ -25,7 +25,10 @@ var (
 )
 
 // RuleSequenceMembershipResolver resolves which RuleSequence (if any) owns a
-// given set of rule UIDs. Implementations must be safe for concurrent use.
+// given set of rule UIDs. Rule UIDs and sequence names are only unique within a
+// namespace, so implementations must resolve within the request namespace
+// carried by ctx and never across namespaces. Implementations must be safe for
+// concurrent use.
 type RuleSequenceMembershipResolver interface {
 	Resolve(ctx context.Context, uids []string) (map[string]RuleSequenceMembership, error)
 }
