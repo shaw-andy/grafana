@@ -327,7 +327,7 @@ func (c *jobsConnector) authorizeJob(ctx context.Context, repo repository.Reposi
 
 	switch spec.Action {
 	case provisioning.JobActionPush:
-		return c.authorizePushJob(ctx, repo, cfg)
+		return c.authorizePushJob(ctx, repo, cfg, spec.Push)
 	case provisioning.JobActionMigrate:
 		return c.authorizeMigrateJob(ctx, repo, cfg, spec)
 	case provisioning.JobActionDelete:
@@ -364,6 +364,8 @@ func (c *jobsConnector) newJobAuthorizer(ctx context.Context, repo repository.Re
 
 // authorizeResourceRefs fetches each referenced resource and checks that the user
 // has the given verb permission on it. Resources that no longer exist are skipped.
+// For get, a missing resource instead requires read access to every object: the
+// job reads whatever exists under that name when it runs, wherever it lives.
 func (c *jobsConnector) authorizeResourceRefs(ctx context.Context, authorizer resources.Authorizer, namespace string, refs []provisioning.ResourceRef, verb, action string) error {
 	if len(refs) == 0 {
 		return nil
@@ -384,7 +386,15 @@ func (c *jobsConnector) authorizeResourceRefs(ctx context.Context, authorizer re
 		obj, err := client.Get(ctx, ref.Name, metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
+				if verb == utils.VerbGet {
+					if err := authorizer.AuthorizeReadAllSupported(ctx); err != nil {
+						return err
+					}
+				}
 				continue
+			}
+			if apierrors.IsForbidden(err) {
+				return apierrors.NewForbidden(gvr.GroupResource(), ref.Name, fmt.Errorf("authorize %s: %w", action, err))
 			}
 			return fmt.Errorf("authorize %s resource %s/%s/%s: %w", action, ref.Group, ref.Kind, ref.Name, err)
 		}
@@ -400,7 +410,15 @@ func (c *jobsConnector) authorizeResourceRefs(ctx context.Context, authorizer re
 			Meta:     meta,
 			GVR:      gvr,
 		}
-		if err := authorizer.AuthorizeResource(ctx, parsed, verb); err != nil {
+		if verb == utils.VerbGet {
+			err = authorizer.AuthorizeRead(ctx, parsed)
+		} else {
+			err = authorizer.AuthorizeResource(ctx, parsed, verb)
+		}
+		if err != nil {
+			if apierrors.IsForbidden(err) {
+				return apierrors.NewForbidden(gvr.GroupResource(), ref.Name, fmt.Errorf("authorize %s: %w", action, err))
+			}
 			return fmt.Errorf("authorize %s %s/%s/%s: %w", action, ref.Group, ref.Kind, ref.Name, err)
 		}
 	}
@@ -423,8 +441,8 @@ func (c *jobsConnector) authorizeAdminJob(ctx context.Context, cfg *provisioning
 	}, "")
 }
 
-// authorizePushJob checks that the requesting user may read every supported
-// resource type. A push job only exports resources to the repository (it reads
+// authorizePushJob checks that the requesting user may read everything the push
+// job will export. A push job only exports resources to the repository (it reads
 // them and writes files to git); it never creates or deletes Grafana resources,
 // so read permission is sufficient.
 //
@@ -432,10 +450,26 @@ func (c *jobsConnector) authorizeAdminJob(ctx context.Context, cfg *provisioning
 // request context, since the job executes later as the provisioning service
 // identity (which can read everything) — without this check a user could export
 // resources they are not allowed to read.
-func (c *jobsConnector) authorizePushJob(ctx context.Context, repo repository.Repository, cfg *provisioning.Repository) error {
+func (c *jobsConnector) authorizePushJob(ctx context.Context, repo repository.Repository, cfg *provisioning.Repository, opts *provisioning.ExportJobOptions) error {
+	var refs []provisioning.ResourceRef
+	if opts != nil {
+		refs = opts.Resources
+	}
 	authorizer, err := c.newJobAuthorizer(ctx, repo, cfg)
 	if err != nil {
 		return err
+	}
+	return c.authorizeExportRead(ctx, authorizer, cfg.Namespace, refs)
+}
+
+// authorizeExportRead checks that the user may read every resource an export
+// writes to the repository. A selective export reads only the listed resources,
+// so each one is checked where it currently lives. A full export reads every
+// unmanaged resource, including ones created after this check, so it requires
+// read access to every object of every supported type.
+func (c *jobsConnector) authorizeExportRead(ctx context.Context, authorizer resources.Authorizer, namespace string, refs []provisioning.ResourceRef) error {
+	if len(refs) > 0 {
+		return c.authorizeResourceRefs(ctx, authorizer, namespace, refs, utils.VerbGet, "export")
 	}
 	return authorizer.AuthorizeReadAllSupported(ctx)
 }
@@ -445,15 +479,16 @@ func (c *jobsConnector) authorizePushJob(ctx context.Context, repo repository.Re
 // This runs at job creation time while the user's identity is still in the request
 // context, since the job executes later as the provisioning service identity.
 //
-// Delegates to the resources.Authorizer which checks:
-//  1. Read permission on all supported resource types at root level.
+// Checks:
+//  1. Read permission on everything the migration exports: each listed resource
+//     for a selective migration, otherwise every object of every supported type.
 //  2. Create permission on all supported resource types in the target folder.
 func (c *jobsConnector) authorizeResourceJob(ctx context.Context, repo repository.Repository, cfg *provisioning.Repository, spec provisioning.JobSpec) error {
 	authorizer, err := c.newJobAuthorizer(ctx, repo, cfg)
 	if err != nil {
 		return err
 	}
-	if err := authorizer.AuthorizeReadAllSupported(ctx); err != nil {
+	if err := c.authorizeExportRead(ctx, authorizer, cfg.Namespace, spec.Migrate.Resources); err != nil {
 		return err
 	}
 	return authorizer.AuthorizeCreateAllSupported(ctx)

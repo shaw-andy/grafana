@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	authlib "github.com/grafana/authlib/types"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/grafana/grafana/apps/provisioning/pkg/apis/auth"
@@ -66,6 +67,11 @@ type Authorizer interface {
 	//   - This prevents bypassing folder permissions via file metadata manipulation
 	AuthorizeResource(ctx context.Context, parsed *ParsedResource, verb string) error
 
+	// AuthorizeRead checks if the current user may read the given existing
+	// resource. Folder-scoped kinds are checked like AuthorizeResource with the
+	// get verb; kinds without folders are checked by type, as their APIs do.
+	AuthorizeRead(ctx context.Context, parsed *ParsedResource) error
+
 	// AuthorizeCreateFolder checks if the current user has permission to create
 	// a folder at the specified path. This checks create permission on the parent folder.
 	//
@@ -93,7 +99,8 @@ type Authorizer interface {
 	AuthorizeMoveByPath(ctx context.Context, sourcePath, targetPath string) error
 
 	// AuthorizeReadAllSupported checks if the current user has read (get) permission
-	// on every supported provisioning resource type at the root level.
+	// on every object of every supported provisioning resource type, which requires
+	// a grant covering the whole type rather than some of its objects or folders.
 	// This is used before operations that enumerate all resources (e.g. full export).
 	AuthorizeReadAllSupported(ctx context.Context) error
 
@@ -103,7 +110,7 @@ type Authorizer interface {
 	AuthorizeCreateAllSupported(ctx context.Context) error
 
 	// AuthorizeDeleteAllSupported checks if the current user has delete permission
-	// on every supported provisioning resource type at the root level. This is used
+	// on every object of every supported provisioning resource type. This is used
 	// before operations that remove all resources (e.g. a full migration, which
 	// deletes the migrated resources from the instance).
 	AuthorizeDeleteAllSupported(ctx context.Context) error
@@ -504,23 +511,28 @@ func (a *ProvisioningAuthorizer) AuthorizeMoveByPath(ctx context.Context, source
 	return a.authorizeFileVerb(ctx, sourcePath, targetFolderID, utils.VerbCreate)
 }
 
+// allObjectsName is the object name used to ask whether the caller may act on
+// every object of a folder-scoped resource type. For those types a check with an
+// empty name only asks whether the caller may act on some object, which a grant
+// on a single folder or object satisfies. No resource can be named "*" and the
+// check carries no folder, so only a grant covering the whole type allows it.
+const allObjectsName = "*"
+
 // AuthorizeReadAllSupported checks if the current user has read (get) permission
-// on every supported provisioning resource type at the root level.
+// on every object of every supported provisioning resource type.
 func (a *ProvisioningAuthorizer) AuthorizeReadAllSupported(ctx context.Context) error {
+	return a.authorizeAllSupported(ctx, utils.VerbGet)
+}
+
+// AuthorizeRead checks if the current user may read the given existing resource.
+func (a *ProvisioningAuthorizer) AuthorizeRead(ctx context.Context, parsed *ParsedResource) error {
+	gk := parsed.Obj.GroupVersionKind().GroupKind()
 	for _, kind := range a.clients.SupportedResources() {
-		_, gvr, err := a.clients.ForKind(ctx, schema.GroupVersionKind{Group: kind.Group, Kind: kind.Kind})
-		if err != nil {
-			return fmt.Errorf("resolve client for %s/%s: %w", kind.Group, kind.Kind, err)
-		}
-		if err := a.access.Check(ctx, authlib.CheckRequest{
-			Group:    gvr.Group,
-			Resource: gvr.Resource,
-			Verb:     utils.VerbGet,
-		}, ""); err != nil {
-			return err
+		if kind.GroupKind == gk && !kind.IsFolderScoped() {
+			return a.authorizeAllOfKind(ctx, kind, parsed.GVR, utils.VerbGet)
 		}
 	}
-	return nil
+	return a.AuthorizeResource(ctx, parsed, utils.VerbGet)
 }
 
 // AuthorizeCreateAllSupported checks if the current user has create permission
@@ -546,20 +558,42 @@ func (a *ProvisioningAuthorizer) AuthorizeCreateAllSupported(ctx context.Context
 }
 
 // AuthorizeDeleteAllSupported checks if the current user has delete permission
-// on every supported provisioning resource type at the root level.
+// on every object of every supported provisioning resource type.
 func (a *ProvisioningAuthorizer) AuthorizeDeleteAllSupported(ctx context.Context) error {
+	return a.authorizeAllSupported(ctx, utils.VerbDelete)
+}
+
+func (a *ProvisioningAuthorizer) authorizeAllSupported(ctx context.Context, verb string) error {
 	for _, kind := range a.clients.SupportedResources() {
 		_, gvr, err := a.clients.ForKind(ctx, schema.GroupVersionKind{Group: kind.Group, Kind: kind.Kind})
 		if err != nil {
 			return fmt.Errorf("resolve client for %s/%s: %w", kind.Group, kind.Kind, err)
 		}
-		if err := a.access.Check(ctx, authlib.CheckRequest{
-			Group:    gvr.Group,
-			Resource: gvr.Resource,
-			Verb:     utils.VerbDelete,
-		}, ""); err != nil {
+		if err := a.authorizeAllOfKind(ctx, kind, gvr, verb); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// authorizeAllOfKind checks if the current user may perform verb on every object
+// of the kind. Kinds without folders keep the type-level check: they are not
+// granted per folder, and their APIs authorize by action alone (a named check on
+// a playlist is denied even to admins).
+func (a *ProvisioningAuthorizer) authorizeAllOfKind(ctx context.Context, kind SupportedResource, gvr schema.GroupVersionResource, verb string) error {
+	req := authlib.CheckRequest{
+		Group:    gvr.Group,
+		Resource: gvr.Resource,
+		Verb:     verb,
+	}
+	if kind.IsFolderScoped() {
+		req.Name = allObjectsName
+	}
+	if err := a.access.Check(ctx, req, ""); err != nil {
+		if apierrors.IsForbidden(err) {
+			return apierrors.NewForbidden(gvr.GroupResource(), "", fmt.Errorf("%s permission on all %s is required", verb, gvr.Resource))
+		}
+		return err
 	}
 	return nil
 }

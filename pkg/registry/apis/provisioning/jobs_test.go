@@ -505,7 +505,7 @@ func TestAuthorizePushJob(t *testing.T) {
 
 		c := &jobsConnector{access: accessMock, clients: newJobAuthClients(t), folderMetadataEnabled: false}
 
-		err := c.authorizePushJob(ctx, mockReader, cfg)
+		err := c.authorizePushJob(ctx, mockReader, cfg, &provisioning.ExportJobOptions{})
 		require.NoError(t, err)
 	})
 
@@ -519,7 +519,7 @@ func TestAuthorizePushJob(t *testing.T) {
 
 		c := &jobsConnector{access: accessMock, clients: newJobAuthClients(t), folderMetadataEnabled: false}
 
-		err := c.authorizePushJob(ctx, mockReader, cfg)
+		err := c.authorizePushJob(ctx, mockReader, cfg, &provisioning.ExportJobOptions{})
 		require.Error(t, err)
 		assert.True(t, apierrors.IsForbidden(err))
 	})
@@ -530,7 +530,7 @@ func TestAuthorizePushJob(t *testing.T) {
 
 		c := &jobsConnector{access: accessMock, clients: newJobAuthClients(t), folderMetadataEnabled: false}
 
-		err := c.authorizePushJob(ctx, mockRepo, cfg)
+		err := c.authorizePushJob(ctx, mockRepo, cfg, &provisioning.ExportJobOptions{})
 		require.Error(t, err)
 		assert.True(t, apierrors.IsBadRequest(err))
 	})
