@@ -87,8 +87,8 @@ type PluginInstanceCfg struct {
 func ProvidePluginInstanceConfig(cfg *setting.Cfg, settingProvider setting.Provider, features featuremgmt.FeatureToggles) (*PluginInstanceCfg, error) {
 	aws := settingProvider.Section("aws")
 	allowedAuth := cfg.AWSAllowedAuthProviders
-	if len(aws.KeyValue("allowed_auth_providers").Value()) > 0 {
-		allowedAuth = util.SplitString(aws.KeyValue("allowed_auth_providers").Value())
+	if providers := util.SplitString(aws.KeyValue("allowed_auth_providers").Value()); len(providers) > 0 {
+		allowedAuth = providers
 	}
 	awsForwardSettingsPlugins := cfg.AWSForwardSettingsPlugins
 	if len(aws.KeyValue("forward_settings_to_plugins").Value()) > 0 {

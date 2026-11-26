@@ -251,7 +251,7 @@ datasources:
     type: cloudwatch
     editable: true
     jsonData:
-      authType: credentials
+      authType: keys
       defaultRegion: eu-west-2
       customMetricsNamespaces: 'CWAgent'
 

@@ -374,6 +374,10 @@ func (s *Service) AddDataSource(ctx context.Context, cmd *datasources.AddDataSou
 	if cmd.JsonData == nil {
 		cmd.JsonData = simplejson.New()
 	}
+	s.setAWSAuthProviderForEmptyCloudWatch(cmd.Type, cmd.JsonData)
+	if err := s.validateAWSAuthProviders(cmd.Type, cmd.JsonData); err != nil {
+		return nil, err
+	}
 	// Run after the store assigns the final UID so the minted ID matches what is inserted.
 	cmd.BeforeSave = func(ctx context.Context, uid string, jsonData *simplejson.Json) {
 		awsexternalid.BeforeSave(ctx, uid, s.cfg, nil, jsonData)
@@ -661,6 +665,13 @@ func (s *Service) UpdateDataSource(ctx context.Context, cmd *datasources.UpdateD
 		}
 		if cmd.JsonData == nil {
 			cmd.JsonData = simplejson.New()
+		}
+		dsType := cmd.Type
+		if dsType == "" {
+			dsType = dataSource.Type
+		}
+		if err := s.validateAWSAuthProviders(dsType, cmd.JsonData); err != nil {
+			return err
 		}
 		existingJSON := dataSource.JsonData
 		cmd.BeforeSave = func(ctx context.Context, uid string, jsonData *simplejson.Json) {

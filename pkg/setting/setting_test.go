@@ -682,7 +682,7 @@ func TestHandleAWSSettings(t *testing.T) {
 		require.NoError(t, err)
 
 		cfg.handleAWSConfig()
-		assert.Equal(t, []string{"default", "keys", "credentials"}, cfg.AWSAllowedAuthProviders)
+		assert.Equal(t, []string{"keys"}, cfg.AWSAllowedAuthProviders)
 	})
 	t.Run("Should pass on auth providers defined in config", func(t *testing.T) {
 		cfg := NewCfg()
