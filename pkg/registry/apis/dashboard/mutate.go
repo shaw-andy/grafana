@@ -65,6 +65,7 @@ func (b *DashboardsAPIBuilder) mutateDashboard(ctx context.Context, a admission.
 
 	var migrationErr error
 	var resourceInfo utils.ResourceInfo
+	var referenceErrs field.ErrorList
 	switch v := obj.(type) {
 	case *dashboardV0.Dashboard:
 		delete(v.Spec.Object, "uid")
@@ -107,6 +108,7 @@ func (b *DashboardsAPIBuilder) mutateDashboard(ctx context.Context, a admission.
 		// Strip BOMs from all string fields recursively
 		util.StripBOMFromStruct(&v.Spec)
 		resourceInfo = dashboardV2alpha1.DashboardResourceInfo
+		referenceErrs = dashboardV2alpha1.ValidateElementReferences(&v.Spec)
 
 	case *dashboardV2beta1.Dashboard:
 		// Temporary fix: The generator fails to properly initialize this property, so we'll do it here
@@ -120,6 +122,7 @@ func (b *DashboardsAPIBuilder) mutateDashboard(ctx context.Context, a admission.
 		// Strip BOMs from all string fields recursively
 		util.StripBOMFromStruct(&v.Spec)
 		resourceInfo = dashboardV2beta1.DashboardResourceInfo
+		referenceErrs = dashboardV2beta1.ValidateElementReferences(&v.Spec)
 
 	case *dashboardV2.Dashboard:
 		if v.Spec.Layout.GridLayoutKind == nil && v.Spec.Layout.RowsLayoutKind == nil && v.Spec.Layout.AutoGridLayoutKind == nil && v.Spec.Layout.TabsLayoutKind == nil {
@@ -131,9 +134,16 @@ func (b *DashboardsAPIBuilder) mutateDashboard(ctx context.Context, a admission.
 		// Strip BOMs from all string fields recursively
 		util.StripBOMFromStruct(&v.Spec)
 		resourceInfo = dashboardV2.DashboardResourceInfo
+		referenceErrs = dashboardV2.ValidateElementReferences(&v.Spec)
 
 	default:
 		return fmt.Errorf("mutation error: expected to dashboard, got %T", obj)
+	}
+
+	// Checked regardless of field validation mode: repeated references expand into one panel per
+	// reference whenever the dashboard is read as v0alpha1 or v1.
+	if len(referenceErrs) > 0 {
+		return apierrors.NewInvalid(resourceInfo.GroupVersionKind().GroupKind(), meta.GetName(), referenceErrs)
 	}
 
 	if internalID != 0 {

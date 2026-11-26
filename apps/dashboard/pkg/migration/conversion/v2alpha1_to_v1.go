@@ -91,6 +91,10 @@ func convertDashboardSpec_V2alpha1_to_V1(ctx context.Context, in *dashv2alpha1.D
 		dashboard["links"] = convertLinksToV1(in.Links)
 	}
 
+	if errs := dashv2alpha1.ValidateElementReferences(in); len(errs) > 0 {
+		return nil, fmt.Errorf("%w: %s", ErrDuplicateElementReference, errs.ToAggregate().Error())
+	}
+
 	// Convert panels from elements and layout
 	panels, err := convertPanelsFromElementsAndLayout(in.Elements, in.Layout)
 	if err != nil {

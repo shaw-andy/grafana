@@ -328,6 +328,9 @@ func withConversionMetrics(sourceVersionAPI, targetVersionAPI string, conversion
 			recordConversionSuccess(sourceVersionAPI, targetVersionAPI, info, duration)
 		}
 
+		if errors.Is(err, ErrDuplicateElementReference) {
+			return err
+		}
 		return nil
 	}
 }

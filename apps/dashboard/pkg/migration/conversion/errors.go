@@ -1,8 +1,16 @@
 package conversion
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 var _ error = &ConversionError{}
+
+// ErrDuplicateElementReference is returned when a v2 layout places the same element more than once.
+// Unlike other conversion failures it is returned to the caller instead of only being recorded in
+// the conversion status, so an object that would expand on conversion is refused outright.
+var ErrDuplicateElementReference = errors.New("layout references the same element more than once")
 
 // NewConversionError creates a new ConversionError with the given message, current API version, target API version, and function name
 func NewConversionError(msg string, currentAPIVersion, targetAPIVersion string, functionName string) *ConversionError {
