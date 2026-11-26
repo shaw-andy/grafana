@@ -20,11 +20,12 @@ import (
 // unlike the public-facing storage wrapper which strips it on GET/LIST.
 type deleteKeyREST struct {
 	getter rest.Getter
+	access accessOptions
 }
 
 // NewDeleteKeyREST creates a new subresource handler for the deleteKey endpoint.
-func NewDeleteKeyREST(getter rest.Getter) (rest.Storage, error) {
-	return &deleteKeyREST{getter: getter}, nil
+func NewDeleteKeyREST(getter rest.Getter, opts ...AccessOption) (rest.Storage, error) {
+	return &deleteKeyREST{getter: getter, access: newAccessOptions(opts)}, nil
 }
 
 var (
@@ -77,6 +78,11 @@ func (r *deleteKeyREST) Connect(ctx context.Context, name string, opts runtime.O
 	}
 	if snap.Namespace != ns.Value {
 		return nil, apierrors.NewNotFound(dashv0.SnapshotResourceInfo.GroupResource(), name)
+	}
+
+	// The delete key grants deletion, so reading it requires the same access as deleting.
+	if err := checkSnapshotDeleteAccess(ctx, r.access.accessControl, snap); err != nil {
+		return nil, err
 	}
 
 	deleteKey := ""

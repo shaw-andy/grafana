@@ -19,6 +19,7 @@ import (
 
 	authlib "github.com/grafana/authlib/types"
 	dashV0 "github.com/grafana/grafana/apps/dashboard/pkg/apis/dashboard/v0alpha1"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/components/simplejson"
 	"github.com/grafana/grafana/pkg/services/dashboardsnapshots"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
@@ -28,6 +29,16 @@ import (
 // how the apiserver sets the namespace before reaching the store.
 func ctxForOrg(orgID int64) context.Context {
 	return k8srequest.WithNamespace(context.Background(), authlib.OrgNamespaceFormatter(orgID))
+}
+
+// ctxForCreator adds a signed-in caller who created the snapshot (snapshot UserID == userID).
+func ctxForCreator(orgID, userID int64) context.Context {
+	return identity.WithRequester(ctxForOrg(orgID), &identity.StaticRequester{
+		Type:    authlib.TypeUser,
+		UserID:  userID,
+		OrgID:   orgID,
+		OrgRole: identity.RoleEditor,
+	})
 }
 
 func setExternalSnapshotsK8SAPIPushToggle(t *testing.T, enabled bool) {
@@ -63,6 +74,7 @@ func setExternalSnapshotsK8SAPIPushToggle(t *testing.T, enabled bool) {
 
 func TestSnapshotLegacyStore_Delete_External(t *testing.T) {
 	const deleteKey = "abc123"
+	const creatorID = int64(10)
 
 	makeStore := func(t *testing.T, externalDeleteURL string) *SnapshotLegacyStore {
 		mockService := dashboardsnapshots.NewMockService(t)
@@ -71,6 +83,7 @@ func TestSnapshotLegacyStore_Delete_External(t *testing.T) {
 				Key:               "snap-1",
 				DeleteKey:         deleteKey,
 				OrgID:             1,
+				UserID:            creatorID,
 				External:          true,
 				ExternalDeleteURL: externalDeleteURL,
 			}, nil)
@@ -99,7 +112,7 @@ func TestSnapshotLegacyStore_Delete_External(t *testing.T) {
 		// the URL from the domain + deleteKey rather than using it as-is.
 		store := makeStore(t, server.URL+"/apis/dashboard.grafana.app/v0alpha1/namespaces/default/snapshots/delete/"+deleteKey)
 
-		_, _, err := store.Delete(ctxForOrg(1), "snap-1", nil, &metav1.DeleteOptions{})
+		_, _, err := store.Delete(ctxForCreator(1, creatorID), "snap-1", nil, &metav1.DeleteOptions{})
 		require.NoError(t, err)
 		require.NotNil(t, receivedReq)
 		assert.Equal(t, http.MethodDelete, receivedReq.Method)
@@ -119,7 +132,7 @@ func TestSnapshotLegacyStore_Delete_External(t *testing.T) {
 
 		store := makeStore(t, server.URL+"/api/snapshots-delete/"+deleteKey)
 
-		_, _, err := store.Delete(ctxForOrg(1), "snap-1", nil, &metav1.DeleteOptions{})
+		_, _, err := store.Delete(ctxForCreator(1, creatorID), "snap-1", nil, &metav1.DeleteOptions{})
 		require.NoError(t, err)
 		require.NotNil(t, receivedReq)
 		assert.Equal(t, http.MethodGet, receivedReq.Method)
@@ -141,7 +154,7 @@ func TestSnapshotLegacyStore_Delete_External(t *testing.T) {
 		// extract just the domain and rebuild the new k8s path.
 		store := makeStore(t, server.URL+"/api/snapshots-delete/"+deleteKey)
 
-		_, _, err := store.Delete(ctxForOrg(1), "snap-1", nil, &metav1.DeleteOptions{})
+		_, _, err := store.Delete(ctxForCreator(1, creatorID), "snap-1", nil, &metav1.DeleteOptions{})
 		require.NoError(t, err)
 		require.NotNil(t, receivedReq)
 		assert.Equal(t, http.MethodDelete, receivedReq.Method)
@@ -153,7 +166,7 @@ func TestSnapshotLegacyStore_Delete_External(t *testing.T) {
 
 		store := makeStore(t, "not-a-url")
 
-		_, _, err := store.Delete(ctxForOrg(1), "snap-1", nil, &metav1.DeleteOptions{})
+		_, _, err := store.Delete(ctxForCreator(1, creatorID), "snap-1", nil, &metav1.DeleteOptions{})
 		require.Error(t, err)
 	})
 }

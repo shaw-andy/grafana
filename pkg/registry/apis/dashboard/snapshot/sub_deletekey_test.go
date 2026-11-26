@@ -34,6 +34,7 @@ func newDeleteKeyREST(t *testing.T) *deleteKeyREST {
 			Key:       "snap-1",
 			DeleteKey: "secret-delete-key",
 			OrgID:     1,
+			UserID:    10,
 			Dashboard: simplejson.New(),
 		}, nil)
 
@@ -49,8 +50,8 @@ func TestDeleteKeyREST_Connect_SameOrg(t *testing.T) {
 	r := newDeleteKeyREST(t)
 	responder := &capturingResponder{}
 
-	// Caller in org 1, snapshot owned by org 1.
-	handler, err := r.Connect(ctxForOrg(1), "snap-1", nil, responder)
+	// Caller in org 1 created the snapshot, which is owned by org 1.
+	handler, err := r.Connect(ctxForCreator(1, 10), "snap-1", nil, responder)
 	require.NoError(t, err)
 	require.NotNil(t, handler)
 

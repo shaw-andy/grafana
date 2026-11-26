@@ -15,6 +15,7 @@ import (
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apimachinery/utils"
 	grafanarest "github.com/grafana/grafana/pkg/apiserver/rest"
+	ac "github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/apiserver/endpoints/request"
 	"github.com/grafana/grafana/pkg/services/dashboardsnapshots"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
@@ -29,6 +30,9 @@ type SnapshotLegacyStore struct {
 	Service               dashboardsnapshots.Service
 	Namespacer            request.NamespaceMapper
 	ExternalSnapshotToken string
+	// AccessControl resolves dashboard permission scopes for delete access.
+	// When nil, the caller's own permissions are evaluated without scope resolution.
+	AccessControl ac.AccessControl
 }
 
 func (s *SnapshotLegacyStore) New() runtime.Object {
@@ -72,6 +76,18 @@ func (s *SnapshotLegacyStore) Delete(ctx context.Context, name string, deleteVal
 	}
 	if snap.OrgID != ns.OrgID {
 		return nil, false, s.ResourceInfo.NewNotFound(name)
+	}
+
+	// Everything below acts on this row, located by its delete key, so the
+	// authorization decision cannot be applied to a different snapshot.
+	obj := convertSnapshotToK8sResource(snap, func(int64) string { return ns.Value })
+	if err := checkSnapshotDeleteAccess(ctx, s.AccessControl, obj); err != nil {
+		return nil, false, err
+	}
+	if deleteValidation != nil {
+		if err := deleteValidation(ctx, obj); err != nil {
+			return nil, false, err
+		}
 	}
 
 	// Delete the external one first. The stored ExternalDeleteURL may have an outdated

@@ -489,7 +489,7 @@ func GetRoutes(options dashv0.SnapshotSharingOptions, accessControl ac.AccessCon
 						return
 					}
 
-					_, _, err = deleter.Delete(ctx, snapshotName, nil, &metav1.DeleteOptions{})
+					_, _, err = deleter.Delete(withDeleteKeyGrant(ctx, deleteKey), snapshotName, requireDeleteKey(deleteKey), &metav1.DeleteOptions{})
 					if err != nil {
 						errhttp.Write(ctx, fmt.Errorf("failed to delete snapshot: %w", err), w)
 						return
