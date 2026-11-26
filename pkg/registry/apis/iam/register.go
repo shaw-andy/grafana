@@ -781,7 +781,7 @@ func (b *IdentityAccessManagementAPIBuilder) UpdateUsersAPIGroup(opts builder.AP
 			team.NewLegacyUserTeamsSearchClient(b.store, b.tracing),
 		)
 
-		statusStore := grafanaregistry.NewRegistryStatusStore(opts.Scheme, userUniStore)
+		statusStore := user.NewStatusStore(opts.Scheme, userUniStore)
 		storage[userResource.StoragePath("status")] = statusStore
 
 		if b.userLegacyStore != nil && b.useStatusDualWriter(userResource) {
@@ -1174,8 +1174,9 @@ func (b *IdentityAccessManagementAPIBuilder) validateUpdate(ctx context.Context,
 	oldObj := a.GetOldObject()
 	switch typedObj := a.GetObject().(type) {
 	case *iamv0.User:
-		// Skip spec validation for status subresource updates because the generated
-		// UpdateStatus client only sends the status (spec fields are empty).
+		// Skip spec validation for status subresource updates: the users/status stores
+		// (user.NewStatusStore and user.NewStatusDualWriter) persist only status, and the
+		// generated UpdateStatus client sends an empty spec.
 		if a.GetSubresource() == "status" {
 			return nil
 		}
