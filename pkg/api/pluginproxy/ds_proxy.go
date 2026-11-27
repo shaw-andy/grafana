@@ -345,6 +345,14 @@ func (proxy *DataSourceProxy) validateRequest() error {
 		}
 	}
 
+	// Routes are matched against the decoded path, because that is the path the upstream
+	// resolves. Matching the escaped form would let encoded separators and dot segments
+	// (e.g. "allowed%2F..%2Frestricted") satisfy a less restrictive route prefix.
+	decodedProxyPath, err := url.PathUnescape(proxy.proxyPath)
+	if err != nil {
+		return err
+	}
+
 	// found route if there are any
 	for _, route := range proxy.pluginRoutes {
 		// method match
@@ -353,7 +361,7 @@ func (proxy *DataSourceProxy) validateRequest() error {
 		}
 
 		// route match
-		r1, err := plugins.CleanRelativePath(proxy.proxyPath)
+		r1, err := plugins.CleanRelativePath(decodedProxyPath)
 		if err != nil {
 			return err
 		}
@@ -364,7 +372,7 @@ func (proxy *DataSourceProxy) validateRequest() error {
 		// issues/116273: When we have an empty input route (or input that becomes relative to "."), we do not want it
 		//   to be ".". This is because the `CleanRelativePath` function will never return "./" prefixes, and as such,
 		//   the common prefix we need is an empty string.
-		if r1 == "." && proxy.proxyPath != "." {
+		if r1 == "." && decodedProxyPath != "." {
 			r1 = ""
 		}
 		if r2 == "." && route.Path != "." {
