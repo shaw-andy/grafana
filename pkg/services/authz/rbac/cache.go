@@ -12,18 +12,18 @@ import (
 	"time"
 
 	"github.com/grafana/authlib/cache"
+	"github.com/grafana/authlib/types"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/infra/tracing"
 )
 
-func userIdentifierCacheKey(namespace, userUID string) string {
-	return namespace + ".uid_" + userUID
-}
-
-func userIdentifierCacheKeyById(namespace, ID string) string {
-	return namespace + ".id_" + ID
+// The prefix differs from the earlier ".uid_" and ".id_" keys so entries written
+// by older instances sharing the cache, which may map a numeric uid to another
+// account, are never read.
+func userIdentifierCacheKey(namespace string, idType types.IdentityType, userUID string) string {
+	return namespace + ".typed_uid_" + string(idType) + ":" + userUID
 }
 
 // permCacheActionPart builds the action segment of permission-cache keys.

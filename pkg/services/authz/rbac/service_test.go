@@ -2263,7 +2263,7 @@ func TestService_Check(t *testing.T) {
 				require.Equal(t, tc.expected, resp.Allowed)
 
 				// Check cache
-				id, ok := s.idCache.Get(ctx, userIdentifierCacheKey("org-12", "test-uid"))
+				id, ok := s.idCache.Get(ctx, userIdentifierCacheKey("org-12", types.TypeUser, "test-uid"))
 				require.True(t, ok)
 				require.Equal(t, id.UID, "test-uid")
 
@@ -2891,7 +2891,7 @@ func TestService_CacheCheck(t *testing.T) {
 	t.Run("Allow based on cached permissions", func(t *testing.T) {
 		s := setupService()
 
-		s.idCache.Set(ctx, userIdentifierCacheKey("org-12", "test-uid"), *userID)
+		s.idCache.Set(ctx, userIdentifierCacheKey("org-12", types.TypeUser, "test-uid"), *userID)
 		dashGetActionSets := actionSetsForVerb(t, "dashboard.grafana.app", "dashboards", "", "get")
 		s.permCache.Set(ctx, userPermCacheKey("org-12", "test-uid", "dashboards:read", dashGetActionSets), map[string]bool{"dashboards:uid:dash1": true})
 
@@ -2918,7 +2918,7 @@ func TestService_CacheCheck(t *testing.T) {
 		s.store = store
 		s.permissionStore = store
 
-		s.idCache.Set(ctx, userIdentifierCacheKey("org-12", "test-uid"), *userID)
+		s.idCache.Set(ctx, userIdentifierCacheKey("org-12", types.TypeUser, "test-uid"), *userID)
 
 		resp, err := s.Check(ctx, &authzv1.CheckRequest{
 			Namespace: "org-12",
@@ -2942,7 +2942,7 @@ func TestService_CacheCheck(t *testing.T) {
 		s.store = store
 		s.permissionStore = store
 
-		s.idCache.Set(ctx, userIdentifierCacheKey("org-12", "test-uid"), *userID)
+		s.idCache.Set(ctx, userIdentifierCacheKey("org-12", types.TypeUser, "test-uid"), *userID)
 		// The cache does not have the permission for dash2 (outdated)
 		s.permCache.Set(ctx, userPermCacheKey("org-12", "test-uid", "dashboards:read", actionSetsForVerb(t, "dashboard.grafana.app", "dashboards", "", "get")), map[string]bool{"dashboards:uid:dash1": true})
 
@@ -2960,7 +2960,7 @@ func TestService_CacheCheck(t *testing.T) {
 	t.Run("Should deny on explicit cache deny entry", func(t *testing.T) {
 		s := setupService()
 
-		s.idCache.Set(ctx, userIdentifierCacheKey("org-12", "test-uid"), *userID)
+		s.idCache.Set(ctx, userIdentifierCacheKey("org-12", types.TypeUser, "test-uid"), *userID)
 
 		// Explicitly deny access to the dashboard
 		s.permDenialCache.Set(ctx, userPermDenialCacheKey("org-12", "test-uid", "dashboards:read", actionSetsForVerb(t, "dashboard.grafana.app", "dashboards", "", "get"), "dash1", "fold1"), true)
@@ -3175,7 +3175,7 @@ func TestService_List(t *testing.T) {
 				require.ElementsMatch(t, resp.Folders, tc.expected.Folders)
 
 				// Check cache
-				id, ok := s.idCache.Get(ctx, userIdentifierCacheKey("org-12", "test-uid"))
+				id, ok := s.idCache.Get(ctx, userIdentifierCacheKey("org-12", types.TypeUser, "test-uid"))
 				require.True(t, ok)
 				require.Equal(t, id.UID, "test-uid")
 				perms, ok := s.permCache.Get(ctx, userPermCacheKey("org-12", "test-uid", "dashboards:read", actionSetsForVerb(t, tc.req.Group, tc.req.Resource, tc.req.Subresource, tc.req.Verb)))
@@ -3409,7 +3409,7 @@ func TestService_CacheList(t *testing.T) {
 		s := setupService()
 		ctx := types.WithAuthInfo(context.Background(), callingService)
 		userID := &store.UserIdentifiers{UID: "test-uid", ID: 1}
-		s.idCache.Set(ctx, userIdentifierCacheKey("org-12", "test-uid"), *userID)
+		s.idCache.Set(ctx, userIdentifierCacheKey("org-12", types.TypeUser, "test-uid"), *userID)
 		s.permCache.Set(ctx,
 			userPermCacheKey("org-12", "test-uid", "dashboards:read", actionSetsForVerb(t, "dashboard.grafana.app", "dashboards", "", "list")),
 			map[string]bool{"dashboards:uid:dash1": true, "dashboards:uid:dash2": true, "folders:uid:fold1": true},

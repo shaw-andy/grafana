@@ -290,7 +290,7 @@ func TestService_GetUserPermissionsSkipCacheBypassesIdentityCaches(t *testing.T)
 	service.permissionStore = permissionStore
 
 	ctx := t.Context()
-	service.idCache.Set(ctx, userIdentifierCacheKey("org-12", "test-uid"), store.UserIdentifiers{UID: "test-uid", ID: 1})
+	service.idCache.Set(ctx, userIdentifierCacheKey("org-12", types.TypeUser, "test-uid"), store.UserIdentifiers{UID: "test-uid", ID: 1})
 	service.basicRoleCache.Set(ctx, userBasicRoleCacheKey("org-12", "test-uid"), store.BasicRole{Role: "Viewer"})
 	service.userTeamCache.Set(ctx, userTeamCacheKey("org-12", "test-uid"), []int64{1})
 	caller := authn.NewAccessTokenAuthInfo(authn.Claims[authn.AccessTokenClaims]{
@@ -327,7 +327,7 @@ func TestService_GetUserPermissionsUsesServerIdentityCachesIndependently(t *test
 	service.permissionStore = permissionStore
 
 	ctx := t.Context()
-	service.idCache.Set(ctx, userIdentifierCacheKey("org-12", "test-uid"), store.UserIdentifiers{UID: "test-uid", ID: 1})
+	service.idCache.Set(ctx, userIdentifierCacheKey("org-12", types.TypeUser, "test-uid"), store.UserIdentifiers{UID: "test-uid", ID: 1})
 	service.basicRoleCache.Set(ctx, userBasicRoleCacheKey("org-12", "test-uid"), store.BasicRole{Role: "Viewer"})
 	service.userTeamCache.Set(ctx, userTeamCacheKey("org-12", "test-uid"), []int64{1})
 	caller := authn.NewAccessTokenAuthInfo(authn.Claims[authn.AccessTokenClaims]{
