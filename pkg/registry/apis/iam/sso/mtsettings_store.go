@@ -1,10 +1,13 @@
 package sso
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"hash/fnv"
+	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -134,14 +137,26 @@ func (s *MTSettingsStore) Create(ctx context.Context, obj runtime.Object, create
 		}
 	}
 
+	// Create does not prune existing rows, so a credential the request leaves
+	// out stays stored and has to be checked against the current settings.
+	var stored map[string]any
+	current, err := s.get(ctx, ssoSetting.Name)
+	switch {
+	case err == nil:
+		stored = current.Spec.Settings.Object
+	case !apierrors.IsNotFound(err):
+		return nil, err
+	}
+
 	section := sectionFor(ssoSetting.Name)
 	desired := ssoSetting.Spec.Settings.UnstructuredContent()
+	if err := refuseCredentialReuse(desired, stored); err != nil {
+		return nil, err
+	}
 	resolveSecrets(desired, nil)
 	desired = s.withProviderDefaults(ssoSetting.Name, desired)
-	for key, val := range desired {
-		if err := s.writer.Upsert(ctx, &settingsvc.Setting{Section: section, Key: key, Value: valueToString(val)}); err != nil {
-			return nil, apierrors.NewInternalError(err)
-		}
+	if err := s.upsertSettings(ctx, section, desired, nil); err != nil {
+		return nil, err
 	}
 
 	// Re-read so the response is the stored projection, not an echo of the
@@ -217,7 +232,9 @@ func (s *MTSettingsStore) Update(ctx context.Context, name string, objInfo rest.
 	current, err := s.get(ctx, name)
 	switch {
 	case err == nil:
-		oldObj = current
+		// A patch is applied to oldObj, so it must carry the redacted placeholder
+		// rather than the stored secret for resolveSecrets to see the reuse.
+		oldObj = redactSecrets(current)
 	case apierrors.IsNotFound(err) && !forceAllowCreate:
 		return nil, false, err
 	case apierrors.IsNotFound(err):
@@ -255,15 +272,16 @@ func (s *MTSettingsStore) Update(ctx context.Context, name string, objInfo rest.
 	if !created {
 		stored = current.Spec.Settings.Object
 	}
-	resolveSecrets(desired, stored)
+	if err := refuseCredentialReuse(desired, stored); err != nil {
+		return nil, false, err
+	}
+	restored := resolveSecrets(desired, stored)
 	desired = s.withProviderDefaults(name, desired)
 
 	// Upsert every desired key first — a required value is never removed before
 	// its replacement is durable.
-	for key, val := range desired {
-		if err := s.writer.Upsert(ctx, &settingsvc.Setting{Section: section, Key: key, Value: valueToString(val)}); err != nil {
-			return nil, false, apierrors.NewInternalError(err)
-		}
+	if err := s.upsertSettings(ctx, section, desired, restored); err != nil {
+		return nil, false, err
 	}
 
 	if _, err := pruneStaleRows(ctx, s.reader, s.writer, name, desired); err != nil {
@@ -299,6 +317,37 @@ func (s *MTSettingsStore) Delete(ctx context.Context, name string, deleteValidat
 	// post-delete semantics are mode-dependent (which store is read-authoritative)
 	// and are settled in the migration's later choreography stage.
 	return current, true, nil
+}
+
+// upsertSettings writes the desired keys, except the restored secrets whose rows
+// already hold the stored value. Rows are written one at a time, so credentials
+// go first and endpoints last: an interrupted or overlapping write must never
+// leave a new endpoint next to a credential that was not supplied with it.
+func (s *MTSettingsStore) upsertSettings(ctx context.Context, section string, desired map[string]any, restored map[string]bool) error {
+	keys := slices.Collect(maps.Keys(desired))
+	rank := func(key string) int {
+		switch {
+		case ssosettings.IsPresentedCredentialField(key):
+			return 0
+		case ssosettings.IsEndpointField(key):
+			return 2
+		default:
+			return 1
+		}
+	}
+	slices.SortFunc(keys, func(a, b string) int {
+		return cmp.Or(cmp.Compare(rank(a), rank(b)), strings.Compare(a, b))
+	})
+
+	for _, key := range keys {
+		if restored[key] {
+			continue
+		}
+		if err := s.writer.Upsert(ctx, &settingsvc.Setting{Section: section, Key: key, Value: valueToString(desired[key])}); err != nil {
+			return apierrors.NewInternalError(err)
+		}
+	}
+	return nil
 }
 
 func (s *MTSettingsStore) notImplemented(verb string, name string) error {
@@ -415,18 +464,41 @@ func isSecretField(key string) bool {
 }
 
 // resolveSecrets restores a placeholder secret from its stored value, or drops the key
-// when there's no real value to restore, so the placeholder is never persisted.
-func resolveSecrets(desired map[string]any, stored map[string]any) {
+// when there's no real value to restore, so the placeholder is never persisted. It
+// returns the restored keys.
+func resolveSecrets(desired map[string]any, stored map[string]any) map[string]bool {
+	restored := map[string]bool{}
 	for key, val := range desired {
 		if str, ok := val.(string); !ok || str != setting.RedactedPassword || !isSecretField(key) {
 			continue
 		}
 		if prev, ok := stored[key].(string); ok && prev != "" && prev != setting.RedactedPassword {
 			desired[key] = prev
+			restored[key] = true
 		} else {
 			delete(desired, key)
 		}
 	}
+	return restored
+}
+
+// refuseCredentialReuse rejects a write that changes a provider endpoint while
+// keeping a stored credential, either by sending the redacted placeholder or by
+// leaving the field out so that the stored or a lower-layer value remains.
+func refuseCredentialReuse(desired map[string]any, stored map[string]any) error {
+	if !ssosettings.EndpointsChanged(desired, stored) {
+		return nil
+	}
+	for key, prev := range stored {
+		if !ssosettings.IsPresentedCredentialField(key) || prev == nil || prev == "" {
+			continue
+		}
+		if val, ok := desired[key]; ok && val != setting.RedactedPassword {
+			continue
+		}
+		return apierrors.NewBadRequest(fmt.Sprintf("a new value for %s is required when the provider endpoints change", key))
+	}
+	return nil
 }
 
 // redactSecrets is a copy of the ssosettings redaction (IsSecretField/removeSecrets in
