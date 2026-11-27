@@ -3,12 +3,16 @@ package model
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 )
+
+// ErrPermissionDenied is returned when the user may not use a channel's plugin.
+var ErrPermissionDenied = errors.New("permission denied")
 
 // ChannelPublisher writes data into a channel. Note that permissions are not checked.
 type ChannelPublisher func(ns string, channel string, data []byte) error

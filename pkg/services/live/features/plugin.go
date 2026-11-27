@@ -68,6 +68,9 @@ type PluginPathRunner struct {
 func (r *PluginPathRunner) OnSubscribe(ctx context.Context, user identity.Requester, e model.SubscribeEvent) (model.SubscribeReply, backend.SubscribeStreamStatus, error) {
 	pCtx, err := r.pluginContextGetter.GetPluginContext(ctx, user, r.pluginID, r.datasourceUID, false)
 	if err != nil {
+		if errors.Is(err, model.ErrPermissionDenied) {
+			return model.SubscribeReply{}, backend.SubscribeStreamStatusPermissionDenied, nil
+		}
 		if errors.Is(err, plugins.ErrPluginNotRegistered) {
 			logger.Error("Plugin context not found", "path", r.path)
 			return model.SubscribeReply{}, 0, centrifuge.ErrorInternal
@@ -112,6 +115,9 @@ func (r *PluginPathRunner) OnSubscribe(ctx context.Context, user identity.Reques
 func (r *PluginPathRunner) OnPublish(ctx context.Context, user identity.Requester, e model.PublishEvent) (model.PublishReply, backend.PublishStreamStatus, error) {
 	pCtx, err := r.pluginContextGetter.GetPluginContext(ctx, user, r.pluginID, r.datasourceUID, false)
 	if err != nil {
+		if errors.Is(err, model.ErrPermissionDenied) {
+			return model.PublishReply{}, backend.PublishStreamStatusPermissionDenied, nil
+		}
 		if errors.Is(err, plugins.ErrPluginNotRegistered) {
 			logger.Error("Plugin context not found", "path", r.path)
 			return model.PublishReply{}, 0, centrifuge.ErrorInternal

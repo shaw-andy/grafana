@@ -14,6 +14,7 @@ import (
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/plugins"
+	"github.com/grafana/grafana/pkg/services/live/model"
 )
 
 var (
@@ -295,6 +296,10 @@ func (s *Manager) runStream(ctx context.Context, cancelFn func(), sr streamReque
 			if err != nil {
 				if errors.Is(err, plugins.ErrPluginNotRegistered) {
 					logger.Info("No plugin context found, stopping stream", "path", sr.Path)
+					return
+				}
+				if errors.Is(err, model.ErrPermissionDenied) {
+					logger.Info("Plugin access denied, stopping stream", "path", sr.Path)
 					return
 				}
 				logger.Error("Error getting plugin context", "path", sr.Path, "error", err)
