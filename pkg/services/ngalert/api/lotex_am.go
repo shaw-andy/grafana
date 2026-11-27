@@ -6,12 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"slices"
 
 	"go.yaml.in/yaml/v3"
 
 	"github.com/grafana/grafana/pkg/api/response"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
 	"github.com/grafana/grafana/pkg/services/datasources"
 	apimodels "github.com/grafana/grafana/pkg/services/ngalert/api/tooling/definitions"
@@ -163,15 +167,78 @@ func (am *LotexAM) RouteDeleteSilence(ctx *contextmodel.ReqContext, silenceID st
 }
 
 func (am *LotexAM) RouteGetAlertingConfig(ctx *contextmodel.ReqContext) response.Response {
+	datasourceUID := web.Params(ctx.Req)[":DatasourceUID"]
+	if datasourceUID == "" {
+		return response.Error(http.StatusBadRequest, "DatasourceUID is invalid", nil)
+	}
+	writeEval := accesscontrol.EvalPermission(accesscontrol.ActionAlertingNotificationsExternalWrite, datasources.ScopeProvider.GetResourceScopeUID(datasourceUID))
+
+	canWrite := false
+	if am.ac != nil {
+		var err error
+		canWrite, err = am.ac.Evaluate(ctx.Req.Context(), ctx.SignedInUser, writeEval)
+		if err != nil {
+			return ErrResp(http.StatusInternalServerError, err, "Failed to evaluate permissions")
+		}
+	}
+
+	// The upstream config contains receiver secrets in plain text. Only callers that can
+	// write the config get it verbatim, because posting it back requires the real values.
+	if canWrite {
+		return am.withAMReq(
+			ctx,
+			http.MethodGet,
+			"config",
+			nil,
+			nil,
+			yamlExtractor(&apimodels.ExternalAlertmanagerConfig{}),
+			nil,
+		)
+	}
+
 	return am.withAMReq(
-		ctx,
+		withExternalConfigRouteGrant(ctx, datasourceUID),
 		http.MethodGet,
 		"config",
 		nil,
 		nil,
-		yamlExtractor(&apimodels.ExternalAlertmanagerConfig{}),
+		redactedExternalConfigExtractor,
 		nil,
 	)
+}
+
+func redactedExternalConfigExtractor(resp *response.NormalResponse) (any, error) {
+	cfg := &apimodels.ExternalAlertmanagerConfig{}
+	if _, err := yamlExtractor(cfg)(resp); err != nil {
+		return nil, err
+	}
+	return cfg.WithRedactedSecrets()
+}
+
+// withExternalConfigRouteGrant returns a copy of ctx whose requester passes the Alertmanager
+// plugin route for the raw config on the given datasource. That route requires write access
+// so the datasource proxy never hands the unredacted config to read-only users. The copy is
+// only used for the fixed upstream GET issued here, and its response is redacted before it
+// is returned.
+func withExternalConfigRouteGrant(ctx *contextmodel.ReqContext, datasourceUID string) *contextmodel.ReqContext {
+	u := *ctx.SignedInUser
+	perms := make(map[int64]map[string][]string, len(u.Permissions)+1)
+	for orgID, orgPerms := range u.Permissions {
+		perms[orgID] = maps.Clone(orgPerms)
+	}
+	if perms[u.OrgID] == nil {
+		perms[u.OrgID] = map[string][]string{}
+	}
+	action := accesscontrol.ActionAlertingNotificationsExternalWrite
+	perms[u.OrgID][action] = append(slices.Clone(perms[u.OrgID][action]), datasources.ScopeProvider.GetResourceScopeUID(datasourceUID))
+	u.Permissions = perms
+
+	webCtx := *ctx.Context
+	webCtx.Req = ctx.Req.WithContext(identity.WithRequester(ctx.Req.Context(), &u))
+	cpy := *ctx
+	cpy.Context = &webCtx
+	cpy.SignedInUser = &u
+	return &cpy
 }
 
 func (am *LotexAM) RouteGetAMAlertGroups(ctx *contextmodel.ReqContext) response.Response {

@@ -859,6 +859,34 @@ func (c *ExternalAlertmanagerConfig) MarshalJSON() ([]byte, error) {
 	return json.Marshal(tmp)
 }
 
+// WithRedactedSecrets returns a copy of c whose alertmanager config is re-encoded from the
+// typed config, so every Secret and SecretURL value is replaced by a placeholder and
+// fields the typed config does not know about are dropped. Use it for callers that may read
+// but not write the configuration: the redacted copy cannot be posted back without losing
+// the real secrets.
+func (c *ExternalAlertmanagerConfig) WithRedactedSecrets() (*ExternalAlertmanagerConfig, error) {
+	if c.amSimple == nil {
+		return nil, fmt.Errorf("cannot redact ExternalAlertmanagerConfig: alertmanager config was not decoded")
+	}
+
+	redacted := map[string]interface{}{}
+	if len(c.amSimple) > 0 {
+		yml, err := yaml.Marshal(&c.AlertmanagerConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal redacted alertmanager config: %w", err)
+		}
+		if err := yaml.Unmarshal(yml, &redacted); err != nil {
+			return nil, fmt.Errorf("failed to decode redacted alertmanager config: %w", err)
+		}
+	}
+
+	return &ExternalAlertmanagerConfig{
+		TemplateFiles:      c.TemplateFiles,
+		AlertmanagerConfig: c.AlertmanagerConfig,
+		amSimple:           redacted,
+	}, nil
+}
+
 func (c *ExternalAlertmanagerConfig) UnmarshalJSON(b []byte) error {
 	type plain ExternalAlertmanagerConfig
 	if err := json.Unmarshal(b, (*plain)(c)); err != nil {

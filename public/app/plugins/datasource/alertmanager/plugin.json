@@ -115,8 +115,8 @@
     {
       "method": "GET",
       "path": "api/v1/alerts",
-      "reqRole": "Viewer",
-      "reqAction": "alert.notifications.external:read"
+      "reqRole": "Editor",
+      "reqAction": "alert.notifications.external:write"
     },
     {
       "method": "POST",
