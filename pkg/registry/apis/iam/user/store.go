@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"go.opentelemetry.io/otel/trace"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -258,6 +259,10 @@ func (s *LegacyStore) Create(ctx context.Context, obj runtime.Object, createVali
 	if userObj.GenerateName != "" {
 		userObj.Name = userObj.GenerateName + util.GenerateShortUID()
 		userObj.GenerateName = ""
+	}
+
+	if common.IsNumericName(userObj.Name) {
+		return nil, apierrors.NewBadRequest("user name cannot be numeric")
 	}
 
 	if createValidation != nil {

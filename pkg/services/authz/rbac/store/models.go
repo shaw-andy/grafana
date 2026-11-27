@@ -16,6 +16,6 @@ type BasicRoleQuery struct {
 }
 
 type UserIdentifierQuery struct {
-	UserID  int64
-	UserUID string
+	UserUID          string
+	IsServiceAccount bool
 }

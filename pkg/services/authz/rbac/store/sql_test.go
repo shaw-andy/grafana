@@ -47,15 +47,16 @@ func TestIdentityQueries(t *testing.T) {
 		Templates: map[*template.Template][]mocks.TemplateTestCase{
 			sqlUserIdentifiers: {
 				{
-					Name: "id_specified",
+					Name: "user_uid_specified",
 					Data: getIdentifiers(&UserIdentifierQuery{
-						UserID: 1,
+						UserUID: "some_uid",
 					}),
 				},
 				{
-					Name: "uid_specified",
+					Name: "service_account_uid_specified",
 					Data: getIdentifiers(&UserIdentifierQuery{
-						UserUID: "some_uid",
+						UserUID:          "some_uid",
+						IsServiceAccount: true,
 					}),
 				},
 			},

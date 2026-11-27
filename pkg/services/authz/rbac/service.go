@@ -703,7 +703,7 @@ func (s *Service) getIdentityPermissions(ctx context.Context, ns types.Namespace
 	case types.TypeRenderService:
 		return s.getRendererPermissions(ctx, action)
 	case types.TypeUser, types.TypeServiceAccount:
-		return s.getUserPermissions(ctx, ns, userID, action, actionSets)
+		return s.getUserPermissions(ctx, ns, idType, userID, action, actionSets)
 	default:
 		return nil, fmt.Errorf("unsupported identity type: %s", idType)
 	}
@@ -723,7 +723,7 @@ func (s *Service) getCachedIdentityPermissions(ctx context.Context, ns types.Nam
 	case types.TypeRenderService:
 		return nil, cache.ErrNotFound
 	case types.TypeUser, types.TypeServiceAccount:
-		userIdentifiers, err := s.GetUserIdentifiers(ctx, ns, userID)
+		userIdentifiers, err := s.GetUserIdentifiers(ctx, ns, idType, userID)
 		if err != nil {
 			return nil, err
 		}
@@ -737,11 +737,11 @@ func (s *Service) getCachedIdentityPermissions(ctx context.Context, ns types.Nam
 	}
 }
 
-func (s *Service) getUserPermissions(ctx context.Context, ns types.NamespaceInfo, userID, action string, actionSets []string) (map[string]bool, error) {
+func (s *Service) getUserPermissions(ctx context.Context, ns types.NamespaceInfo, idType types.IdentityType, userID, action string, actionSets []string) (map[string]bool, error) {
 	ctx, span := s.tracer.Start(ctx, "authz_direct_db.service.getUserPermissions")
 	defer span.End()
 
-	userIdentifiers, err := s.GetUserIdentifiers(ctx, ns, userID)
+	userIdentifiers, err := s.GetUserIdentifiers(ctx, ns, idType, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -825,39 +825,37 @@ func (s *Service) getRendererPermissions(ctx context.Context, action string) (ma
 	return map[string]bool{}, nil
 }
 
-func (s *Service) GetUserIdentifiers(ctx context.Context, ns types.NamespaceInfo, userUID string) (*store.UserIdentifiers, error) {
-	return s.getUserIdentifiers(ctx, ns, userUID, false)
+func (s *Service) GetUserIdentifiers(ctx context.Context, ns types.NamespaceInfo, idType types.IdentityType, userUID string) (*store.UserIdentifiers, error) {
+	return s.getUserIdentifiers(ctx, ns, idType, userUID, false)
 }
 
-func (s *Service) getUserIdentifiers(ctx context.Context, ns types.NamespaceInfo, userUID string, skipCache bool) (*store.UserIdentifiers, error) {
-	uidCacheKey := userIdentifierCacheKey(ns.Value, userUID)
+// getUserIdentifiers resolves the subject strictly by UID. The UID of an account
+// can be chosen by whoever creates it, so it must never be interpreted as an
+// internal id, and the lookup is restricted to the account type of the subject.
+func (s *Service) getUserIdentifiers(ctx context.Context, ns types.NamespaceInfo, idType types.IdentityType, userUID string, skipCache bool) (*store.UserIdentifiers, error) {
+	if userUID == "" {
+		return nil, fmt.Errorf("could not get user internal id: empty uid")
+	}
+	if !types.IsIdentityType(idType, types.TypeUser, types.TypeServiceAccount) {
+		return nil, fmt.Errorf("could not get user internal id: unsupported identity type %s", idType)
+	}
+
+	cacheKey := userIdentifierCacheKey(ns.Value, idType, userUID)
 	if !skipCache {
-		if cached, ok := s.idCache.Get(ctx, uidCacheKey); ok {
+		if cached, ok := s.idCache.Get(ctx, cacheKey); ok {
 			return &cached, nil
 		}
 	}
 
-	idCacheKey := userIdentifierCacheKeyById(ns.Value, userUID)
-	if !skipCache {
-		if cached, ok := s.idCache.Get(ctx, idCacheKey); ok {
-			return &cached, nil
-		}
-	}
-
-	var userIDQuery store.UserIdentifierQuery
-	// Assume that numeric UID is user ID
-	if userID, err := strconv.Atoi(userUID); err == nil {
-		userIDQuery = store.UserIdentifierQuery{UserID: int64(userID)}
-	} else {
-		userIDQuery = store.UserIdentifierQuery{UserUID: userUID}
-	}
-	userIdentifiers, err := s.store.GetUserIdentifiers(ctx, userIDQuery)
+	userIdentifiers, err := s.store.GetUserIdentifiers(ctx, store.UserIdentifierQuery{
+		UserUID:          userUID,
+		IsServiceAccount: idType == types.TypeServiceAccount,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("could not get user internal id: %w", err)
 	}
 
-	s.idCache.Set(ctx, uidCacheKey, *userIdentifiers)
-	s.idCache.Set(ctx, idCacheKey, *userIdentifiers)
+	s.idCache.Set(ctx, cacheKey, *userIdentifiers)
 
 	return userIdentifiers, nil
 }

@@ -110,7 +110,7 @@ func deduplicateUserPermissions(permissions []accesscontrol.Permission) []access
 func (s *Service) getAllIdentityPermissions(ctx context.Context, ns types.NamespaceInfo, identityType types.IdentityType, userUID string, contextualTeams []string, skipCache bool) ([]accesscontrol.Permission, bool, error) {
 	switch identityType {
 	case types.TypeUser, types.TypeServiceAccount:
-		identifiers, err := s.getUserIdentifiers(ctx, ns, userUID, skipCache)
+		identifiers, err := s.getUserIdentifiers(ctx, ns, identityType, userUID, skipCache)
 		if err != nil {
 			return nil, false, err
 		}

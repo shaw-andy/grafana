@@ -10,10 +10,15 @@ import (
 	"github.com/grafana/authlib/types"
 	iamv0alpha1 "github.com/grafana/grafana/apps/iam/pkg/apis/iam/v0alpha1"
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
+	"github.com/grafana/grafana/pkg/registry/apis/iam/common"
 	"github.com/grafana/grafana/pkg/services/serviceaccounts"
 )
 
 func ValidateOnCreate(ctx context.Context, obj *iamv0alpha1.ServiceAccount) error {
+	if common.IsNumericName(obj.Name) {
+		return apierrors.NewBadRequest("service account name cannot be numeric")
+	}
+
 	if obj.Spec.Title == "" {
 		return apierrors.NewBadRequest("service account must have a title")
 	}
