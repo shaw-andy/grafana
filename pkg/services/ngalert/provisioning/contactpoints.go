@@ -32,6 +32,7 @@ import (
 var ErrUserRequired = errors.New("user is required to check protected field authorization")
 
 type receiverAuthz interface {
+	AuthorizeReadDecrypted(ctx context.Context, user identity.Requester, receiver *models.Receiver) error
 	HasUpdateProtected(ctx context.Context, user identity.Requester, receiver *models.Receiver) (bool, error)
 	AuthorizeUpdateProtected(ctx context.Context, user identity.Requester, receiver *models.Receiver) error
 	AuthorizeCreate(context.Context, identity.Requester) error
@@ -157,28 +158,26 @@ func (ecp *ContactPointService) GetContactPoints(ctx context.Context, q ContactP
 	return contactPoints, nil
 }
 
-// getContactPointDecrypted is an internal-only function that gets full contact point info, included encrypted fields.
-// nil is returned if no matching contact point exists.
-func (ecp *ContactPointService) getContactPointDecrypted(ctx context.Context, orgID int64, uid string) (apimodels.EmbeddedContactPoint, error) {
-	revision, err := ecp.configStore.Get(ctx, orgID)
-	if err != nil {
-		return apimodels.EmbeddedContactPoint{}, err
-	}
-	for _, receiver := range revision.Config.GetGrafanaReceiverMap() {
-		if receiver.UID != uid || !isV1IntegrationVersion(receiver.Version) {
-			continue
+// findStoredIntegration returns the V1 integration with the given uid and the receiver group that holds it in cfg.
+func findStoredIntegration(cfg *v1.AMConfigV1, uid string) (v1.PostableApiReceiver, *v1.PostableGrafanaReceiver, error) {
+	for _, receiverGroup := range cfg.Receivers {
+		for _, integration := range receiverGroup.GrafanaManagedReceivers {
+			if integration.UID != uid || !isV1IntegrationVersion(integration.Version) {
+				continue
+			}
+			return receiverGroup, integration, nil
 		}
-		embeddedContactPoint, err := PostableGrafanaReceiverToEmbeddedContactPoint(
-			new(definition.PostableGrafanaReceiver(*receiver)),
-			models.ProvenanceNone, // TODO should be correct provenance?
-			ecp.decryptValueOrRedacted(true, receiver.UID),
-		)
-		if err != nil {
-			return apimodels.EmbeddedContactPoint{}, err
-		}
-		return embeddedContactPoint, nil
 	}
-	return apimodels.EmbeddedContactPoint{}, fmt.Errorf("%w: contact point with uid '%s' not found", ErrNotFound, uid)
+	return v1.PostableApiReceiver{}, nil, fmt.Errorf("%w: contact point with uid '%s' not found", ErrNotFound, uid)
+}
+
+// decryptStoredIntegration returns the full contact point info of a stored integration, including decrypted secure fields.
+func (ecp *ContactPointService) decryptStoredIntegration(integration *v1.PostableGrafanaReceiver) (apimodels.EmbeddedContactPoint, error) {
+	return PostableGrafanaReceiverToEmbeddedContactPoint(
+		new(definition.PostableGrafanaReceiver(*integration)),
+		models.ProvenanceNone, // TODO should be correct provenance?
+		ecp.decryptValueOrRedacted(true, integration.UID),
+	)
 }
 
 func (ecp *ContactPointService) CreateContactPoint(
@@ -297,17 +296,38 @@ func (ecp *ContactPointService) UpdateContactPoint(ctx context.Context, orgID in
 		return fmt.Errorf("%w: failed to get secret keys for contact point type %s", ErrValidation, contactPoint.Type)
 	}
 
-	// patch integration with the secrets from the existing version
-	rawContactPoint, err := ecp.getContactPointDecrypted(ctx, orgID, contactPoint.UID)
+	// Stored secrets are copied from, and the update is authorized and applied against, this single revision.
+	revision, err := ecp.configStore.Get(ctx, orgID)
 	if err != nil {
 		return err
 	}
+	sourceReceiver, storedIntegration, err := findStoredIntegration(revision.Config, contactPoint.UID)
+	if err != nil {
+		return err
+	}
+
+	var redactedSecretKeys []string
 	for _, secretPath := range typeSchema.GetSecretFieldsPaths() {
 		secretKey := secretPath.String()
-		secretValue := contactPoint.Settings.Get(secretKey).MustString()
-		if secretValue == apimodels.RedactedValue {
-			contactPoint.Settings.Set(secretKey, rawContactPoint.Settings.Get(secretKey).MustString())
+		if contactPoint.Settings.Get(secretKey).MustString() == apimodels.RedactedValue {
+			redactedSecretKeys = append(redactedSecretKeys, secretKey)
 		}
+	}
+	// Moving an integration to another receiver with its stored secrets exposes them to everyone who can read
+	// the target receiver's secrets, so the caller must be allowed to read the source receiver's secrets.
+	if len(redactedSecretKeys) > 0 && sourceReceiver.Name != contactPoint.Name {
+		if err := ecp.authz.AuthorizeReadDecrypted(ctx, user, &models.Receiver{UID: string(sourceReceiver.UID), Name: sourceReceiver.Name}); err != nil {
+			return err
+		}
+	}
+
+	// patch integration with the secrets from the existing version
+	rawContactPoint, err := ecp.decryptStoredIntegration(storedIntegration)
+	if err != nil {
+		return err
+	}
+	for _, secretKey := range redactedSecretKeys {
+		contactPoint.Settings.Set(secretKey, rawContactPoint.Settings.Get(secretKey).MustString())
 	}
 
 	// validate merged values
@@ -325,7 +345,7 @@ func (ecp *ContactPointService) UpdateContactPoint(ctx context.Context, orgID in
 	}
 
 	// Check protected fields authorization
-	if err := ecp.checkProtectedFields(ctx, user, typeSchema, rawContactPoint, contactPoint); err != nil {
+	if err := ecp.checkProtectedFields(ctx, user, typeSchema, sourceReceiver, rawContactPoint, contactPoint); err != nil {
 		return err
 	}
 	// transform to internal model
@@ -354,14 +374,8 @@ func (ecp *ContactPointService) UpdateContactPoint(ctx context.Context, orgID in
 		Settings:              jsonData,
 		SecureSettings:        extractedSecrets,
 	}
-	// save to store
-	revision, err := ecp.configStore.Get(ctx, orgID)
-	if err != nil {
-		return err
-	}
-
 	oldReceiver, newReceiver, fullRemoval, newReceiverCreated := stitchReceiver(revision.Config, mergedReceiver)
-	if oldReceiver == nil {
+	if oldReceiver == nil || oldReceiver.UID != sourceReceiver.UID {
 		return fmt.Errorf("%w: contact point with uid '%s' not found", ErrNotFound, mergedReceiver.UID)
 	}
 
@@ -548,6 +562,7 @@ func (ecp *ContactPointService) checkProtectedFields(
 	ctx context.Context,
 	user identity.Requester,
 	typeSchema schema.IntegrationSchemaVersion,
+	existingReceiver v1.PostableApiReceiver,
 	existing apimodels.EmbeddedContactPoint,
 	incoming apimodels.EmbeddedContactPoint,
 ) error {
@@ -555,12 +570,10 @@ func (ecp *ContactPointService) checkProtectedFields(
 		return ErrUserRequired
 	}
 
-	// Create a receiver wrapper for authorization check.
-	// Use the existing receiver's name for UID derivation since authorization
-	// should be checked against the existing resource, not the potentially renamed one.
-	receiver := &models.Receiver{ // TODO: This needs to be the real receiver's UID not this assumption.
-		UID:  string(v1.ReceiverUID(existing.Name)),
-		Name: existing.Name,
+	// Authorization is checked against the receiver that currently holds the integration, not the potentially renamed one.
+	receiver := &models.Receiver{
+		UID:  string(existingReceiver.UID),
+		Name: existingReceiver.Name,
 	}
 
 	// Check if user has permission to update protected fields first, before doing
