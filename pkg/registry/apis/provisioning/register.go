@@ -503,7 +503,7 @@ func (b *APIBuilder) GetAuthorizer() authorizer.Authorizer {
 //
 // Connections:
 //   - CRUD: connections:create/read/write/delete
-//   - Status: connections:read
+//   - Status: connections:read to get, connections:write to update or patch
 //
 // Jobs:
 //   - CRUD: jobs:create/read/write/delete
@@ -680,10 +680,10 @@ func (b *APIBuilder) authorizeConnectionSubresource(ctx context.Context, a autho
 			Namespace: a.GetNamespace(),
 		}, ""))
 
-	// Status is read-only
+	// Status writes are updates of the connection, so they need write access.
 	case "status":
 		return toAuthorizerDecision(b.accessWithAdmin.Check(ctx, authlib.CheckRequest{
-			Verb:      apiutils.VerbGet,
+			Verb:      a.GetVerb(),
 			Group:     provisioning.GROUP,
 			Resource:  provisioning.ConnectionResourceInfo.GetName(),
 			Name:      a.GetName(),
@@ -837,7 +837,7 @@ func (b *APIBuilder) UpdateAPIGroupInfo(apiGroupInfo *genericapiserver.APIGroupI
 		return fmt.Errorf("failed to create repository storage: %w", err)
 	}
 
-	repositoryStatusStorage := grafanaregistry.NewRegistryStatusStore(opts.Scheme, repositoryStorage)
+	repositoryStatusStorage := newStatusStore(opts.Scheme, repositoryStorage)
 	b.repoLister = repository.NewStorageLister(repositoryStorage)
 
 	// Create admission handler and register mutators/validators
@@ -901,7 +901,7 @@ func (b *APIBuilder) UpdateAPIGroupInfo(apiGroupInfo *genericapiserver.APIGroupI
 	if err != nil {
 		return fmt.Errorf("failed to create connection storage: %w", err)
 	}
-	connectionStatusStorage := grafanaregistry.NewRegistryStatusStore(opts.Scheme, connectionsStore)
+	connectionStatusStorage := newStatusStore(opts.Scheme, connectionsStore)
 
 	// When serving a non-storage version (e.g. v1beta1), wrap the CRUD stores
 	// so that List re-stamps each item's apiVersion to match the served version.

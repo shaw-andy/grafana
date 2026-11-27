@@ -2,8 +2,10 @@ package generic
 
 import (
 	"context"
+	"reflect"
 
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -149,13 +151,39 @@ func (g *genericStatusStrategy) GetResetFields() map[fieldpath.APIVersion]*field
 	return fields
 }
 
+// PrepareForUpdate restores everything a status write may not change -- spec,
+// metadata and any other top-level field such as secure values -- from the
+// stored object, so only the incoming status survives.
 func (g *genericStatusStrategy) PrepareForUpdate(ctx context.Context, obj, old runtime.Object) {
-	oldMeta, err := utils.MetaAccessor(old)
+	newMeta, err := utils.MetaAccessor(obj)
 	if err != nil {
 		return
 	}
+	status, statusErr := newMeta.GetStatus()
+	managedFields := newMeta.GetManagedFields()
 
-	newMeta, err := utils.MetaAccessor(obj)
+	dst := reflect.ValueOf(obj)
+	src := reflect.ValueOf(old.DeepCopyObject())
+	if dst.Kind() != reflect.Pointer || dst.IsNil() || src.Type() != dst.Type() {
+		restoreMetadataAndSpec(newMeta, old)
+		return
+	}
+	dst.Elem().Set(src.Elem())
+
+	restored, err := utils.MetaAccessor(obj)
+	if err != nil {
+		return
+	}
+	restored.SetManagedFields(managedFields)
+	if statusErr == nil {
+		_ = restored.SetStatus(status)
+	} else if u, ok := obj.(*unstructured.Unstructured); ok {
+		delete(u.Object, "status")
+	}
+}
+
+func restoreMetadataAndSpec(newMeta utils.GrafanaMetaAccessor, old runtime.Object) {
+	oldMeta, err := utils.MetaAccessor(old.DeepCopyObject())
 	if err != nil {
 		return
 	}
@@ -163,6 +191,9 @@ func (g *genericStatusStrategy) PrepareForUpdate(ctx context.Context, obj, old r
 	newMeta.SetLabels(oldMeta.GetLabels())
 	newMeta.SetFinalizers(oldMeta.GetFinalizers())
 	newMeta.SetOwnerReferences(oldMeta.GetOwnerReferences())
+	if spec, err := oldMeta.GetSpec(); err == nil {
+		_ = newMeta.SetSpec(spec)
+	}
 }
 
 func (g *genericStatusStrategy) AllowCreateOnUpdate(ctx context.Context) bool {
