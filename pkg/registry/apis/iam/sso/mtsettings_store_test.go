@@ -251,8 +251,10 @@ func TestMTSettingsStore(t *testing.T) {
 			assert: func(t *testing.T, sso *iamv0.SSOSetting, _ bool, err error, f *fakeSettings) {
 				require.NoError(t, err)
 				require.NotNil(t, sso)
-				// The placeholder is not persisted; the stored secret is preserved.
-				assert.Equal(t, "storedsecret", f.upserts["auth.generic_oauth|client_secret"])
+				// The placeholder is not persisted; the stored secret row is left as is.
+				_, wrote := f.upserts["auth.generic_oauth|client_secret"]
+				assert.False(t, wrote, "restored secret must not be rewritten")
+				assert.Equal(t, "storedsecret", f.us["auth.generic_oauth|client_secret"].Value)
 				assert.Equal(t, setting.RedactedPassword, sso.Spec.Settings.Object["client_secret"])
 			},
 		},
