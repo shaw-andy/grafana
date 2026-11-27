@@ -11,6 +11,7 @@ import (
 	"github.com/grafana/authlib/types"
 	iamv0alpha1 "github.com/grafana/grafana/apps/iam/pkg/apis/iam/v0alpha1"
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
+	"github.com/grafana/grafana/pkg/registry/apis/iam/common"
 	"github.com/grafana/grafana/pkg/storage/unified/resource"
 	"github.com/grafana/grafana/pkg/storage/unified/resourcepb"
 )
@@ -19,6 +20,10 @@ func ValidateOnCreate(ctx context.Context, userSearchClient resourcepb.ResourceI
 	requester, err := identity.GetRequester(ctx)
 	if err != nil {
 		return apierrors.NewUnauthorized("no identity found")
+	}
+
+	if common.IsNumericName(obj.Name) {
+		return apierrors.NewBadRequest("user name cannot be numeric")
 	}
 
 	// Temporary validation that the user is not trying to create a Grafana Admin without being a Grafana Admin.

@@ -25,6 +25,24 @@ func OptionalFormatInt(num int64) string {
 	return ""
 }
 
+// IsNumericName reports whether name is an optionally signed run of decimal digits.
+// User and service account names are stored as their UID, and a numeric UID is
+// indistinguishable from an internal id in code that accepts either.
+func IsNumericName(name string) bool {
+	if name != "" && (name[0] == '+' || name[0] == '-') {
+		name = name[1:]
+	}
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func MapTeamPermission(p team.PermissionType) iamv0alpha1.TeamBindingTeamPermission {
 	if p == team.PermissionTypeAdmin {
 		return iamv0alpha1.TeamBindingTeamPermissionAdmin
