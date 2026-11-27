@@ -206,7 +206,7 @@ var serviceIdentityPermissions = getWildcardPermissions(
 	"notifications.alerting.grafana.app/configs:get",           // accesscontrol.ActionAlertingConfigRead — ExternalAMSyncer reads spec.externalAlertmanagerSync.datasourceUid.
 	"notifications.alerting.grafana.app/configs:update",        // accesscontrol.ActionAlertingConfigUpdate — ExternalAMSyncer creates the Config singleton on first sync.
 	"notifications.alerting.grafana.app/configs/status:update", // accesscontrol.ActionAlertingConfigStatusUpdate — service-only; humans never write status directly.
-	"alert.notifications.external:read",                        // accesscontrol.ActionAlertingNotificationsExternalRead — the Alertmanager datasource plugin's GET api/v1/alerts route requires this; ExternalAMSyncer fetches the upstream config through it.
+	"alert.notifications.external:write",                       // accesscontrol.ActionAlertingNotificationsExternalWrite — the Alertmanager datasource plugin's GET api/v1/alerts route requires this because the upstream config holds receiver secrets; ExternalAMSyncer fetches the upstream config through it.
 	"users:read",                                               // accesscontrol.ActionUsersRead,
 	"org.users:read",                                           // accesscontrol.ActionOrgUsersRead,
 	"teams:read",                                               // accesscontrol.ActionTeamsRead,
