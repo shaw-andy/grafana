@@ -14,8 +14,10 @@ import (
 	"github.com/grafana/grafana/pkg/infra/localcache"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/plugins"
+	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/datasources"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/adapters"
+	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginaccesscontrol"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginconfig"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginsettings"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginstore"
@@ -25,6 +27,11 @@ import (
 const (
 	pluginSettingsCacheTTL    = 5 * time.Second
 	pluginSettingsCachePrefix = "plugin-setting-"
+)
+
+var (
+	ErrPluginAccessDenied = errors.New("plugin access denied")
+	ErrAppNotEnabled      = errors.New("app plugin is not enabled")
 )
 
 func ProvideService(cfg *setting.Cfg, cacheService *localcache.CacheService, pluginStore pluginstore.Store,
@@ -63,7 +70,38 @@ func (p *Provider) Get(ctx context.Context, pluginID string, user identity.Reque
 
 	pCtx := p.GetBasePluginContext(ctx, plugin, user)
 	if plugin.IsApp() {
-		appSettings, err := p.appInstanceSettings(ctx, pluginID, orgID)
+		appSettings, err := p.appInstanceSettings(ctx, pluginID, plugin, orgID, false)
+		if err != nil {
+			return backend.PluginContext{}, err
+		}
+		pCtx.AppInstanceSettings = appSettings
+	}
+
+	return pCtx, nil
+}
+
+// GetAuthorized is like Get, but applies the same checks as the HTTP app plugin routes:
+// it returns ErrPluginAccessDenied unless user holds plugins.app:access for the plugin,
+// and ErrAppNotEnabled when the plugin is an app that is not enabled in orgID (an app
+// with no settings row is allowed only if it is auto-enabled).
+// Both checks are made against the resolved plugin and the same settings row that the
+// returned context is built from, so an alias ID cannot select different settings.
+func (p *Provider) GetAuthorized(ctx context.Context, pluginID string, user identity.Requester, orgID int64) (backend.PluginContext, error) {
+	plugin, exists := p.pluginStore.Plugin(ctx, pluginID)
+	if !exists {
+		return backend.PluginContext{}, plugins.ErrPluginNotRegistered
+	}
+
+	if user == nil || !accesscontrol.EvalPermission(
+		pluginaccesscontrol.ActionAppAccess,
+		pluginaccesscontrol.ScopeProvider.GetResourceScope(plugin.ID),
+	).Evaluate(user.GetPermissions()) {
+		return backend.PluginContext{}, ErrPluginAccessDenied
+	}
+
+	pCtx := p.GetBasePluginContext(ctx, plugin, user)
+	if plugin.IsApp() {
+		appSettings, err := p.appInstanceSettings(ctx, plugin.ID, plugin, orgID, true)
 		if err != nil {
 			return backend.PluginContext{}, err
 		}
@@ -146,19 +184,25 @@ func (p *Provider) PluginContextForApp(ctx context.Context, pluginID string, app
 	return ctx, pCtx, nil
 }
 
-func (p *Provider) appInstanceSettings(ctx context.Context, pluginID string, orgID int64) (*backend.AppInstanceSettings, error) {
+func (p *Provider) appInstanceSettings(ctx context.Context, settingsID string, plugin pluginstore.Plugin, orgID int64, requireEnabled bool) (*backend.AppInstanceSettings, error) {
 	jsonData := json.RawMessage{}
 	decryptedSecureJSONData := map[string]string{}
 	var updated time.Time
 
-	ps, err := p.getCachedPluginSettings(ctx, pluginID, orgID)
+	ps, err := p.getCachedPluginSettings(ctx, settingsID, orgID)
 	if err != nil {
 		// pluginsettings.ErrPluginSettingNotFound is expected if there's no row found for plugin setting in database (if non-app plugin).
 		// Otherwise, something is wrong with cache or database, and we return the error to the client.
 		if !errors.Is(err, pluginsettings.ErrPluginSettingNotFound) {
 			return nil, fmt.Errorf("%v: %w", "Failed to get plugin settings", err)
 		}
+		if requireEnabled && !plugin.AutoEnabled {
+			return nil, ErrAppNotEnabled
+		}
 	} else {
+		if requireEnabled && !ps.Enabled {
+			return nil, ErrAppNotEnabled
+		}
 		jsonData, err = json.Marshal(ps.JSONData)
 		if err != nil {
 			return nil, fmt.Errorf("%v: %w", "Failed to unmarshal plugin json data", err)

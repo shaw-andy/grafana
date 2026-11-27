@@ -2,6 +2,7 @@ package liveplugin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/centrifugal/centrifuge"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/services/datasources"
+	"github.com/grafana/grafana/pkg/services/live/model"
 	"github.com/grafana/grafana/pkg/services/live/orgchannel"
 	"github.com/grafana/grafana/pkg/services/live/pipeline"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/plugincontext"
@@ -75,7 +77,11 @@ func NewContextGetter(pluginContextProvider *plugincontext.Provider, dataSourceC
 
 func (g *ContextGetter) GetPluginContext(ctx context.Context, user identity.Requester, pluginID string, datasourceUID string, skipCache bool) (backend.PluginContext, error) {
 	if datasourceUID == "" {
-		return g.pluginContextProvider.Get(ctx, pluginID, user, user.GetOrgID())
+		pCtx, err := g.pluginContextProvider.GetAuthorized(ctx, pluginID, user, user.GetOrgID())
+		if errors.Is(err, plugincontext.ErrPluginAccessDenied) || errors.Is(err, plugincontext.ErrAppNotEnabled) {
+			return backend.PluginContext{}, fmt.Errorf("%w: %w", model.ErrPermissionDenied, err)
+		}
+		return pCtx, err
 	}
 
 	ds, err := g.dataSourceCache.GetDatasourceByUID(ctx, datasourceUID, user, skipCache)
