@@ -1,6 +1,8 @@
 package ssosettings
 
 import (
+	"fmt"
+
 	"github.com/grafana/grafana/pkg/apimachinery/errutil"
 )
 
@@ -21,6 +23,14 @@ var (
 	ErrInvalidProvider = errutil.ValidationFailed("sso.invalidProvider", errutil.WithPublicMessage("Provider is invalid"))
 	ErrInvalidSettings = errutil.ValidationFailed("sso.settings", errutil.WithPublicMessage("Settings field is invalid"))
 	ErrEmptyClientId   = errutil.ValidationFailed("sso.emptyClientId", errutil.WithPublicMessage("ClientId cannot be empty"))
+
+	ErrBaseSecretRequiredForEndpointChange = errutil.ValidationFailed("sso.secretRequiredForEndpointChange")
+
+	ErrSecretRequiredForEndpointChange = func(field string) error {
+		base := ErrBaseSecretRequiredForEndpointChange.Errorf("stored %s cannot be reused with a changed endpoint", field)
+		base.PublicMessage = fmt.Sprintf("A new value for %s is required when the provider endpoints change.", field)
+		return base
+	}
 
 	ErrMTSettingsNotImplemented = errutil.NotImplemented("sso.mtSettingsNotImplemented",
 		errutil.WithPublicMessage("Resolving SSO settings from the MT-Settings service is not implemented yet")).

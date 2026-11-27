@@ -381,8 +381,9 @@ func (s *Service) Patch(ctx context.Context, provider string, data map[string]an
 		return err
 	}
 
-	newSettingsMap := make(map[string]any)
-	maps.Copy(newSettingsMap, storedSettings.Settings)
+	// Start from the redacted settings so that a secret the request leaves out
+	// goes through the same reuse checks in mergeSecrets as a redacted one.
+	newSettingsMap := removeSecrets(storedSettings.Settings)
 	maps.Copy(newSettingsMap, data)
 
 	newSettings := &models.SSOSettings{
@@ -661,6 +662,7 @@ func (s *Service) mergeSSOSettingsMTAuthoritative(dbSettings, systemSettings *mo
 			settings[k] = v
 		}
 	}
+	s.dropMixedSourceCredentials(settings, systemSettings.Settings, dbSettings.Settings)
 
 	return &models.SSOSettings{
 		Provider: systemSettings.Provider,
@@ -669,6 +671,39 @@ func (s *Service) mergeSSOSettingsMTAuthoritative(dbSettings, systemSettings *mo
 		Created:  dbSettings.Created,
 		Updated:  dbSettings.Updated,
 	}
+}
+
+// dropMixedSourceCredentials clears each credential in the merged settings that would be paired
+// with an endpoint taken from the other source while that source holds a different credential.
+// The two sources are written separately, so only a credential and the endpoints stored next to
+// it have been checked together.
+func (s *Service) dropMixedSourceCredentials(merged, mtSettings, dbSettings map[string]any) {
+	for k, v := range merged {
+		if !ssosettings.IsPresentedCredentialField(k) || settingString(v) == "" {
+			continue
+		}
+		source, other := mtSettings, dbSettings
+		if settingString(mtSettings[k]) == "" {
+			source, other = dbSettings, mtSettings
+		}
+		if settingString(other[k]) == settingString(v) {
+			continue
+		}
+		for e, endpoint := range merged {
+			if ssosettings.IsEndpointField(e) && settingString(source[e]) != settingString(endpoint) {
+				s.logger.Warn("Ignoring SSO credential stored with different endpoints", "field", k, "endpoint", e)
+				merged[k] = ""
+				break
+			}
+		}
+	}
+}
+
+func settingString(v any) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprint(v)
 }
 
 func (s *Service) decryptSecrets(ctx context.Context, settings map[string]any) (map[string]any, error) {
@@ -728,9 +763,12 @@ func removeSecrets(settings map[string]any) map[string]any {
 // getConfigMaps returns a list of maps that may contain secrets
 func getConfigMaps(settings map[string]any) []map[string]any {
 	// always include the main settings map
-	result := []map[string]any{settings}
+	return append([]map[string]any{settings}, getLDAPServers(settings)...)
+}
 
-	// for LDAP include settings for each server
+// getLDAPServers returns the settings of each configured LDAP server
+func getLDAPServers(settings map[string]any) []map[string]any {
+	var result []map[string]any
 	if config, ok := settings["config"].(map[string]any); ok {
 		if servers, ok := config["servers"].([]any); ok {
 			for _, server := range servers {
@@ -740,7 +778,6 @@ func getConfigMaps(settings map[string]any) []map[string]any {
 			}
 		}
 	}
-
 	return result
 }
 
@@ -783,28 +820,109 @@ func isMergingAllowed(fieldName string) bool {
 	return true
 }
 
-// mergeSecrets returns a new map with the current value for secrets that have not been updated
+// mergeSecrets returns a new map with the current value for secrets that have not been updated.
+// A stored credential is only kept while the endpoints it is presented to are unchanged: the
+// provider URLs for the main settings map, and the host and port for each LDAP server.
 func mergeSecrets(settings map[string]any, storedSettings map[string]any) (map[string]any, error) {
 	settingsWithSecrets := deepCopyMap(settings)
-	newConfigs := getConfigMaps(settingsWithSecrets)
-	storedConfigs := getConfigMaps(storedSettings)
 
-	for i, config := range newConfigs {
-		for k, v := range config {
-			if IsSecretField(k) {
-				strValue, ok := v.(string)
-				if !ok {
-					return nil, fmt.Errorf("secret value is not a string")
-				}
-
-				if !isNewSecretValue(strValue) && len(storedConfigs) > i {
-					config[k] = storedConfigs[i][k] // use the currently stored value
-				}
+	sameEndpoint := storedSettings
+	if ssosettings.EndpointsChanged(settingsWithSecrets, storedSettings) {
+		sameEndpoint = nil
+		// An omitted credential is filled from the stored or system settings on reload,
+		// so it counts as reused just like a redacted one.
+		for k, v := range storedSettings {
+			if _, ok := settingsWithSecrets[k]; !ok && ssosettings.IsPresentedCredentialField(k) && v != nil && v != "" {
+				return nil, ssosettings.ErrSecretRequiredForEndpointChange(k)
 			}
+		}
+	}
+	if err := restoreSecrets(settingsWithSecrets, sameEndpoint, storedSettings); err != nil {
+		return nil, err
+	}
+
+	storedServers := getLDAPServers(storedSettings)
+	for i, server := range getLDAPServers(settingsWithSecrets) {
+		var positional map[string]any
+		if i < len(storedServers) {
+			positional = storedServers[i]
+		}
+		if err := restoreSecrets(server, findStoredLDAPServer(storedServers, server, i), positional); err != nil {
+			return nil, err
 		}
 	}
 
 	return settingsWithSecrets, nil
+}
+
+// restoreSecrets replaces the redacted secrets in config with the values stored for the same
+// endpoint. When there is none, credentials presented to the endpoint are refused, while other
+// secrets fall back to the stored values at the same position.
+func restoreSecrets(config, sameEndpoint, fallback map[string]any) error {
+	for k, v := range config {
+		if !IsSecretField(k) {
+			continue
+		}
+		strValue, ok := v.(string)
+		if !ok {
+			return fmt.Errorf("secret value is not a string")
+		}
+		if isNewSecretValue(strValue) {
+			continue
+		}
+
+		switch {
+		case sameEndpoint != nil:
+			config[k] = sameEndpoint[k]
+		case ssosettings.IsPresentedCredentialField(k):
+			return ssosettings.ErrSecretRequiredForEndpointChange(k)
+		case fallback != nil:
+			config[k] = fallback[k]
+		}
+	}
+	return nil
+}
+
+// findStoredLDAPServer returns the stored LDAP server with the same host and port as server,
+// preferring the one at the same position, or nil if there is none.
+func findStoredLDAPServer(storedServers []map[string]any, server map[string]any, position int) map[string]any {
+	endpoint, ok := ldapServerEndpoint(server)
+	if !ok {
+		return nil
+	}
+	if position < len(storedServers) {
+		if stored, ok := ldapServerEndpoint(storedServers[position]); ok && stored == endpoint {
+			return storedServers[position]
+		}
+	}
+	for _, storedServer := range storedServers {
+		if stored, ok := ldapServerEndpoint(storedServer); ok && stored == endpoint {
+			return storedServer
+		}
+	}
+	return nil
+}
+
+// ldapServerEndpoint identifies a server by every key that decodes to its host or port, since
+// the LDAP configuration is decoded with case-insensitive key matching.
+func ldapServerEndpoint(server map[string]any) (string, bool) {
+	var parts []string
+	hasHost := false
+	for k, v := range server {
+		isHost := strings.EqualFold(k, "host")
+		if !isHost && !strings.EqualFold(k, "port") {
+			continue
+		}
+		if host, ok := v.(string); isHost && ok && host != "" {
+			hasHost = true
+		}
+		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+	}
+	if !hasHost {
+		return "", false
+	}
+	slices.Sort(parts)
+	return strings.Join(parts, "\x00"), true
 }
 
 func overrideMaps(input ...map[string]any) map[string]any {
