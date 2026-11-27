@@ -616,6 +616,13 @@ func (s *Service) UpdateDataSource(ctx context.Context, cmd *datasources.UpdateD
 		cmd.UID = dataSource.UID
 		cmd.ID = dataSource.ID
 
+		if cmd.RejectReadOnly {
+			if dataSource.ReadOnly {
+				return datasources.ErrDatasourceIsReadOnly
+			}
+			cmd.ReadOnly = dataSource.ReadOnly
+		}
+
 		// Validate the command
 		jd, err := cmd.JsonData.ToDB()
 		if err != nil {

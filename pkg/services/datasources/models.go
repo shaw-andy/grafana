@@ -224,6 +224,11 @@ type UpdateDataSourceCommand struct {
 	BeforeSave func(ctx context.Context, uid string, jsonData *simplejson.Json) `json:"-"`
 
 	AllowLBACRuleUpdates bool `json:"-"`
+
+	// RejectReadOnly fails the update with ErrDatasourceIsReadOnly when the stored data source
+	// is read-only, and keeps the stored read-only flag instead of ReadOnly. Requests made on
+	// behalf of users must set it; only provisioning and internal migrations may leave it unset.
+	RejectReadOnly bool `json:"-"`
 }
 
 // DeleteDataSourceCommand will delete a DataSource based on OrgID as well as the UID (preferred), ID, or Name.
@@ -244,6 +249,10 @@ type DeleteDataSourceCommand struct {
 	// In such case we don't want to publish the event that triggers clean-up
 	// of related resources (like correlations)
 	SkipPublish bool
+
+	// RejectReadOnly fails the delete with ErrDatasourceIsReadOnly when the stored data source
+	// is read-only. Requests made on behalf of users must set it; only provisioning may leave it unset.
+	RejectReadOnly bool
 }
 
 // Function for updating secrets along with datasources, to ensure atomicity

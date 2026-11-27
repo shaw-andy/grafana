@@ -198,13 +198,26 @@ func (ss *SqlStore) DeleteDataSource(ctx context.Context, cmd *datasources.Delet
 		}
 
 		if ds != nil {
+			if cmd.RejectReadOnly && ds.ReadOnly {
+				return datasources.ErrDatasourceIsReadOnly
+			}
+
 			// Delete the data source
-			result, err := sess.Exec("DELETE FROM data_source WHERE org_id=? AND id=?", ds.OrgID, ds.ID)
+			deleteSQL := []any{"DELETE FROM data_source WHERE org_id=? AND id=?", ds.OrgID, ds.ID}
+			if cmd.RejectReadOnly {
+				// Repeat the read-only condition in the statement so a concurrent change to the
+				// flag cannot slip in between the read above and the delete.
+				deleteSQL = []any{"DELETE FROM data_source WHERE org_id=? AND id=? AND read_only=?", ds.OrgID, ds.ID, false}
+			}
+			result, err := sess.Exec(deleteSQL...)
 			if err != nil {
 				return err
 			}
 
 			cmd.DeletedDatasourcesCount, _ = result.RowsAffected()
+			if cmd.RejectReadOnly && cmd.DeletedDatasourcesCount == 0 {
+				return datasources.ErrDatasourceIsReadOnly
+			}
 		}
 
 		if cmd.UpdateSecretFn != nil {
@@ -428,6 +441,9 @@ func (ss *SqlStore) UpdateDataSource(ctx context.Context, cmd *datasources.Updat
 			updateSession = sess.Where("id=? and org_id=? and version < ?", ds.ID, ds.OrgID, ds.Version)
 		} else {
 			updateSession = sess.Where("id=? and org_id=?", ds.ID, ds.OrgID)
+		}
+		if cmd.RejectReadOnly {
+			updateSession = updateSession.And("read_only=?", false)
 		}
 
 		affected, err := updateSession.Update(ds)
