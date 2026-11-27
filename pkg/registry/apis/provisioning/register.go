@@ -837,7 +837,7 @@ func (b *APIBuilder) UpdateAPIGroupInfo(apiGroupInfo *genericapiserver.APIGroupI
 		return fmt.Errorf("failed to create repository storage: %w", err)
 	}
 
-	repositoryStatusStorage := grafanaregistry.NewRegistryStatusStore(opts.Scheme, repositoryStorage)
+	repositoryStatusStorage := newStatusStore(opts.Scheme, repositoryStorage)
 	b.repoLister = repository.NewStorageLister(repositoryStorage)
 
 	// Create admission handler and register mutators/validators
@@ -901,7 +901,7 @@ func (b *APIBuilder) UpdateAPIGroupInfo(apiGroupInfo *genericapiserver.APIGroupI
 	if err != nil {
 		return fmt.Errorf("failed to create connection storage: %w", err)
 	}
-	connectionStatusStorage := grafanaregistry.NewRegistryStatusStore(opts.Scheme, connectionsStore)
+	connectionStatusStorage := newStatusStore(opts.Scheme, connectionsStore)
 
 	// When serving a non-storage version (e.g. v1beta1), wrap the CRUD stores
 	// so that List re-stamps each item's apiVersion to match the served version.
