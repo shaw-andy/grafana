@@ -171,10 +171,13 @@ func (hs *HTTPServer) DeleteDataSourceById(c *contextmodel.ReqContext) response.
 		return response.Error(http.StatusForbidden, "Cannot delete read-only data source", nil)
 	}
 
-	cmd := &datasources.DeleteDataSourceCommand{ID: id, OrgID: c.GetOrgID(), Name: ds.Name}
+	cmd := &datasources.DeleteDataSourceCommand{ID: id, OrgID: c.GetOrgID(), Name: ds.Name, RejectReadOnly: true}
 
 	err = hs.DataSourcesService.DeleteDataSource(c.Req.Context(), cmd)
 	if err != nil {
+		if errors.Is(err, datasources.ErrDatasourceIsReadOnly) {
+			return response.Error(http.StatusForbidden, "Cannot delete read-only data source", nil)
+		}
 		return response.Error(http.StatusInternalServerError, "Failed to delete datasource", err)
 	}
 
@@ -261,10 +264,13 @@ func (hs *HTTPServer) DeleteDataSourceByUID(c *contextmodel.ReqContext) response
 		return response.Error(http.StatusForbidden, "Cannot delete read-only data source", nil)
 	}
 
-	cmd := &datasources.DeleteDataSourceCommand{UID: uid, OrgID: c.GetOrgID(), Name: ds.Name}
+	cmd := &datasources.DeleteDataSourceCommand{UID: uid, OrgID: c.GetOrgID(), Name: ds.Name, RejectReadOnly: true}
 
 	err = hs.DataSourcesService.DeleteDataSource(c.Req.Context(), cmd)
 	if err != nil {
+		if errors.Is(err, datasources.ErrDatasourceIsReadOnly) {
+			return response.Error(http.StatusForbidden, "Cannot delete read-only data source", nil)
+		}
 		return response.Error(http.StatusInternalServerError, "Failed to delete datasource", err)
 	}
 
@@ -315,9 +321,12 @@ func (hs *HTTPServer) DeleteDataSourceByName(c *contextmodel.ReqContext) respons
 		return response.Error(http.StatusForbidden, "Cannot delete read-only data source", nil)
 	}
 
-	cmd := &datasources.DeleteDataSourceCommand{Name: name, OrgID: c.GetOrgID(), UID: dataSource.UID}
+	cmd := &datasources.DeleteDataSourceCommand{Name: name, OrgID: c.GetOrgID(), UID: dataSource.UID, RejectReadOnly: true}
 	err = hs.DataSourcesService.DeleteDataSource(c.Req.Context(), cmd)
 	if err != nil {
+		if errors.Is(err, datasources.ErrDatasourceIsReadOnly) {
+			return response.Error(http.StatusForbidden, "Cannot delete read-only data source", nil)
+		}
 		return response.Error(http.StatusInternalServerError, "Failed to delete datasource", err)
 	}
 
@@ -542,8 +551,13 @@ func (hs *HTTPServer) updateDataSourceByID(c *contextmodel.ReqContext, ds *datas
 		return response.Error(http.StatusForbidden, "Cannot update read-only data source", nil)
 	}
 
+	cmd.RejectReadOnly = true
 	_, err := hs.DataSourcesService.UpdateDataSource(c.Req.Context(), &cmd)
 	if err != nil {
+		if errors.Is(err, datasources.ErrDatasourceIsReadOnly) {
+			return response.Error(http.StatusForbidden, "Cannot update read-only data source", nil)
+		}
+
 		if errors.Is(err, datasources.ErrDataSourceNameExists) {
 			return response.Error(http.StatusConflict, "Failed to update datasource: "+err.Error(), err)
 		}

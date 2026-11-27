@@ -152,6 +152,11 @@ func (s *legacyStorage) Update(ctx context.Context, name string, objInfo rest.Up
 		return nil, false, fmt.Errorf("expected a datasource object (old)")
 	}
 
+	// The legacy update command is keyed by the object's name and namespace, so pin them to the
+	// datasource that was authorized and loaded instead of trusting the request body.
+	ds.Name = oldDS.Name
+	ds.Namespace = oldDS.Namespace
+
 	// Expose any secure value changes to the dual writer
 	var secureChanges common.InlineSecureValues
 	for k, v := range ds.Secure {
@@ -190,7 +195,17 @@ func (s *legacyStorage) Update(ctx context.Context, name string, objInfo rest.Up
 	}
 
 	ds, err = s.datasources.UpdateDataSource(ctx, ds)
-	return ds, false, err
+	if err != nil {
+		return nil, false, s.readOnlyError(name, err)
+	}
+	return ds, false, nil
+}
+
+func (s *legacyStorage) readOnlyError(name string, err error) error {
+	if errors.Is(err, datasources.ErrDatasourceIsReadOnly) {
+		return apierrors.NewForbidden(s.resourceInfo.GroupResource(), name, err)
+	}
+	return err
 }
 
 // Delete implements rest.GracefulDeleter.
@@ -203,7 +218,7 @@ func (s *legacyStorage) Delete(ctx context.Context, name string, deleteValidatio
 	}
 
 	err := s.datasources.DeleteDataSource(ctx, name)
-	return nil, false, err
+	return nil, false, s.readOnlyError(name, err)
 }
 
 // DeleteCollection implements rest.CollectionDeleter.
@@ -215,13 +230,23 @@ func (s *legacyStorage) DeleteCollection(ctx context.Context, deleteValidation r
 		}()
 	}
 
+	// Refuse up front so the collection is not left partly deleted. Each delete below still
+	// enforces the read-only flag against the stored row.
+	locked, err := s.datasources.HasReadOnlyDataSources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if locked {
+		return nil, s.readOnlyError("", datasources.ErrDatasourceIsReadOnly)
+	}
+
 	dss, err := s.datasources.ListDataSources(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for _, ds := range dss.Items {
 		if err = s.datasources.DeleteDataSource(ctx, ds.Name); err != nil {
-			return nil, err
+			return nil, s.readOnlyError(ds.Name, err)
 		}
 	}
 	return nil, nil

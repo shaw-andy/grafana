@@ -3,6 +3,7 @@ package datasource
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -36,6 +37,10 @@ type PluginDatasourceProvider interface {
 
 	// Delete a data source (any type)
 	DeleteDataSource(ctx context.Context, uid string) error
+
+	// Report whether any data source of this type in the namespace is read-only,
+	// including ones the user in ctx can not read
+	HasReadOnlyDataSources(ctx context.Context) (bool, error)
 
 	// Return settings (decrypted!) for a specific plugin
 	// This will require "query" permission for the user in context
@@ -130,6 +135,7 @@ func (q *scopedDatasourceProvider) UpdateDataSource(ctx context.Context, ds *dat
 	if err != nil {
 		return nil, err
 	}
+	cmd.RejectReadOnly = true
 	out, err := q.dsService.UpdateDataSource(ctx, cmd)
 	if err != nil {
 		return nil, err
@@ -160,11 +166,30 @@ func (q *scopedDatasourceProvider) DeleteDataSource(ctx context.Context, uid str
 		return fmt.Errorf("not found")
 	}
 	return q.dsService.DeleteDataSource(ctx, &datasources.DeleteDataSourceCommand{
-		ID:    ds.ID,
-		UID:   ds.UID,
-		OrgID: ds.OrgID,
-		Name:  ds.Name,
+		ID:             ds.ID,
+		UID:            ds.UID,
+		OrgID:          ds.OrgID,
+		Name:           ds.Name,
+		RejectReadOnly: true,
 	})
+}
+
+// HasReadOnlyDataSources implements PluginDatasourceProvider.
+func (q *scopedDatasourceProvider) HasReadOnlyDataSources(ctx context.Context) (bool, error) {
+	info, err := request.NamespaceInfoFrom(ctx, true)
+	if err != nil {
+		return false, err
+	}
+	dss, err := q.dsService.GetDataSources(ctx, &datasources.GetDataSourcesQuery{OrgID: info.OrgID})
+	if err != nil {
+		return false, err
+	}
+	for _, ds := range dss {
+		if ds.ReadOnly && (ds.Type == q.plugin.ID || slices.Contains(q.plugin.AliasIDs, ds.Type)) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // GetDataSource implements PluginDatasourceProvider.
