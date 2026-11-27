@@ -91,6 +91,11 @@ func (m mockDatasources) DeleteDataSource(ctx context.Context, uid string) error
 	return nil
 }
 
+// HasReadOnlyDataSources implements PluginDatasourceProvider.
+func (m mockDatasources) HasReadOnlyDataSources(ctx context.Context) (bool, error) {
+	return false, nil
+}
+
 // GetDataSource implements PluginDatasourceProvider.
 func (m mockDatasources) GetDataSource(ctx context.Context, uid string) (*v0alpha1.DataSource, error) {
 	return nil, nil

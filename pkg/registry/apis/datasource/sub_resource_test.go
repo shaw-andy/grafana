@@ -67,6 +67,10 @@ func (m *resourceMockDatasourceProvider) DeleteDataSource(ctx context.Context, u
 	return nil
 }
 
+func (m *resourceMockDatasourceProvider) HasReadOnlyDataSources(ctx context.Context) (bool, error) {
+	return false, nil
+}
+
 func (m *resourceMockDatasourceProvider) GetInstanceSettings(ctx context.Context, uid string) (*backend.DataSourceInstanceSettings, error) {
 	return m.instanceSettings, m.instanceSettingsErr
 }

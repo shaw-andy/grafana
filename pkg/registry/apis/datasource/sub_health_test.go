@@ -63,6 +63,10 @@ func (m *mockHealthDatasourceProvider) DeleteDataSource(context.Context, string)
 	return nil
 }
 
+func (m *mockHealthDatasourceProvider) HasReadOnlyDataSources(context.Context) (bool, error) {
+	return false, nil
+}
+
 func (m *mockHealthDatasourceProvider) GetDataSource(context.Context, string) (*datasourceV0.DataSource, error) {
 	return nil, nil
 }
