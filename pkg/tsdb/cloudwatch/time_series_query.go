@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sync"
 
 	"golang.org/x/sync/errgroup"
 
@@ -52,7 +53,16 @@ func (ds *DataSource) executeTimeSeriesQuery(ctx context.Context, req *backend.Q
 		return backend.NewQueryDataResponse(), nil
 	}
 
-	resultChan := make(chan *responseWrapper, len(req.Queries))
+	// Results are written straight into the response map rather than through a channel:
+	// with cloudWatchBatchQueries a query referenced by several math expressions is copied
+	// into each of their batches, so the number of results is not bounded by len(req.Queries).
+	var respMu sync.Mutex
+	setResponse := func(refID string, dataResponse *backend.DataResponse) {
+		respMu.Lock()
+		defer respMu.Unlock()
+		resp.Responses[refID] = *dataResponse
+	}
+
 	eg, ectx := errgroup.WithContext(ctx)
 	for _, timeAndRegionQueries := range requestQueriesByTimeAndRegion {
 		batches := [][]*models.CloudWatchQuery{timeAndRegionQueries}
@@ -66,17 +76,16 @@ func (ds *DataSource) executeTimeSeriesQuery(ctx context.Context, req *backend.Q
 		endTime := timeAndRegionQueries[0].EndTime
 
 		for _, batch := range batches {
-			requestQueries := batch
+			// A query can appear in several batches, and building the request mutates it.
+			requestQueries := copyQueries(batch)
 			eg.Go(func() error {
 				defer func() {
 					if err := recover(); err != nil {
 						ds.logger.FromContext(ctx).Error("Execute Get Metric Data Query Panic", "error", err, "stack", utils.Stack(1))
 						if theErr, ok := err.(error); ok {
-							resultChan <- &responseWrapper{
-								DataResponse: &backend.DataResponse{
-									Error: theErr,
-								},
-							}
+							setResponse("", &backend.DataResponse{
+								Error: theErr,
+							})
 						}
 					}
 				}()
@@ -107,7 +116,7 @@ func (ds *DataSource) executeTimeSeriesQuery(ctx context.Context, req *backend.Q
 				}
 
 				for _, responseWrapper := range res {
-					resultChan <- responseWrapper
+					setResponse(responseWrapper.RefId, responseWrapper.DataResponse)
 				}
 
 				return nil
@@ -117,15 +126,7 @@ func (ds *DataSource) executeTimeSeriesQuery(ctx context.Context, req *backend.Q
 
 	if err := eg.Wait(); err != nil {
 		dataResponse := backend.ErrorResponseWithErrorSource(fmt.Errorf("metric request error: %w", err))
-		resultChan <- &responseWrapper{
-			RefId:        getQueryRefIdFromErrorString(err.Error(), requestQueriesByTimeAndRegion),
-			DataResponse: &dataResponse,
-		}
-	}
-	close(resultChan)
-
-	for result := range resultChan {
-		resp.Responses[result.RefId] = *result.DataResponse
+		setResponse(getQueryRefIdFromErrorString(err.Error(), requestQueriesByTimeAndRegion), &dataResponse)
 	}
 
 	return resp, nil
