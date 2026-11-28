@@ -41,8 +41,9 @@ type GrafanaAuthorizer struct {
 // This authorizer is a chain of smaller authorizers that together form the decision if
 // access should be granted.
 //  1. We deny all impersonate request.
-//  2. We allow all identities that belongs to `system:masters` group, regular grafana identities cannot
-//     be part of this group
+//  2. We allow all identities that belongs to `system:masters` group. Only the loopback client is meant
+//     to be in it: the identity authenticator strips every `system:` group from Grafana requesters,
+//     whose groups are team UIDs or identity provider group names.
 //  3. We check that identity is allowed to make a request for namespace.
 //  4. We check authorizer that is configured speficially for an api.
 //  5. As a last fallback we check Role, this will only happen if an api have not configured

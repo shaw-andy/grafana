@@ -5,6 +5,7 @@ import (
 
 	claims "github.com/grafana/authlib/types"
 
+	"github.com/grafana/grafana/pkg/services/apiserver/auth/authenticator"
 	"github.com/grafana/grafana/pkg/services/authn"
 	"github.com/grafana/grafana/pkg/setting"
 )
@@ -32,6 +33,8 @@ func (s *GroupsClaimSync) SyncGroupsClaimHook(_ context.Context, id *authn.Ident
 		return nil
 	}
 
-	id.Groups = id.ExternalGroups
+	// A group the identity provider names system:masters would otherwise be
+	// presented to the API server as the Kubernetes superuser group.
+	id.Groups = authenticator.WithoutSystemGroups(id.ExternalGroups)
 	return nil
 }

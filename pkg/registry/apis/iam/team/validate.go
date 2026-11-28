@@ -13,6 +13,7 @@ import (
 	iamv0alpha1 "github.com/grafana/grafana/apps/iam/pkg/apis/iam/v0alpha1"
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/registry/apis/iam/legacy"
+	"github.com/grafana/grafana/pkg/services/apiserver/auth/authenticator"
 	"github.com/grafana/grafana/pkg/services/team/folderownership"
 	"github.com/grafana/grafana/pkg/storage/unified/resource"
 	"github.com/grafana/grafana/pkg/storage/unified/resourcepb"
@@ -22,6 +23,11 @@ func ValidateOnCreate(ctx context.Context, teamSearchClient resourcepb.ResourceI
 	requester, err := identity.GetRequester(ctx)
 	if err != nil {
 		return apierrors.NewUnauthorized("no identity found")
+	}
+
+	// The team name becomes the team UID, which members carry as a group.
+	if authenticator.IsSystemGroup(obj.Name) {
+		return apierrors.NewBadRequest("team name may not start with " + authenticator.SystemGroupPrefix)
 	}
 
 	if obj.Spec.Title == "" {
