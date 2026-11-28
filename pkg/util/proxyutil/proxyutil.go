@@ -10,6 +10,7 @@ import (
 	claims "github.com/grafana/authlib/types"
 
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
+	"github.com/grafana/grafana/pkg/services/authn/clients"
 )
 
 const (
@@ -18,6 +19,10 @@ const (
 	// IDHeaderName name of the header used when forwarding singed id token of the user
 	IDHeaderName = "X-Grafana-Id"
 )
+
+// authCookieNames are Grafana authentication cookies that are never forwarded,
+// regardless of the cookies a datasource is configured to keep.
+var authCookieNames = []string{clients.RenderCookieName}
 
 // PrepareProxyRequest prepares a request for being proxied.
 // Removes X-Forwarded-Host, X-Forwarded-Port, X-Forwarded-Proto, Origin, Referer headers.
@@ -49,6 +54,7 @@ func PrepareProxyRequest(req *http.Request) {
 }
 
 // ClearCookieHeader clear cookie header, except for cookies specified to be kept (keepCookiesNames) if not in skipCookiesNames.
+// Grafana authentication cookies (authCookieNames) are always cleared.
 func ClearCookieHeader(req *http.Request, keepCookiesNames []string, skipCookiesNames []string) {
 	keepCookies := map[string]*http.Cookie{}
 	for _, c := range req.Cookies() {
@@ -75,6 +81,9 @@ func ClearCookieHeader(req *http.Request, keepCookiesNames []string, skipCookies
 	}
 
 	for _, v := range skipCookiesNames {
+		delete(keepCookies, v)
+	}
+	for _, v := range authCookieNames {
 		delete(keepCookies, v)
 	}
 

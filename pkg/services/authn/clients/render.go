@@ -16,7 +16,7 @@ import (
 var errInvalidRenderKey = errutil.Unauthorized("render-auth.invalid-key", errutil.WithPublicMessage("Invalid Render Key"))
 
 const (
-	renderCookieName = "renderKey"
+	RenderCookieName = "renderKey"
 )
 
 var _ authn.ContextAwareClient = new(Render)
@@ -82,7 +82,7 @@ func (c *Render) Priority() uint {
 }
 
 func getRenderKey(r *authn.Request) string {
-	cookie, err := r.HTTPRequest.Cookie(renderCookieName)
+	cookie, err := r.HTTPRequest.Cookie(RenderCookieName)
 	if err != nil {
 		return ""
 	}
