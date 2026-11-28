@@ -8,12 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
-
-	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/model/timestamp"
-	"github.com/prometheus/prometheus/promql"
-	"github.com/prometheus/prometheus/template"
 
 	"github.com/grafana/grafana/pkg/services/ngalert/eval"
 )
@@ -126,7 +122,9 @@ func (e ExpandError) Error() string {
 	return fmt.Sprintf("failed to expand template '%s': %s", e.Tmpl, e.Err)
 }
 
-func Expand(ctx context.Context, name, tmpl string, data Data, externalURL *url.URL, evaluatedAt time.Time) (string, error) {
+// Expand expands tmpl with data. The expansion fails with ErrExpandedSizeExceeded as soon as it
+// writes, or its functions return, more than MaxExpandedSize bytes.
+func Expand(_ context.Context, name, tmpl string, data Data, externalURL *url.URL, evaluatedAt time.Time) (result string, resultErr error) {
 	if !strings.Contains(tmpl, "{{") { // If it is not a template, skip expanding it.
 		return tmpl, nil
 	}
@@ -135,24 +133,36 @@ func Expand(ctx context.Context, name, tmpl string, data Data, externalURL *url.
 	name = "__alert_" + name
 	// add variables for the labels and values to the beginning of the template
 	tmpl = "{{- $labels := .Labels -}}{{- $values := .Values -}}{{- $value := .Value -}}" + tmpl
-	// ctx and queryFunc are no-ops as `query()` is not supported in Grafana
-	queryFunc := func(context.Context, string, time.Time) (promql.Vector, error) {
-		return nil, nil
-	}
-	tm := model.Time(timestamp.FromTime(evaluatedAt))
+
+	// It's better to have no annotation or label than to kill the whole process if there's a bug in the template.
+	defer func() {
+		if r := recover(); r != nil {
+			err, ok := r.(error)
+			if !ok {
+				err = fmt.Errorf("panic expanding template %v: %v", name, r)
+			}
+			result, resultErr = "", ExpandError{Tmpl: tmpl, Err: err}
+		}
+	}()
+
 	// Use missingkey=invalid so missing data shows <no value> instead of the type's default value
-	options := []string{"missingkey=invalid"}
-
-	expander := template.NewTemplateExpander(ctx, tmpl, name, data, tm, queryFunc, externalURL, options)
-	expander.Funcs(defaultFuncs)
-
-	result, err := expander.Expand()
+	t, err := template.New(name).
+		Option("missingkey=invalid").
+		Funcs(newFuncMap(newBudget(), evaluatedAt, externalURL)).
+		Parse(tmpl)
+	if err == nil {
+		err = checkRecursion(t)
+	}
 	if err != nil {
-		return "", ExpandError{Tmpl: tmpl, Err: err}
+		return "", ExpandError{Tmpl: tmpl, Err: fmt.Errorf("error parsing template %v: %w", name, err)}
+	}
+
+	w := &limitedWriter{limit: MaxExpandedSize}
+	if err := t.Execute(w, data); err != nil {
+		return "", ExpandError{Tmpl: tmpl, Err: fmt.Errorf("error executing template %v: %w", name, err)}
 	}
 
 	// We need to replace <no value> with [no value] as some integrations think <no value> is invalid HTML. For example,
 	// Telegram in HTML mode rejects messages with unsupported tags.
-	result = strings.ReplaceAll(result, "<no value>", "[no value]")
-	return result, nil
+	return strings.ReplaceAll(w.String(), "<no value>", "[no value]"), nil
 }
